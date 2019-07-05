@@ -2359,6 +2359,10 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
               !CGM.getCodeGenOpts().NullPointerIsValid)
             AI->addAttr(llvm::Attribute::NonNull);
 
+          if (PVD->getAttr<SecretAttr>()) {
+            AI->addAttr(llvm::Attribute::get(getLLVMContext(), "secret"));
+          }
+
           QualType OTy = PVD->getOriginalType();
           if (const auto *ArrTy =
               getContext().getAsConstantArrayType(OTy)) {

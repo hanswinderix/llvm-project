@@ -53,6 +53,7 @@ enum ActionType {
   GenX86FoldTables,
   GenRegisterBank,
   GenExegesis,
+  GenMSP430InstrLatencyInfo,
 };
 
 namespace llvm {
@@ -124,6 +125,8 @@ namespace {
                                "Generate X86 fold tables"),
                     clEnumValN(GenRegisterBank, "gen-register-bank",
                                "Generate registers bank descriptions"),
+                    clEnumValN(GenMSP430InstrLatencyInfo, "gen-msp430-latency-info",
+                               "Generate MSP430 instruction latency information"),
                     clEnumValN(GenExegesis, "gen-exegesis",
                                "Generate llvm-exegesis tables")));
 
@@ -243,6 +246,9 @@ bool LLVMTableGenMain(raw_ostream &OS, RecordKeeper &Records) {
     break;
   case GenX86FoldTables:
     EmitX86FoldTables(Records, OS);
+    break;
+  case GenMSP430InstrLatencyInfo:
+    EmitMSP430InstrLatencyInfo(Records, OS);
     break;
   case GenExegesis:
     EmitExegesis(Records, OS);

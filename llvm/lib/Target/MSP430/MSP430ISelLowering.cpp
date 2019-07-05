@@ -12,12 +12,15 @@
 
 #include "MSP430ISelLowering.h"
 #include "MSP430.h"
+#include "MSP430Sancus.h"
 #include "MSP430MachineFunctionInfo.h"
 #include "MSP430Subtarget.h"
 #include "MSP430TargetMachine.h"
+#include "llvm/SLLVM.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
@@ -33,6 +36,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/FormatVariadic.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "msp430-lower"
@@ -437,26 +441,47 @@ template<typename ArgT>
 static void AnalyzeArguments(CCState &State,
                              SmallVectorImpl<CCValAssign> &ArgLocs,
                              const SmallVectorImpl<ArgT> &Args) {
-  static const MCPhysReg CRegList[] = {
-    MSP430::R12, MSP430::R13, MSP430::R14, MSP430::R15
-  };
-  static const unsigned CNbRegs = array_lengthof(CRegList);
-  static const MCPhysReg BuiltinRegList[] = {
-    MSP430::R8, MSP430::R9, MSP430::R10, MSP430::R11,
-    MSP430::R12, MSP430::R13, MSP430::R14, MSP430::R15
-  };
-  static const unsigned BuiltinNbRegs = array_lengthof(BuiltinRegList);
+  if (State.getCallingConv() == CallingConv::SANCUS_DISPATCH)
+    return;
 
   ArrayRef<MCPhysReg> RegList;
   unsigned NbRegs;
 
-  bool Builtin = (State.getCallingConv() == CallingConv::MSP430_BUILTIN);
-  if (Builtin) {
-    RegList = BuiltinRegList;
-    NbRegs = BuiltinNbRegs;
-  } else {
-    RegList = CRegList;
-    NbRegs = CNbRegs;
+  switch (State.getCallingConv()) {
+    default:
+      report_fatal_error("Unsupported calling convention");
+    case CallingConv::MSP430_BUILTIN:
+      {
+        static const MCPhysReg BuiltinRegList[] = {
+          MSP430::R8, MSP430::R9, MSP430::R10, MSP430::R11,
+          MSP430::R12, MSP430::R13, MSP430::R14, MSP430::R15
+        };
+        static const unsigned BuiltinNbRegs = array_lengthof(BuiltinRegList);
+        RegList = BuiltinRegList;
+        NbRegs = BuiltinNbRegs;
+      }
+      break;
+    case CallingConv::Fast:
+    case CallingConv::C:
+      {
+        static const MCPhysReg CRegList[] = {
+          MSP430::R12, MSP430::R13, MSP430::R14, MSP430::R15
+        };
+        static const unsigned CNbRegs = array_lengthof(CRegList);
+        RegList = CRegList;
+        NbRegs = CNbRegs;
+      }
+      break;
+    case CallingConv::SANCUS_ENTRY:
+      {
+        static const MCPhysReg SRegList[] = {
+          MSP430::R6, MSP430::R12, MSP430::R13, MSP430::R14, MSP430::R15
+        };
+        static const unsigned SNbRegs = array_lengthof(SRegList);
+        RegList = SRegList;
+        NbRegs = SNbRegs;
+      }
+      break;
   }
 
   if (State.isVarArg()) {
@@ -467,6 +492,7 @@ static void AnalyzeArguments(CCState &State,
   SmallVector<unsigned, 4> ArgsParts;
   ParseFunctionArgs(Args, ArgsParts);
 
+  bool Builtin = (State.getCallingConv() == CallingConv::MSP430_BUILTIN);
   if (Builtin) {
     assert(ArgsParts.size() == 2 &&
         "Builtin calling convention requires two arguments");
@@ -555,6 +581,8 @@ SDValue MSP430TargetLowering::LowerFormalArguments(
     report_fatal_error("Unsupported calling convention");
   case CallingConv::C:
   case CallingConv::Fast:
+  case CallingConv::SANCUS_ENTRY:
+  case CallingConv::SANCUS_DISPATCH:
     return LowerCCCArguments(Chain, CallConv, isVarArg, Ins, dl, DAG, InVals);
   case CallingConv::MSP430_INTR:
     if (Ins.empty())
@@ -586,7 +614,9 @@ MSP430TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   case CallingConv::MSP430_BUILTIN:
   case CallingConv::Fast:
   case CallingConv::C:
-    return LowerCCCCallTo(Chain, Callee, CallConv, isVarArg, isTailCall,
+  case CallingConv::SANCUS_ENTRY:
+  case CallingConv::SANCUS_DISPATCH:
+    return LowerCCCCallTo(CLI, Chain, Callee, CallConv, isVarArg, isTailCall,
                           Outs, OutVals, Ins, dl, DAG, InVals);
   case CallingConv::MSP430_INTR:
     report_fatal_error("ISRs cannot be called directly");
@@ -780,9 +810,184 @@ MSP430TargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
   return DAG.getNode(Opc, dl, MVT::Other, RetOps);
 }
 
+SDValue MSP430TargetLowering::saveStack(SDValue Chain,
+                                        const SDLoc &dl,
+                                        SelectionDAG &DAG,
+                                        const Module *M,
+                                        StringRef gName) const {
+  auto PtrVT = getPointerTy(DAG.getDataLayout());
+  auto NV = M->getNamedValue(gName);
+  assert (NV != nullptr);
+  SDValue GA = DAG.getGlobalAddress(NV, dl, PtrVT);
+  SDValue SP = DAG.getRegister(MSP430::SP, PtrVT);
+  return DAG.getStore(Chain, dl, SP, GA, MachinePointerInfo());
+}
+
+SDValue MSP430TargetLowering::restoreStack(SDValue Chain,
+                                           const SDLoc &dl,
+                                           SelectionDAG &DAG,
+                                           const Module *M,
+                                           StringRef gName) const {
+  auto PtrVT = getPointerTy(DAG.getDataLayout());
+  GlobalVariable *GV = M->getGlobalVariable(gName, true);
+  assert(GV != nullptr);
+  SDValue G = DAG.getGlobalAddress(GV, dl, PtrVT);
+  SDValue L = DAG.getLoad(PtrVT, dl, Chain, G, MachinePointerInfo());
+  return DAG.getCopyToReg(Chain, dl, MSP430::SP, L);
+}
+
+SDValue MSP430TargetLowering::pushOnStack(SDValue Chain,
+                                         const SDLoc &dl,
+                                         SelectionDAG &DAG,
+                                         SDValue V) const {
+  // TODO: Isn't there a simpler way (like just a simple push...)?
+  //        (and why can't we add directly to the register?)
+  auto PtrVT = getPointerTy(DAG.getDataLayout());
+  SDValue Size = DAG.getIntPtrConstant(2, dl);
+  SDValue OldSP = DAG.getCopyFromReg(Chain, dl, MSP430::SP, PtrVT);
+  SDValue NewSP = DAG.getNode(ISD::SUB, dl, PtrVT, OldSP, Size);
+  Chain = DAG.getCopyToReg(Chain, dl, MSP430::SP, NewSP);
+  SDValue SP = DAG.getRegister(MSP430::SP, PtrVT);
+  return DAG.getStore(Chain, dl, V, SP, MachinePointerInfo());
+}
+
+// TODO: isOCall, isOCallToUnprotecedCode
+//   - Move (part of it) to SLLVM.h?
+//   - Make it part of the CC ? 
+static bool isOCall(TargetLowering::CallLoweringInfo &CLI) {
+  if (CLI.CS.getInstruction() == nullptr)
+    return false;
+
+  auto F = CLI.CS.getCaller();
+  if (sllvm::isProtected(CLI.CS.getCaller())) {
+    const Function *CF = CLI.CS.getCalledFunction();
+    assert (CF != nullptr && "Indirect calls are not allowed in enclaves");
+    return (! sllvm::shareProtectionDomains(F, CF));
+  }
+
+  return false;
+}
+static bool isOCallToUnprotecedCode(TargetLowering::CallLoweringInfo &CLI) {
+  return (isOCall(CLI) && (CLI.CallConv != CallingConv::SANCUS_ENTRY));
+}
+
+// TODO: - Not sure if this is the right place to put this...
+//       - Maybe part of the logic related to R7 can be integrated in 
+//           AnalyzeArguments()
+//       - Refactor/Document !
+SDValue MSP430TargetLowering::lowerSancusCall(
+    CallLoweringInfo &CLI,
+    SDValue Chain,
+    SDValue Callee,
+    const SDLoc &dl,
+    SelectionDAG &DAG) const {
+
+  if (CLI.CS.getInstruction() == nullptr)
+    return Chain;
+
+  const Function * C = CLI.CS.getCaller();
+
+  if ((! sllvm::isProtected(C)) && (CLI.CallConv != CallingConv::SANCUS_ENTRY))
+    return Chain;
+
+  // Retrieve the after-call-label (ACL)
+  auto PtrVT = getPointerTy(DAG.getDataLayout());
+  MachineFunction &MF = DAG.getMachineFunction();
+  MCSymbol *Sym = MF.getMMI().getContext().createDirectionalLocalSymbol(0);
+  SDValue ACL = DAG.getMCSymbol(Sym, PtrVT);
+
+  const Module * M = C->getParent();
+
+  if (sllvm::isProtected(C) ) {
+    const Function *CF = CLI.CS.getCalledFunction();
+    assert(CF != nullptr && "Indirect calls are not allowed in enclaves");
+
+    // Retrieve the dispatcher's address
+    auto F = M->getNamedValue(sllvm::sancus::getDispatcherName(C));
+    assert(F != nullptr && "Enclave dispatcher not found");
+    SDValue D = DAG.getGlobalAddress(F, dl, PtrVT);
+
+    if (CLI.CallConv == CallingConv::SANCUS_ENTRY) {
+      assert( (! sllvm::shareProtectionDomains(C, CF)) 
+          && "External call expected");
+      Chain = DAG.getCopyToReg(Chain, dl, MSP430::R7, D);
+    }
+
+    if (! sllvm::shareProtectionDomains(C, CF)) {
+      // Not for internal calls
+      Chain = pushOnStack(Chain, dl, DAG, ACL);
+      Chain = saveStack(Chain, dl, DAG, M, sllvm::sancus::getLocalR1Name(C));
+    }
+
+    if (isOCallToUnprotecedCode(CLI)) {
+      Chain = 
+        restoreStack(Chain, dl, DAG, M, sllvm::sancus::getGLobalStackName());
+      Chain = pushOnStack(Chain, dl, DAG, D);
+      SDValue V = DAG.getConstant(sllvm::sancus::R6_URet, dl, PtrVT);
+      Chain = DAG.getCopyToReg(Chain, dl, MSP430::R6, V);
+    }
+  }
+  else {
+    if (CLI.CallConv == CallingConv::SANCUS_ENTRY) {
+#if 0
+      Chain = DAG.getCopyToReg(Chain, dl, MSP430::R7, ACL);
+#else
+      // TODO: Find out why the simple code above asserts with message
+      //           "Node emitted out of order - late"
+      GlobalVariable *GV = M->getGlobalVariable(sllvm::sancus::global_pc, true);
+      assert(GV != nullptr);
+      SDValue G = DAG.getGlobalAddress(GV, dl, PtrVT);
+      Chain = DAG.getStore(Chain, dl, ACL, G, MachinePointerInfo());
+
+      SDValue L = DAG.getLoad(PtrVT, dl, Chain, G, MachinePointerInfo());
+      Chain = DAG.getCopyToReg(Chain, dl, MSP430::R7, L);
+#endif
+
+      Chain = saveStack(Chain, dl, DAG, M, sllvm::sancus::getGLobalStackName());
+    }
+  }
+
+  if (isOCall(CLI)) {
+    Chain = DAG.getCopyToReg(Chain, dl, MSP430::R8, Callee);
+  }
+
+  return Chain;
+}
+
+// TODO: Document/Refactor
+SDValue MSP430TargetLowering::LowerSancusCallResult(
+    CallLoweringInfo &CLI,
+    SDValue Chain,
+    const SDLoc &dl,
+    SelectionDAG &DAG) const {
+
+  if (CLI.CS.getInstruction() == nullptr)
+    return Chain;
+
+  const Function * F = CLI.CS.getCaller();
+  const Module * M = F->getParent();
+  const Function *CF = CLI.CS.getCalledFunction();
+
+  if ( (CLI.CallConv == CallingConv::SANCUS_ENTRY)
+      || ( sllvm::isProtected(F) && (CF != nullptr) && !(sllvm::shareProtectionDomains(F, CF))) ) {
+    // Generate the after-call-label (ACL)
+    MachineFunction &MF = DAG.getMachineFunction();
+    MCSymbol *ACL = MF.getMMI().getContext().getDirectionalLocalSymbol(0, true);
+    Chain = DAG.getLabelNode(ISD::ANNOTATION_LABEL, dl, Chain, ACL);
+
+    if (! (sllvm::isProtected(CLI.CS.getCaller())) ) { 
+      Chain = 
+        restoreStack(Chain, dl, DAG, M, sllvm::sancus::getGLobalStackName());
+    }
+  }
+
+  return Chain;
+}
+
 /// LowerCCCCallTo - functions arguments are copied from virtual regs to
 /// (physical regs)/(stack frame), CALLSEQ_START and CALLSEQ_END are emitted.
 SDValue MSP430TargetLowering::LowerCCCCallTo(
+    TargetLowering::CallLoweringInfo &CLI,
     SDValue Chain, SDValue Callee, CallingConv::ID CallConv, bool isVarArg,
     bool isTailCall, const SmallVectorImpl<ISD::OutputArg> &Outs,
     const SmallVectorImpl<SDValue> &OutVals,
@@ -797,6 +1002,8 @@ SDValue MSP430TargetLowering::LowerCCCCallTo(
   // Get a count of how many bytes are to be pushed on the stack.
   unsigned NumBytes = CCInfo.getNextStackOffset();
   auto PtrVT = getPointerTy(DAG.getDataLayout());
+
+  Chain = lowerSancusCall(CLI, Chain, Callee, dl, DAG);
 
   Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, dl);
 
@@ -874,13 +1081,22 @@ SDValue MSP430TargetLowering::LowerCCCCallTo(
     InFlag = Chain.getValue(1);
   }
 
-  // If the callee is a GlobalAddress node (quite common, every direct call is)
-  // turn it into a TargetGlobalAddress node so that legalize doesn't hack it.
-  // Likewise ExternalSymbol -> TargetExternalSymbol.
-  if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee))
-    Callee = DAG.getTargetGlobalAddress(G->getGlobal(), dl, MVT::i16);
-  else if (ExternalSymbolSDNode *E = dyn_cast<ExternalSymbolSDNode>(Callee))
-    Callee = DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i16);
+  if (isOCall(CLI)) {
+    const Function * C = CLI.CS.getCaller();
+    // TODO: Get rid of strdup
+    Callee = DAG.getTargetExternalSymbol(
+        strdup(sllvm::sancus::getOCallHandlerName(C).c_str()), PtrVT);
+  }
+  else {
+    // If the callee is a GlobalAddress node (quite common, every direct call 
+    // is) turn it into a TargetGlobalAddress node so that legalize doesn't 
+    // hack it.
+    // Likewise ExternalSymbol -> TargetExternalSymbol.
+    if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee))
+      Callee = DAG.getTargetGlobalAddress(G->getGlobal(), dl, MVT::i16);
+    else if (ExternalSymbolSDNode *E = dyn_cast<ExternalSymbolSDNode>(Callee))
+      Callee = DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i16);
+  }
 
   // Returns a chain & a flag for retval copy to use.
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
@@ -894,10 +1110,24 @@ SDValue MSP430TargetLowering::LowerCCCCallTo(
     Ops.push_back(DAG.getRegister(RegsToPass[i].first,
                                   RegsToPass[i].second.getValueType()));
 
+  // R7 is live into Sancus entry calls
+  //   (R6 Should already be marked live by AnalyzeArguments())
+  if (CLI.CallConv == CallingConv::SANCUS_ENTRY)
+      Ops.push_back(DAG.getRegister(MSP430::R7, PtrVT));
+
   if (InFlag.getNode())
     Ops.push_back(InFlag);
-
-  Chain = DAG.getNode(MSP430ISD::CALL, dl, NodeTys, Ops);
+  
+  // TODO: Can we get rid of BRCALLs ?
+  if (isOCall(CLI)) {
+    Chain = DAG.getNode(MSP430ISD::BRCALL, dl, NodeTys, Ops);
+  } 
+  else if (CCInfo.getCallingConv() == CallingConv::SANCUS_DISPATCH) {
+    Chain = DAG.getNode(MSP430ISD::BRCALL, dl, NodeTys, Ops);
+  }
+  else {
+    Chain = DAG.getNode(MSP430ISD::CALL, dl, NodeTys, Ops);
+  }
   InFlag = Chain.getValue(1);
 
   // Create the CALLSEQ_END node.
@@ -907,14 +1137,17 @@ SDValue MSP430TargetLowering::LowerCCCCallTo(
 
   // Handle result values, copying them out of physregs into vregs that we
   // return.
-  return LowerCallResult(Chain, InFlag, CallConv, isVarArg, Ins, dl,
-                         DAG, InVals);
+  Chain = LowerCallResult(CLI, Chain, InFlag, CallConv, isVarArg, Ins, dl,
+                          DAG, InVals);
+
+  return Chain;
 }
 
 /// LowerCallResult - Lower the result values of a call into the
 /// appropriate copies out of appropriate physical registers.
 ///
 SDValue MSP430TargetLowering::LowerCallResult(
+    TargetLowering::CallLoweringInfo &CLI,
     SDValue Chain, SDValue InFlag, CallingConv::ID CallConv, bool isVarArg,
     const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &dl,
     SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
@@ -933,6 +1166,8 @@ SDValue MSP430TargetLowering::LowerCallResult(
     InFlag = Chain.getValue(2);
     InVals.push_back(Chain.getValue(0));
   }
+
+  Chain = LowerSancusCallResult(CLI, Chain, dl, DAG);
 
   return Chain;
 }
@@ -1360,6 +1595,7 @@ const char *MSP430TargetLowering::getTargetNodeName(unsigned Opcode) const {
   case MSP430ISD::RRC:                return "MSP430ISD::RRC";
   case MSP430ISD::RRCL:               return "MSP430ISD::RRCL";
   case MSP430ISD::CALL:               return "MSP430ISD::CALL";
+  case MSP430ISD::BRCALL:             return "MSP430ISD::BRCALL";
   case MSP430ISD::Wrapper:            return "MSP430ISD::Wrapper";
   case MSP430ISD::BR_CC:              return "MSP430ISD::BR_CC";
   case MSP430ISD::CMP:                return "MSP430ISD::CMP";
@@ -1534,6 +1770,28 @@ MSP430TargetLowering::EmitShiftInstr(MachineInstr &MI,
 }
 
 MachineBasicBlock *
+MSP430TargetLowering::EmitAttestInstr(MachineInstr &MI,
+                                      MachineBasicBlock *BB) const {
+  MachineFunction *MF = BB->getParent();
+  DebugLoc dl = MI.getDebugLoc();
+  const TargetInstrInfo &TII = *MF->getSubtarget().getInstrInfo();
+  const Function &F = MF->getFunction();
+
+  BuildMI(*BB, MI, dl, TII.get(MSP430::MOV16rr), MSP430::R14)
+    .addReg(MI.getOperand(0).getReg());
+  BuildMI(*BB, MI, dl, TII.get(MSP430::MOV16rr), MSP430::R15)
+    .addReg(MI.getOperand(1).getReg());
+  BuildMI(*BB, MI, dl, TII.get(MSP430::MOV16rr), MSP430::R13)
+    .addReg(MI.getOperand(2).getReg());
+  // TODO: Get rid of strdup
+  BuildMI(*BB, MI, dl, TII.get(MSP430::CALLi))
+    .addExternalSymbol(strdup(sllvm::sancus::getAttestName(&F).c_str()));
+
+  MI.eraseFromParent(); // The pseudo instruction is gone now.
+  return BB;
+}
+
+MachineBasicBlock *
 MSP430TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                   MachineBasicBlock *BB) const {
   unsigned Opc = MI.getOpcode();
@@ -1543,6 +1801,10 @@ MSP430TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
       Opc == MSP430::Srl8  || Opc == MSP430::Srl16 ||
       Opc == MSP430::Rrcl8 || Opc == MSP430::Rrcl16)
     return EmitShiftInstr(MI, BB);
+
+  if (Opc == MSP430::attest) {
+    return EmitAttestInstr(MI, BB);
+  }
 
   const TargetInstrInfo &TII = *BB->getParent()->getSubtarget().getInstrInfo();
   DebugLoc dl = MI.getDebugLoc();

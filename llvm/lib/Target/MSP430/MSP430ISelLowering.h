@@ -42,6 +42,9 @@ namespace llvm {
       /// instruction, which includes a bunch of information.
       CALL,
 
+      /// BRCALL - Behaves like a call put does not push the return address
+      BRCALL,
+
       /// Wrapper - A wrapper node for TargetConstantPool, TargetExternalSymbol,
       /// and TargetGlobalAddress.
       Wrapper,
@@ -129,9 +132,26 @@ namespace llvm {
                                 MachineBasicBlock *BB) const override;
     MachineBasicBlock *EmitShiftInstr(MachineInstr &MI,
                                       MachineBasicBlock *BB) const;
+    MachineBasicBlock *EmitEXCallInstr(MachineInstr &MI,
+                                       MachineBasicBlock *BB) const;
+    MachineBasicBlock *EmitAttestInstr(MachineInstr &MI,
+                                       MachineBasicBlock *BB) const;
 
   private:
-    SDValue LowerCCCCallTo(SDValue Chain, SDValue Callee,
+    SDValue saveStack(SDValue Chain, const SDLoc &dl, SelectionDAG &DAG,
+                      const Module *M, StringRef gName) const;
+    SDValue restoreStack(SDValue Chain, const SDLoc &dl, SelectionDAG &DAG,
+                         const Module *M, StringRef gName) const;
+    SDValue pushOnStack(SDValue Chain, const SDLoc &dl, SelectionDAG &DAG,
+                       SDValue V) const;
+    SDValue lowerSancusCall(CallLoweringInfo &CLI, SDValue Chain, 
+                            SDValue Callee, const SDLoc &dl, 
+                            SelectionDAG &DAG) const;
+    SDValue LowerSancusCallResult(CallLoweringInfo &CLI, SDValue Chain,
+                                  const SDLoc &dl, SelectionDAG &DAG) const;
+
+    SDValue LowerCCCCallTo(CallLoweringInfo &CLI,
+                           SDValue Chain, SDValue Callee,
                            CallingConv::ID CallConv, bool isVarArg,
                            bool isTailCall,
                            const SmallVectorImpl<ISD::OutputArg> &Outs,
@@ -146,7 +166,8 @@ namespace llvm {
                               const SDLoc &dl, SelectionDAG &DAG,
                               SmallVectorImpl<SDValue> &InVals) const;
 
-    SDValue LowerCallResult(SDValue Chain, SDValue InFlag,
+    SDValue LowerCallResult(CallLoweringInfo &CLI,
+                            SDValue Chain, SDValue InFlag,
                             CallingConv::ID CallConv, bool isVarArg,
                             const SmallVectorImpl<ISD::InputArg> &Ins,
                             const SDLoc &dl, SelectionDAG &DAG,

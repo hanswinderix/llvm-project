@@ -13,6 +13,8 @@
 
 #include "MCTargetDesc/MSP430InstPrinter.h"
 #include "MSP430.h"
+#include "llvm/SLLVM.h"
+#include "MSP430Sancus.h"
 #include "MSP430InstrInfo.h"
 #include "MSP430MCInstLower.h"
 #include "MSP430TargetMachine.h"
@@ -57,11 +59,74 @@ namespace {
                          const char *ExtraCode, raw_ostream &O) override;
     bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
                                const char *ExtraCode, raw_ostream &O) override;
+
+    void EmitEndOfAsmFile(Module &) override;
+
     void EmitInstruction(const MachineInstr *MI) override;
 
     void EmitInterruptVectorSection(MachineFunction &ISR);
   };
 } // end of anonymous namespace
+
+static std::string string_replace(
+    const char * xStr, const char * xMatch, const StringRef xReplacement)
+{
+  std::string str(xStr);
+  std::string match(xMatch);
+  std::string replacement(xReplacement);
+
+  size_t pos = 0;
+  std::string newstr = str;
+  unsigned int replacements = 0;
+  while ((pos = newstr.find(match, pos)) != std::string::npos)
+  {
+    newstr.replace(pos, match.length(), replacement);
+    pos += replacement.length();
+    replacements++;
+  }
+  return newstr;
+}
+
+void MSP430AsmPrinter::EmitEndOfAsmFile(Module &M) {
+  if (sllvm::isPM(&M) && (! sllvm::sancus::hasFixedDataSection(&M))) {
+    // TODO: Have section names generated
+    // TODO: Use OutStreamer.setSection, pushSection or something similar
+    OutStreamer->EmitRawText(
+        "\t.section\t.sllvm.text." + sllvm::getPMName(&M) + ",\"ax\",@progbits");
+    // TOOD: Hide template expansion functionality in sllvm::sancus module
+    //   Example:  OutStreamer->EmitRawText(asm_mpyi(sllvm::getPMName(&M));
+    OutStreamer->EmitRawText(string_replace(
+        sllvm::sancus::asm_eenter, "<pm>", sllvm::getPMName(&M)).c_str());
+    OutStreamer->EmitRawText(string_replace(
+        sllvm::sancus::asm_eexit, "<pm>", sllvm::getPMName(&M)).c_str());
+    OutStreamer->EmitRawText(string_replace(
+          sllvm::sancus::asm_excall, "<pm>", sllvm::getPMName(&M)).c_str());
+    OutStreamer->EmitRawText(string_replace(
+        sllvm::sancus::asm_ereturn, "<pm>", sllvm::getPMName(&M)).c_str());
+    OutStreamer->EmitRawText(string_replace(
+          sllvm::sancus::asm_attest, "<pm>", sllvm::getPMName(&M)).c_str());
+    OutStreamer->EmitRawText(string_replace(
+          sllvm::sancus::asm_reti, "<pm>", sllvm::getPMName(&M)).c_str());
+
+    OutStreamer->EmitRawText(string_replace(
+          sllvm::sancus::asm_mpyi, "<pm>", sllvm::getPMName(&M)).c_str());
+    OutStreamer->EmitRawText(string_replace(
+          sllvm::sancus::asm_divu, "<pm>", sllvm::getPMName(&M)).c_str());
+    OutStreamer->EmitRawText(string_replace(
+          sllvm::sancus::asm_divumodhi4, "<pm>", sllvm::getPMName(&M)).c_str());
+    OutStreamer->EmitRawText(string_replace(
+          sllvm::sancus::asm_remi, "<pm>", sllvm::getPMName(&M)).c_str());
+    OutStreamer->EmitRawText(string_replace(
+          sllvm::sancus::asm_divi, "<pm>", sllvm::getPMName(&M)).c_str());
+
+    OutStreamer->EmitRawText(string_replace(
+          sllvm::sancus::asm_aliases, "<pm>", sllvm::getPMName(&M)).c_str());
+
+    // TODO: Use OutStreamer.setSection, pushSection or something similar
+    OutStreamer->EmitRawText("\t.text");
+    //OutStreamer->EmitRawText(sllvm::sancus::asm_protect);
+  }
+}
 
 void MSP430AsmPrinter::PrintSymbolOperand(const MachineOperand &MO,
                                           raw_ostream &O) {

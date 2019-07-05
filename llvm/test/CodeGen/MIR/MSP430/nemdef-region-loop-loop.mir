@@ -1,0 +1,146 @@
+# RUN: llc -O3 -x=mir -start-before=msp430-nemesis-defender -msp430-nemesis-defender-enable=true -verify-machineinstrs -o - %s | FileCheck %s
+
+--- |
+  target triple = "msp430-unknown-unknown-elf"
+
+  define i16 @foo(i16 "secret" %a, i16 %b) {
+  entry:
+    ret i16 0
+  }
+
+  declare void @bar(i16, i16)
+...
+---
+name: foo
+body: |
+  bb.0:
+    successors: %bb.1, %bb.5
+    PUSH16r killed $r10, implicit-def $sp, implicit $sp
+    PUSH16r killed $r9, implicit-def $sp, implicit $sp
+    CMP16rr killed $r12, killed $r13, implicit-def $sr
+    JCC %bb.5, 4, implicit $sr
+
+  bb.1:
+    $r10 = MOV16rc 0
+
+  bb.2:
+    $r9 = MOV16rc 0
+
+  bb.3:
+    successors: %bb.4(0x04000000), %bb.3(0x7c000000)
+    $r12 = MOV16rr $r10
+    $r13 = MOV16rr $r9
+    CALLi @bar, implicit-def dead $r11, implicit-def dead $r12, implicit-def dead $r13, implicit-def dead $r14, implicit-def dead $r15, implicit-def dead $sr, implicit $sp, implicit $r12, implicit $r13
+    $r9 = nuw nsw ADD16rc killed $r9, 1, implicit-def dead $sr
+    CMP16ri $r9, 513, implicit-def $sr
+    JCC %bb.3, 1, implicit $sr
+
+  bb.4:
+    successors: %bb.5(0x04000000), %bb.2(0x7c000000)
+    $r10 = nuw nsw ADD16rc killed $r10, 1, implicit-def dead $sr
+    CMP16ri $r10, 1023, implicit-def $sr
+    JCC %bb.2, 1, implicit $sr
+
+  bb.5:
+    $r12 = MOV16ri 3
+    $r9 = POP16r implicit-def $sp, implicit $sp
+    $r10 = POP16r implicit-def $sp, implicit $sp
+    RET implicit $r12
+
+  ; CHECK-LABEL: foo:
+  ; CHECK-NEXT: ; %bb.0:
+  ; CHECK-NEXT: 	push	r10
+  ; CHECK-NEXT: 	push	r9
+  ; CHECK-NEXT: 	cmp	r13, r12
+  ; CHECK-NEXT: 	jge	.LBB0_6
+  ; CHECK-NEXT: 	jmp	.LBB0_1
+  ; CHECK-NEXT: .LBB0_1:
+  ; CHECK-NEXT: 	clr	r10
+  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	jmp	.LBB0_18
+  ; CHECK-NEXT: .LBB0_2:
+
+  ; CHECK:     	  clr	r9
+  ; CHECK-NEXT: 	jmp	.LBB0_15
+  ; CHECK-NEXT: .LBB0_3:
+
+  ; CHECK: 	      mov	#42, r3
+  ; CHECK-NEXT: 	mov	r10, r12
+  ; CHECK-NEXT: 	mov	r9, r13
+  ; CHECK-NEXT: 	call	#_nds_bar
+  ; CHECK-NEXT: 	inc	r9
+  ; CHECK-NEXT: 	cmp	#513, r9
+  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	jne	.LBB0_3
+  ; CHECK-NEXT: 	jmp	.LBB0_16
+  ; CHECK-NEXT: .LBB0_4:
+  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	inc	r10
+  ; CHECK-NEXT: 	cmp	#1023, r10
+  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	jne	.LBB0_2
+  ; CHECK-NEXT: 	jmp	.LBB0_19
+  ; CHECK-NEXT: .LBB0_5:
+  ; CHECK-NEXT: 	mov	#3, r12
+  ; CHECK-NEXT: 	pop	r9
+  ; CHECK-NEXT: 	pop	r10
+  ; CHECK-NEXT: 	ret
+  ; CHECK-NEXT: .LBB0_6:
+  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	jmp	.LBB0_7
+  ; CHECK-NEXT: .LBB0_7:
+  ; CHECK-NEXT: 	push	r10
+  ; CHECK-NEXT: 	mov	#0, r10
+  ; CHECK-NEXT: 	jmp	.LBB0_8
+  ; CHECK-NEXT: .LBB0_8:
+
+  ; CHECK: 	      mov	#42, r3
+  ; CHECK-NEXT: 	jmp	.LBB0_11
+  ; CHECK-NEXT: .LBB0_9:
+  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	add	#1, r10
+  ; CHECK-NEXT: 	cmp	#1023, r10
+  ; CHECK-NEXT: 	jl	.LBB0_8
+  ; CHECK-NEXT: 	jmp	.LBB0_10
+  ; CHECK-NEXT: .LBB0_10:
+  ; CHECK-NEXT: 	pop	r10
+  ; CHECK-NEXT: 	jmp	.LBB0_5
+  ; CHECK-NEXT: .LBB0_11:
+  ; CHECK-NEXT: 	push	r10
+  ; CHECK-NEXT: 	mov	#0, r10
+  ; CHECK-NEXT: 	jmp	.LBB0_12
+  ; CHECK-NEXT: .LBB0_12:
+
+  ; CHECK: 	      jmp	.LBB0_13
+  ; CHECK-NEXT: .LBB0_13:
+  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	call	#_ndd_bar
+  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	add	#1, r10
+  ; CHECK-NEXT: 	cmp	#513, r10
+  ; CHECK-NEXT: 	jl	.LBB0_12
+  ; CHECK-NEXT: 	jmp	.LBB0_14
+  ; CHECK-NEXT: .LBB0_14:
+  ; CHECK-NEXT: 	pop	r10
+  ; CHECK-NEXT: 	jmp	.LBB0_17
+  ; CHECK-NEXT: .LBB0_15:
+  ; CHECK-NEXT: 	mov	2(r0), r0
+  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	jmp	.LBB0_3
+  ; CHECK-NEXT: .LBB0_16:
+  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	jmp	.LBB0_4
+  ; CHECK-NEXT: .LBB0_17:
+  ; CHECK-NEXT: 	jmp	.LBB0_9
+  ; CHECK-NEXT: .LBB0_18:
+  ; CHECK-NEXT: 	mov	2(r0), r0
+  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	jmp	.LBB0_2
+  ; CHECK-NEXT: .LBB0_19:
+  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	jmp	.LBB0_5
+  ; CHECK-NEXT: .Lfunc_end0:
+...

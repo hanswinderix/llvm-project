@@ -1821,6 +1821,23 @@ void CodeGenModule::SetFunctionAttributes(GlobalDecl GD, llvm::Function *F,
   if (!IsIncompleteFunction && F->isDeclaration())
     getTargetCodeGenInfo().setTargetAttributes(FD, F, *this);
 
+  auto EEA = FD->getAttr<EEntryAttr>();
+  if (EEA != nullptr) {
+    if (EEA->getName() == nullptr) {
+      F->addFnAttr("sllvm-eentry");
+    } else {
+      F->addFnAttr("sllvm-eentry", EEA->getName()->getName());
+    }
+  }
+  auto EFA = FD->getAttr<EFuncAttr>();
+  if (EFA != nullptr) {
+    if (EFA->getName() == nullptr) {
+      F->addFnAttr("sllvm-efunc");
+    } else {
+      F->addFnAttr("sllvm-efunc", EFA->getName()->getName());
+    }
+  }
+
   if (const auto *CSA = FD->getAttr<CodeSegAttr>())
     F->setSection(CSA->getName());
   else if (const auto *SA = FD->getAttr<SectionAttr>())
@@ -2454,7 +2471,8 @@ void CodeGenModule::EmitGlobal(GlobalDecl GD) {
   if (const auto *FD = dyn_cast<FunctionDecl>(Global)) {
     // Forward declarations are emitted lazily on first use.
     if (!FD->doesThisDeclarationHaveABody()) {
-      if (!FD->doesDeclarationForceExternallyVisibleDefinition())
+      if (!FD->doesDeclarationForceExternallyVisibleDefinition() 
+          && (! FD->hasAttr<EEntryAttr>()))
         return;
 
       StringRef MangledName = getMangledName(GD);
@@ -3418,6 +3436,16 @@ CodeGenModule::GetOrCreateLLVMGlobal(StringRef MangledName,
     if (D->hasExternalStorage()) {
       if (const SectionAttr *SA = D->getAttr<SectionAttr>())
         GV->setSection(SA->getName());
+    }
+
+    // SLLVM enclave data 
+    auto EDA = D->getAttr<EDataAttr>();
+    if (EDA != nullptr) {
+      if (EDA->getName() == nullptr) {
+        GV->addAttribute("sllvm-edata");
+      } else {
+        GV->addAttribute("sllvm-edata", EDA->getName()->getName());
+      }
     }
 
     // Handle XCore specific ABI requirements.

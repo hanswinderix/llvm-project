@@ -1,0 +1,90 @@
+# RUN: llc -O3 -x=mir -start-before=msp430-nemesis-defender -msp430-nemesis-defender-enable=true -verify-machineinstrs -o - %s | FileCheck %s
+
+--- |
+  target triple = "msp430-unknown-unknown-elf"
+  
+  define i16 @test(i16 "secret" %a) {
+  entry:
+    ret i16 0
+  }
+...
+---
+name: test
+body: |
+  ; CHECK-LABEL: test:
+  bb.0:
+    successors: %bb.1(0x20000000), %bb.2(0x60000000)
+    CMP16ri $r12, 12, implicit-def $sr
+    JCC %bb.1, 0, implicit $sr
+  ; CHECK-LABEL: ; %bb.0:
+  ; CHECK-NEXT:   cmp #12, r12
+  ; CHECK-NEXT:   jeq .LBB0_4
+  
+  bb.2:
+    successors: %bb.5(0x2aaaaaab), %bb.3(0x55555555)
+    CMP16ri $r12, 69, implicit-def $sr
+    JCC %bb.5, 0, implicit $sr
+  ; CHECK-LABEL: ; %bb.1:
+  ; CHECK-NEXT:   cmp #69, r12
+  ; CHECK-NEXT:   mov #42, r3
+  ; CHECK-NEXT:   jeq .LBB0_5
+  
+  bb.3:
+    successors: %bb.4, %bb.6
+    CMP16ri killed $r12, 13, implicit-def $sr
+    JCC %bb.6, 1, implicit $sr
+  ; CHECK-LABEL: ; %bb.2:
+  ; CHECK-NEXT:   cmp #13, r12
+  ; CHECK-NEXT:   mov #42, r3
+  ; CHECK-NEXT:   jne .LBB0_6
+  
+  bb.4:
+    $r12 = MOV16ri 129
+    RET implicit $r12
+  ; CHECK-LABEL: ; %bb.3:
+  ; CHECK-NEXT:   mov #129, r12
+  ; CHECK-NEXT:   mov #0, r3
+  ; CHECK-NEXT:   mov #42, r3
+  ; CHECK-NEXT:   jmp .LBB0_7
+  
+  bb.1:
+    $r12 = MOV16ri 123
+    RET implicit $r12
+  ; CHECK-LABEL: .LBB0_4:
+  ; CHECK-NEXT:   mov #123, r12
+  ; CHECK-NEXT:   mov #42, r3
+  ; CHECK-NEXT:   jmp .LBB0_8
+  
+  bb.5:
+    $r12 = MOV16ri 111
+    RET implicit $r12
+  ; CHECK-LABEL: .LBB0_5:
+  ; CHECK-NEXT:   mov #111, r12
+  ; CHECK-NEXT:   mov #42, r3
+  ; CHECK-NEXT:   jmp .LBB0_9
+  
+  bb.6:
+    $r12 = MOV16rc 0
+    RET implicit $r12
+  ; CHECK-LABEL: .LBB0_6:
+  ; CHECK-NEXT:   mov #42, r3
+  ; CHECK-NEXT:   clr r12
+  ; CHECK-NEXT:   mov #42, r3
+  ; CHECK-NEXT:   jmp .LBB0_7
+
+  ; CHECK-LABEL: .LBB0_7:
+  ; CHECK-NEXT:   ret
+
+  ; CHECK-LABEL: .LBB0_8:
+  ; CHECK-NEXT:   mov #42, r3
+  ; CHECK-NEXT:   mov #42, r3
+  ; CHECK-NEXT:   jmp .LBB0_9
+
+  ; CHECK-LABEL: .LBB0_9:
+  ; CHECK-NEXT:   mov #42, r3
+  ; CHECK-NEXT:   mov #0, r3
+  ; CHECK-NEXT:   mov #42, r3
+  ; CHECK-NEXT:   jmp .LBB0_7
+
+  ; CHECK-NEXT: .Lfunc_end0:
+...

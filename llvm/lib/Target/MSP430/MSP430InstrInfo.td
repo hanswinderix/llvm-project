@@ -52,6 +52,8 @@ def MSP430rrcl    : SDNode<"MSP430ISD::RRCL", SDTIntUnaryOp, []>;
 
 def MSP430call    : SDNode<"MSP430ISD::CALL", SDT_MSP430Call,
                      [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue, SDNPVariadic]>;
+def MSP430brcall  : SDNode<"MSP430ISD::BRCALL", SDT_MSP430Call,
+                     [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue, SDNPVariadic]>;
 def MSP430callseq_start :
                  SDNode<"ISD::CALLSEQ_START", SDT_MSP430CallSeqStart,
                         [SDNPHasChain, SDNPOutGlue]>;
@@ -222,6 +224,60 @@ let isCodeGenOnly = 1, usesCustomInserter = 1 in {
 }
 
 //===----------------------------------------------------------------------===//
+//  SLLVM instructions
+//
+
+let isCodeGenOnly = 1 in {
+def eenter : Pseudo<(outs), (ins),
+                    // TODO: Figure out why the following statement is necessary
+                    "mov #sllvm_lr1, &sllvm_lr1_addr \n\t"
+                    // Check if this is a return from an interrupt
+                    "bit #1, &sllvm_lr1 \n\t"
+                    "jz 1f \n\t"
+                    "br #sllvm_reti \n"
+                    "1:\n\t"
+                    // In case this is a return from a call to unprotected code,
+                    //  the sp should be saved before switching stacks
+                    // TODO: Is it better to do this at DAG level ?
+                    //          (see X86 for example)
+                    "cmp\t#0xfffe, r6\n\t"
+                    "jne\t1f\n\t"
+                    "mov\tr1, &sllvm_r1\n"
+                    "1:\n\t"
+                    // Switch stack
+                    "mov\t&sllvm_lr1, r1\n\t"
+                    "call\t#sllvm_eenter"
+                    ,[(int_sllvm_eenter)]>;
+
+def eexit : Pseudo<(outs), (ins),
+                   "call\t#sllvm_eexit\n\t"
+                   // Save stack
+                   "mov\tr1, &sllvm_lr1\n\t"
+                   // Push return address
+                   "push\tr7"
+                   ,[(int_sllvm_eexit)]>;
+}
+
+def ereturn : Pseudo<(outs), (ins),
+                   "call\t#sllvm_ereturn"
+                   ,[(int_sllvm_ereturn)]>;
+
+let isCodeGenOnly = 1 in {
+  def rete : Pseudo<(outs), (ins),
+                     "mov\t#0xffff, r6\n\t"
+                     "br\tr7"
+                     ,[(int_sllvm_rete)]>;
+}
+
+// TODO: Instruction selection should match immediates, not registers
+let isCodeGenOnly = 1, usesCustomInserter = 1 in {
+  def attest : Pseudo<(outs), (ins GR16:$src, GR16:$src2, GR16:$src3),
+                   "# Attest PSEUDO\n\t"
+                   ,[(int_sllvm_attest GR16:$src, GR16:$src2, GR16:$src3)]>;
+}
+                   
+
+//===----------------------------------------------------------------------===//
 //  Control Flow Instructions...
 //
 
@@ -230,6 +286,7 @@ let isReturn = 1, isTerminator = 1, isBarrier = 1 in {
                      (outs), (ins), "ret",  [(MSP430retflag)]> {
     let DecoderNamespace = "Delta";
     let rs = 1;
+    // TODO: Mark PC as def ?
     let rd = 0;
   }
   def RETI : IIForm16<0b110, SrcReg, 2,
@@ -250,6 +307,7 @@ let isBarrier = 1 in {
                    [(br bb:$dst)]> {
     let cond = 0b111;
   }
+  // TODO: Mark PC as def ?
   let isIndirectBranch = 1, rd = 0 in {
     // Long branches
     def Bi  : I16ri<0b0100, (outs), (ins i16imm:$imm),
@@ -290,6 +348,15 @@ let isCall = 1,
   def CALLm     : II16m<0b101,
                         (outs), (ins memsrc:$src),
                         "call\t$src", [(MSP430call (load addr:$src))]>;
+  def BRCALLi   : II16i<0b101,
+                        (outs), (ins i16imm:$imm),
+                        "br\t$imm", [(MSP430brcall imm:$imm)]>;
+  def BRCALLr   : II16r<0b101,
+                        (outs), (ins GR16:$rs),
+                        "br\t$rs", [(MSP430brcall GR16:$rs)]>;
+  def BRCALLm   : II16m<0b101,
+                        (outs), (ins memsrc:$src),
+                        "br\t$src", [(MSP430brcall (load addr:$src))]>;
   def CALLn     : II16n<0b101, (outs), (ins indreg:$rs), "call\t$rs", []>;
   def CALLp     : II16p<0b101, (outs), (ins postreg:$rs), "call\t$rs", []>;
 }

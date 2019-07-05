@@ -1214,6 +1214,19 @@ def int_loop_decrement_reg :
 
 def int_ssa_copy : Intrinsic<[llvm_any_ty], [LLVMMatchType<0>],
                              [IntrNoMem, Returned<0>]>;
+
+//===----- SLLVM intrinsics ----------------------------------------------===//
+
+def int_sllvm_eenter : Intrinsic<[], []>;  // Enter enclave entry point
+def int_sllvm_eexit : Intrinsic<[], []>;   // Exit enclave entry point
+def int_sllvm_ereturn : Intrinsic<[], []>; // Return from ocall
+def int_sllvm_rete : Intrinsic<[], []>;    // Return from within an enclave
+
+// TODO: sllvm_attest should be Sancus-independent
+// Attest protected module
+def int_sllvm_attest :
+    Intrinsic<[], [llvm_i16_ty, llvm_i16_ty, llvm_i16_ty]>; 
+
 //===----------------------------------------------------------------------===//
 // Target-specific intrinsics
 //===----------------------------------------------------------------------===//

@@ -1880,6 +1880,29 @@ static void handleIFuncAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
                                          AL.getAttributeSpellingListIndex()));
 }
 
+template <typename AttrType>
+static void handleSLLVMAttribute(Sema &S, Decl *D, const ParsedAttr &AL) {
+  if (getNumAttributeArgs(AL) == 0) {
+    handleSimpleAttribute<AttrType>(S, D, AL);
+    return;
+  }
+
+  if (!checkAttributeNumArgs(S, AL, 1))
+    return;
+
+  auto LI = AL.getArgAsIdent(0);
+  if (LI == nullptr) {
+    S.Diag(AL.getLoc(), diag::err_attribute_argument_type)
+      << AL << AANT_ArgumentIdentifier;
+    return;
+  }
+
+  auto index = AL.getAttributeSpellingListIndex();
+
+  D->addAttr(
+      ::new (S.Context) AttrType(AL.getRange(), S.Context, LI->Ident, index));
+}
+
 static void handleAliasAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   StringRef Str;
   if (!S.checkStringLiteralArgumentAttr(AL, 0, Str))
@@ -6681,6 +6704,18 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     break;
   case ParsedAttr::AT_IFunc:
     handleIFuncAttr(S, D, AL);
+    break;
+  case ParsedAttr::AT_EEntry:
+    handleSLLVMAttribute<EEntryAttr>(S, D, AL);
+    break;
+  case ParsedAttr::AT_EFunc:
+    handleSLLVMAttribute<EFuncAttr>(S, D, AL);
+    break;
+  case ParsedAttr::AT_EData:
+    handleSLLVMAttribute<EDataAttr>(S, D, AL);
+    break;
+  case ParsedAttr::AT_Secret:
+    handleSimpleAttribute<SecretAttr>(S, D, AL);
     break;
   case ParsedAttr::AT_Alias:
     handleAliasAttr(S, D, AL);

@@ -141,6 +141,9 @@ void MSP430MCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
     case MachineOperand::MO_ExternalSymbol:
       MCOp = LowerSymbolOperand(MO, GetExternalSymbolSymbol(MO));
       break;
+    case MachineOperand::MO_MCSymbol:
+      MCOp = LowerSymbolOperand(MO, MO.getMCSymbol());
+      break;
     case MachineOperand::MO_JumpTableIndex:
       MCOp = LowerSymbolOperand(MO, GetJumpTableSymbol(MO));
       break;

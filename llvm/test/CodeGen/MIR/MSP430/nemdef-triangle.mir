@@ -1,0 +1,41 @@
+# RUN: llc -O3 -x=mir -start-before=msp430-nemesis-defender -msp430-nemesis-defender-enable=true -verify-machineinstrs -o - %s | FileCheck %s
+
+--- |
+  target triple = "msp430-unknown-unknown-elf"
+  define i16 @foo(i16 "secret" %a, i16 %b) {
+  entry:
+    ret i16 0
+  }
+...
+---
+name: foo
+body: |
+  bb.0:
+    successors: %bb.1, %bb.2
+    CMP16rr $r12, $r13, implicit-def $sr
+    JCC %bb.2, 5, implicit $sr
+
+  bb.1:
+    successors: %bb.2
+    $r12 = MOV16ri 3
+
+  bb.2:
+    RET implicit $r12
+
+  ; CHECK-LABEL: foo:
+  ; CHECK-NEXT: ; %bb.0:
+  ; CHECK-NEXT: 	cmp	r13, r12
+  ; CHECK-NEXT: 	jl	.LBB0_3
+  ; CHECK-NEXT: 	jmp	.LBB0_1
+  ; CHECK-NEXT: .LBB0_1:
+  ; CHECK-NEXT: 	mov	#3, r12
+  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: .LBB0_2:
+  ; CHECK-NEXT: 	ret
+  ; CHECK-NEXT: .LBB0_3:
+  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	jmp	.LBB0_2
+...

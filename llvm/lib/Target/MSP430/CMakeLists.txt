@@ -9,11 +9,14 @@ tablegen(LLVM MSP430GenInstrInfo.inc -gen-instr-info)
 tablegen(LLVM MSP430GenMCCodeEmitter.inc -gen-emitter)
 tablegen(LLVM MSP430GenRegisterInfo.inc -gen-register-info)
 tablegen(LLVM MSP430GenSubtargetInfo.inc -gen-subtarget)
+tablegen(LLVM MSP430GenInstrLatencyInfo.inc -gen-msp430-latency-info)
 
 add_public_tablegen_target(MSP430CommonTableGen)
 
 add_llvm_target(MSP430CodeGen
   MSP430BranchSelector.cpp
+  MSP430RTLInternalizer.cpp
+  MSP430NemesisDefender.cpp
   MSP430ISelDAGToDAG.cpp
   MSP430ISelLowering.cpp
   MSP430InstrInfo.cpp

@@ -88,8 +88,11 @@ void MSP430InstPrinter::printSrcMemOperand(const MCInst *MI, unsigned OpNo,
   }
 
   // Print register base field
-  if ((Base.getReg() != MSP430::SR) &&
-      (Base.getReg() != MSP430::PC))
+  if ((Base.getReg() != MSP430::SR)
+#if 0
+     && (Base.getReg() != MSP430::PC)
+#endif
+      )
     O << '(' << getRegisterName(Base.getReg()) << ')';
 }
 

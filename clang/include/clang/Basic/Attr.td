@@ -1644,6 +1644,33 @@ def AssumeAligned : InheritableAttr {
   let Documentation = [AssumeAlignedDocs];
 }
 
+def EEntry : InheritableAttr {
+  let Spellings = [GCC<"eentry">, Keyword<"eentry">];
+  let Args = [IdentifierArgument<"Name", 1>];
+  let Subjects = SubjectList<[Function]>;
+  let Documentation = [Undocumented];
+}
+
+def EFunc : InheritableAttr {
+  let Spellings = [GCC<"efunc">, Keyword<"efunc">];
+  let Args = [IdentifierArgument<"Name", 1>];
+  let Subjects = SubjectList<[Function]>;
+  let Documentation = [Undocumented];
+}
+
+def EData : InheritableAttr {
+  let Spellings = [GCC<"edata">, Keyword<"edata">];
+  let Args = [IdentifierArgument<"Name", 1>];
+  let Subjects = SubjectList<[Var]>;
+  let Documentation = [Undocumented];
+}
+
+def Secret : InheritableAttr {
+  let Spellings = [GCC<"secret">, Keyword<"secret">];
+  let Subjects = SubjectList<[ParmVar]>;
+  let Documentation = [Undocumented];
+}
+
 def AllocAlign : InheritableAttr {
   let Spellings = [GCC<"alloc_align">];
   let Subjects = SubjectList<[HasFunctionProto]>;

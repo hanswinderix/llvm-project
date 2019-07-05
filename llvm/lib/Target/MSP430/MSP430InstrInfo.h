@@ -74,6 +74,13 @@ public:
     assert(I.getOperand(1).getImm() >= 0 && "Size must not be negative");
     return I.getOperand(1).getImm();
   }
+
+  unsigned getInstrLatency(const InstrItineraryData *ItinData,
+                           const MachineInstr &MI,
+                           unsigned *PredCost = nullptr) const override;
+
+  void insertNoop(MachineBasicBlock &MBB,
+                  MachineBasicBlock::iterator MI) const override;
 };
 
 }

@@ -48,6 +48,8 @@ class IForm<bits<4> opcode, DestMode ad, bit bw, SourceMode as, int size,
   : MSP430Inst<outs, ins, size, asmstr> {
   let Pattern = pattern;
 
+  bits<1> Ad = ad.Value;
+  bits<2> As = as.Value;
   bits<4> rs;
   bits<4> rd;
 
@@ -85,6 +87,8 @@ class I8rc<bits<4> opcode,
   let DecoderNamespace = "Beta";
   let Pattern = pattern;
 
+  bits<4> Opcode = opcode;
+  bits<1> Ad = DstReg.Value;
   bits<6> imm;
   bits<4> rd;
 
@@ -144,6 +148,8 @@ class I8mc<bits<4> opcode,
   let DecoderNamespace = "Beta";
   let Pattern = pattern;
 
+  bits<4> Opcode = opcode;
+  bits<1> Ad = DstMem.Value;
   bits<6> imm;
   bits<20> dst;
 
@@ -212,6 +218,8 @@ class I16rc<bits<4> opcode,
   let DecoderNamespace = "Beta";
   let Pattern = pattern;
 
+  bits<4> Opcode = opcode;
+  bits<1> Ad = DstReg.Value;
   bits<6> imm;
   bits<4> rd;
 
@@ -271,6 +279,8 @@ class I16mc<bits<4> opcode,
   let DecoderNamespace = "Beta";
   let Pattern = pattern;
 
+  bits<4> Opcode = opcode;
+  bits<1> Ad = DstMem.Value;
   bits<6> imm;
   bits<20> dst;
 
@@ -319,6 +329,8 @@ class IIForm<bits<3> opcode, bit bw, SourceMode as, int size,
   : MSP430Inst<outs, ins, size, asmstr> {
   let Pattern = pattern;
 
+  bits<3> Opcode = opcode;
+  bits<2> As = as.Value;
   bits<4> rs;
 
   let Inst{15-10} = 0b000100;
@@ -358,6 +370,7 @@ class II8c<bits<3> opcode,
   : MSP430Inst<outs, ins, 2, asmstr> {
   let Pattern = pattern;
 
+  bits<3> Opcode = opcode;
   bits<6> imm;
 
   let Inst{15-10} = 0b000100;
@@ -404,6 +417,7 @@ class II16c<bits<3> opcode,
   : MSP430Inst<outs, ins, 2, asmstr> {
   let Pattern = pattern;
 
+  bits<3> Opcode = opcode;
   bits<6> imm;
 
   let Inst{15-10} = 0b000100;

@@ -393,9 +393,15 @@ struct ClientCapabilities {
   bool CompletionFixes = false;
 
   /// Client supports hierarchical document symbols.
+  /// textDocument.documentSymbol.hierarchicalDocumentSymbolSupport
   bool HierarchicalDocumentSymbol = false;
 
+  /// Client supports signature help.
+  /// textDocument.signatureHelp
+  bool HasSignatureHelp = false;
+
   /// Client supports processing label offsets instead of a simple label string.
+  /// textDocument.signatureHelp.signatureInformation.parameterInformation.labelOffsetSupport
   bool OffsetsInSignatureHelp = false;
 
   /// The supported set of CompletionItemKinds for textDocument/completion.
@@ -407,12 +413,14 @@ struct ClientCapabilities {
   bool CodeActionStructure = false;
 
   /// Client supports semantic highlighting.
+  /// textDocument.semanticHighlightingCapabilities.semanticHighlighting
   bool SemanticHighlighting = false;
 
   /// Supported encodings for LSP character offsets. (clangd extension).
   llvm::Optional<std::vector<OffsetEncoding>> offsetEncoding;
 
   /// The content format that should be used for Hover requests.
+  /// textDocument.hover.contentEncoding
   MarkupKind HoverContentFormat = MarkupKind::PlainText;
 };
 bool fromJSON(const llvm::json::Value &, ClientCapabilities &);
@@ -668,17 +676,11 @@ llvm::json::Value toJSON(const Diagnostic &);
 
 /// A LSP-specific comparator used to find diagnostic in a container like
 /// std:map.
-/// We only use as many fields of Diagnostic as is needed to make distinct
-/// diagnostics unique in practice, to avoid  regression issues from LSP clients
-/// (e.g. VScode), see https://git.io/vbr29
+/// We only use the required fields of Diagnostic to do the comparsion to avoid
+/// any regression issues from LSP clients (e.g. VScode), see
+/// https://git.io/vbr29
 struct LSPDiagnosticCompare {
   bool operator()(const Diagnostic &LHS, const Diagnostic &RHS) const {
-    if (!LHS.code.empty() && !RHS.code.empty()) {
-      // If the code is known for both, use the code to diambiguate, as e.g.
-      // two checkers could produce diagnostics with the same range and message.
-      return std::tie(LHS.range, LHS.message, LHS.code) <
-             std::tie(RHS.range, RHS.message, RHS.code);
-    }
     return std::tie(LHS.range, LHS.message) < std::tie(RHS.range, RHS.message);
   }
 };
@@ -1125,7 +1127,7 @@ struct TypeHierarchyItem {
   SymbolKind kind;
 
   /// `true` if the hierarchy item is deprecated. Otherwise, `false`.
-  bool deprecated;
+  bool deprecated = false;
 
   /// The URI of the text document where this type hierarchy item belongs to.
   URIForFile uri;
@@ -1151,13 +1153,26 @@ struct TypeHierarchyItem {
   /// descendants. If not defined, the children have not been resolved.
   llvm::Optional<std::vector<TypeHierarchyItem>> children;
 
-  /// The protocol has a slot here for an optional 'data' filed, which can
-  /// be used to identify a type hierarchy item in a resolve request. We don't
-  /// need this (the item itself is sufficient to identify what to resolve)
-  /// so don't declare it.
+  /// An optional 'data' filed, which can be used to identify a type hierarchy
+  /// item in a resolve request.
+  llvm::Optional<std::string> data;
 };
 llvm::json::Value toJSON(const TypeHierarchyItem &);
 llvm::raw_ostream &operator<<(llvm::raw_ostream &, const TypeHierarchyItem &);
+bool fromJSON(const llvm::json::Value &, TypeHierarchyItem &);
+
+/// Parameters for the `typeHierarchy/resolve` request.
+struct ResolveTypeHierarchyItemParams {
+  /// The item to resolve.
+  TypeHierarchyItem item;
+
+  /// The hierarchy levels to resolve. `0` indicates no level.
+  int resolve;
+
+  /// The direction of the hierarchy levels to resolve.
+  TypeHierarchyDirection direction;
+};
+bool fromJSON(const llvm::json::Value &, ResolveTypeHierarchyItemParams &);
 
 struct ReferenceParams : public TextDocumentPositionParams {
   // For now, no options like context.includeDeclaration are supported.

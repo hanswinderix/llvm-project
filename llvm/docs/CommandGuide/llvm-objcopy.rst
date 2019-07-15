@@ -150,10 +150,10 @@ them.
 
 .. option:: --add-symbol <name>=[<section>:]<value>[,<flags>]
 
- Add to the output a new symbol called ``<name>`` to the symbol table, in the
- section named ``<section>``, with value ``<value>``. If ``<section>`` is not
- specified, the symbol is added as an absolute symbol. The ``<flags>`` affect
- the symbol properties. Accepted values are:
+ Add a new symbol called ``<name>`` to the output symbol table, in the section
+ named ``<section>``, with value ``<value>``. If ``<section>`` is not specified,
+ the symbol is added as an absolute symbol. The ``<flags>`` affect the symbol
+ properties. Accepted values are:
 
  - `global` = the symbol will have global binding.
  - `local` = the symbol will have local binding.
@@ -457,8 +457,23 @@ options. For GNU :program:`objcopy` compatibility, the values are all bfdnames.
 - `elf32-sparc`
 - `elf32-sparcel`
 
-Additionally, all targets except ``binary`` and ``ihex`` can have ``-freebsd``
-as a suffix.
+Additionally, all targets except `binary` and `ihex` can have `-freebsd` as a
+suffix.
+
+BINARY INPUT AND OUTPUT
+-----------------------
+
+If `binary` is used as the value for :option:`--input-target`, the input file
+will be embedded as a data section in an ELF relocatable object, with symbols
+``_binary_<file_name>_start``, ``_binary_<file_name>_end``, and
+``_binary_<file_name>_size`` representing the start, end and size of the data,
+where ``<file_name>`` is the path of the input file as specified on the command
+line with non-alphanumeric characters converted to ``_``.
+
+If `binary` is used as the value for :option:`--output-target`, the output file
+will be a raw binary file, containing the memory image of the input file.
+Symbols and relocation information will be discarded. The image will start at
+the address of the first loadable section in the output.
 
 EXIT STATUS
 -----------

@@ -740,6 +740,8 @@ void AMDGPUPassConfig::addCodeGenPrepare() {
       EnableLowerKernelArguments)
     addPass(createAMDGPULowerKernelArgumentsPass());
 
+  addPass(&AMDGPUPerfHintAnalysisID);
+
   TargetPassConfig::addCodeGenPrepare();
 
   if (EnableLoadStoreVectorizer)
@@ -1141,6 +1143,9 @@ bool GCNTargetMachine::parseMachineFunctionInfo(
                              AMDGPU::VGPR_32RegClass,
                              MFI->ArgInfo.WorkItemIDZ)))
     return true;
+
+  MFI->Mode.IEEE = YamlMFI.Mode.IEEE;
+  MFI->Mode.DX10Clamp = YamlMFI.Mode.DX10Clamp;
 
   return false;
 }

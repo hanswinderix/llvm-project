@@ -250,12 +250,24 @@ void ARMTargetLowering::addMVEVectorTypes(bool HasMVEFP) {
     setOperationAction(ISD::INSERT_VECTOR_ELT, VT, Custom);
     setOperationAction(ISD::EXTRACT_VECTOR_ELT, VT, Custom);
     setOperationAction(ISD::BUILD_VECTOR, VT, Custom);
+    setOperationAction(ISD::SMIN, VT, Legal);
+    setOperationAction(ISD::SMAX, VT, Legal);
+    setOperationAction(ISD::UMIN, VT, Legal);
+    setOperationAction(ISD::UMAX, VT, Legal);
+    setOperationAction(ISD::ABS, VT, Legal);
 
     // No native support for these.
     setOperationAction(ISD::UDIV, VT, Expand);
     setOperationAction(ISD::SDIV, VT, Expand);
     setOperationAction(ISD::UREM, VT, Expand);
     setOperationAction(ISD::SREM, VT, Expand);
+
+    if (!HasMVEFP) {
+      setOperationAction(ISD::SINT_TO_FP, VT, Expand);
+      setOperationAction(ISD::UINT_TO_FP, VT, Expand);
+      setOperationAction(ISD::FP_TO_SINT, VT, Expand);
+      setOperationAction(ISD::FP_TO_UINT, VT, Expand);
+    }
   }
 
   const MVT FloatTypes[] = { MVT::v8f16, MVT::v4f32 };
@@ -274,6 +286,10 @@ void ARMTargetLowering::addMVEVectorTypes(bool HasMVEFP) {
     setOperationAction(ISD::SCALAR_TO_VECTOR, VT, Legal);
 
     if (HasMVEFP) {
+      setOperationAction(ISD::FMINNUM, VT, Legal);
+      setOperationAction(ISD::FMAXNUM, VT, Legal);
+      setOperationAction(ISD::FROUND, VT, Legal);
+
       // No native support for these.
       setOperationAction(ISD::FDIV, VT, Expand);
       setOperationAction(ISD::FREM, VT, Expand);
@@ -286,6 +302,7 @@ void ARMTargetLowering::addMVEVectorTypes(bool HasMVEFP) {
       setOperationAction(ISD::FLOG10, VT, Expand);
       setOperationAction(ISD::FEXP, VT, Expand);
       setOperationAction(ISD::FEXP2, VT, Expand);
+      setOperationAction(ISD::FNEARBYINT, VT, Expand);
     }
   }
 
@@ -816,9 +833,6 @@ ARMTargetLowering::ARMTargetLowering(const TargetMachine &TM,
     setTargetDAGCombine(ISD::SIGN_EXTEND);
     setTargetDAGCombine(ISD::ZERO_EXTEND);
     setTargetDAGCombine(ISD::ANY_EXTEND);
-    setTargetDAGCombine(ISD::BUILD_VECTOR);
-    setTargetDAGCombine(ISD::VECTOR_SHUFFLE);
-    setTargetDAGCombine(ISD::INSERT_VECTOR_ELT);
     setTargetDAGCombine(ISD::STORE);
     setTargetDAGCombine(ISD::FP_TO_SINT);
     setTargetDAGCombine(ISD::FP_TO_UINT);
@@ -834,6 +848,12 @@ ARMTargetLowering::ARMTargetLowering(const TargetMachine &TM,
         setLoadExtAction(ISD::SEXTLOAD, VT, Ty, Legal);
       }
     }
+  }
+
+  if (Subtarget->hasNEON() || Subtarget->hasMVEIntegerOps()) {
+    setTargetDAGCombine(ISD::BUILD_VECTOR);
+    setTargetDAGCombine(ISD::VECTOR_SHUFFLE);
+    setTargetDAGCombine(ISD::INSERT_VECTOR_ELT);
   }
 
   if (!Subtarget->hasFP64()) {
@@ -1244,10 +1264,12 @@ ARMTargetLowering::ARMTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::FRINT, MVT::f32, Legal);
     setOperationAction(ISD::FMINNUM, MVT::f32, Legal);
     setOperationAction(ISD::FMAXNUM, MVT::f32, Legal);
-    setOperationAction(ISD::FMINNUM, MVT::v2f32, Legal);
-    setOperationAction(ISD::FMAXNUM, MVT::v2f32, Legal);
-    setOperationAction(ISD::FMINNUM, MVT::v4f32, Legal);
-    setOperationAction(ISD::FMAXNUM, MVT::v4f32, Legal);
+    if (Subtarget->hasNEON()) {
+      setOperationAction(ISD::FMINNUM, MVT::v2f32, Legal);
+      setOperationAction(ISD::FMAXNUM, MVT::v2f32, Legal);
+      setOperationAction(ISD::FMINNUM, MVT::v4f32, Legal);
+      setOperationAction(ISD::FMAXNUM, MVT::v4f32, Legal);
+    }
 
     if (Subtarget->hasFP64()) {
       setOperationAction(ISD::FFLOOR, MVT::f64, Legal);
@@ -1971,12 +1993,14 @@ ARMTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     // more times in this block, we can improve codesize by calling indirectly
     // as BLXr has a 16-bit encoding.
     auto *GV = cast<GlobalAddressSDNode>(Callee)->getGlobal();
-    auto *BB = CLI.CS.getParent();
-    PreferIndirect =
-        Subtarget->isThumb() && Subtarget->hasMinSize() &&
-        count_if(GV->users(), [&BB](const User *U) {
-          return isa<Instruction>(U) && cast<Instruction>(U)->getParent() == BB;
-        }) > 2;
+    if (CLI.CS) {
+      auto *BB = CLI.CS.getParent();
+      PreferIndirect = Subtarget->isThumb() && Subtarget->hasMinSize() &&
+                       count_if(GV->users(), [&BB](const User *U) {
+                         return isa<Instruction>(U) &&
+                                cast<Instruction>(U)->getParent() == BB;
+                       }) > 2;
+    }
   }
   if (isTailCall) {
     // Check if it's really possible to do a tail call.
@@ -5935,7 +5959,7 @@ static SDValue LowerSETCCCARRY(SDValue Op, SelectionDAG &DAG) {
 }
 
 /// isNEONModifiedImm - Check if the specified splat value corresponds to a
-/// valid vector constant for a NEON instruction with a "modified immediate"
+/// valid vector constant for a NEON or MVE instruction with a "modified immediate"
 /// operand (e.g., VMOV).  If so, return the encoded value.
 static SDValue isNEONModifiedImm(uint64_t SplatBits, uint64_t SplatUndef,
                                  unsigned SplatBitSize, SelectionDAG &DAG,
@@ -6020,6 +6044,10 @@ static SDValue isNEONModifiedImm(uint64_t SplatBits, uint64_t SplatUndef,
       Imm = SplatBits >> 8;
       break;
     }
+
+    // cmode == 0b1101 is not supported for MVE VMVN
+    if (type == MVEVMVNModImm)
+      return SDValue();
 
     if ((SplatBits & ~0xffffff) == 0 &&
         ((SplatBits | SplatUndef) & 0xffff) == 0xffff) {
@@ -6587,13 +6615,15 @@ SDValue ARMTargetLowering::LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG,
     if (SplatUndef.isAllOnesValue())
       return DAG.getUNDEF(VT);
 
-    if (ST->hasNEON() && SplatBitSize <= 64) {
+    if ((ST->hasNEON() && SplatBitSize <= 64) ||
+        (ST->hasMVEIntegerOps() && SplatBitSize <= 32)) {
       // Check if an immediate VMOV works.
       EVT VmovVT;
       SDValue Val = isNEONModifiedImm(SplatBits.getZExtValue(),
                                       SplatUndef.getZExtValue(), SplatBitSize,
                                       DAG, dl, VmovVT, VT.is128BitVector(),
                                       VMOVModImm);
+
       if (Val.getNode()) {
         SDValue Vmov = DAG.getNode(ARMISD::VMOVIMM, dl, VmovVT, Val);
         return DAG.getNode(ISD::BITCAST, dl, VT, Vmov);
@@ -6601,10 +6631,10 @@ SDValue ARMTargetLowering::LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG,
 
       // Try an immediate VMVN.
       uint64_t NegatedImm = (~SplatBits).getZExtValue();
-      Val = isNEONModifiedImm(NegatedImm,
-                                      SplatUndef.getZExtValue(), SplatBitSize,
-                                      DAG, dl, VmovVT, VT.is128BitVector(),
-                                      VMVNModImm);
+      Val = isNEONModifiedImm(
+          NegatedImm, SplatUndef.getZExtValue(), SplatBitSize,
+          DAG, dl, VmovVT, VT.is128BitVector(),
+          ST->hasMVEIntegerOps() ? MVEVMVNModImm : VMVNModImm);
       if (Val.getNode()) {
         SDValue Vmov = DAG.getNode(ARMISD::VMVNIMM, dl, VmovVT, Val);
         return DAG.getNode(ISD::BITCAST, dl, VT, Vmov);
@@ -11150,7 +11180,7 @@ static SDValue PerformANDCombine(SDNode *N,
   APInt SplatBits, SplatUndef;
   unsigned SplatBitSize;
   bool HasAnyUndefs;
-  if (BVN &&
+  if (BVN && Subtarget->hasNEON() &&
       BVN->isConstantSplat(SplatBits, SplatUndef, SplatBitSize, HasAnyUndefs)) {
     if (SplatBitSize <= 64) {
       EVT VbicVT;
@@ -12971,21 +13001,25 @@ static SDValue PerformHWLoopCombine(SDNode *N,
                                     const ARMSubtarget *ST) {
   // Look for (brcond (xor test.set.loop.iterations, -1)
   SDValue CC = N->getOperand(1);
+  unsigned Opc = CC->getOpcode();
+  SDValue Int;
 
-  if (CC->getOpcode() != ISD::XOR && CC->getOpcode() != ISD::SETCC)
+  if ((Opc == ISD::XOR || Opc == ISD::SETCC) &&
+      (CC->getOperand(0)->getOpcode() == ISD::INTRINSIC_W_CHAIN)) {
+
+    assert((isa<ConstantSDNode>(CC->getOperand(1)) &&
+            cast<ConstantSDNode>(CC->getOperand(1))->isOne()) &&
+            "Expected to compare against 1");
+
+    Int = CC->getOperand(0);
+  } else if (CC->getOpcode() == ISD::INTRINSIC_W_CHAIN)
+    Int = CC;
+  else 
     return SDValue();
 
-  if (CC->getOperand(0)->getOpcode() != ISD::INTRINSIC_W_CHAIN)
-    return SDValue();
-
-  SDValue Int = CC->getOperand(0);
   unsigned IntOp = cast<ConstantSDNode>(Int.getOperand(1))->getZExtValue();
   if (IntOp != Intrinsic::test_set_loop_iterations)
     return SDValue();
-
-  assert((isa<ConstantSDNode>(CC->getOperand(1)) &&
-          cast<ConstantSDNode>(CC->getOperand(1))->isOne()) &&
-          "Expected to compare against 1");
 
   SDLoc dl(Int);
   SDValue Chain = N->getOperand(0);
@@ -15219,6 +15253,36 @@ bool ARMTargetLowering::shouldInsertFencesForAtomic(
 // This has so far only been implemented for MachO.
 bool ARMTargetLowering::useLoadStackGuardNode() const {
   return Subtarget->isTargetMachO();
+}
+
+void ARMTargetLowering::insertSSPDeclarations(Module &M) const {
+  if (!Subtarget->getTargetTriple().isWindowsMSVCEnvironment())
+    return TargetLowering::insertSSPDeclarations(M);
+
+  // MSVC CRT has a global variable holding security cookie.
+  M.getOrInsertGlobal("__security_cookie",
+                      Type::getInt8PtrTy(M.getContext()));
+
+  // MSVC CRT has a function to validate security cookie.
+  FunctionCallee SecurityCheckCookie = M.getOrInsertFunction(
+      "__security_check_cookie", Type::getVoidTy(M.getContext()),
+      Type::getInt8PtrTy(M.getContext()));
+  if (Function *F = dyn_cast<Function>(SecurityCheckCookie.getCallee()))
+    F->addAttribute(1, Attribute::AttrKind::InReg);
+}
+
+Value *ARMTargetLowering::getSDagStackGuard(const Module &M) const {
+  // MSVC CRT has a global variable holding security cookie.
+  if (Subtarget->getTargetTriple().isWindowsMSVCEnvironment())
+    return M.getGlobalVariable("__security_cookie");
+  return TargetLowering::getSDagStackGuard(M);
+}
+
+Function *ARMTargetLowering::getSSPStackGuardCheck(const Module &M) const {
+  // MSVC CRT has a function to validate security cookie.
+  if (Subtarget->getTargetTriple().isWindowsMSVCEnvironment())
+    return M.getFunction("__security_check_cookie");
+  return TargetLowering::getSSPStackGuardCheck(M);
 }
 
 bool ARMTargetLowering::canCombineStoreAndExtract(Type *VectorTy, Value *Idx,

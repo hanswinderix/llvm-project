@@ -650,6 +650,7 @@ lltok::Kind LLLexer::LexIdentifier() {
   KEYWORD(nobuiltin);
   KEYWORD(nocapture);
   KEYWORD(noduplicate);
+  KEYWORD(nofree);
   KEYWORD(noimplicitfloat);
   KEYWORD(noinline);
   KEYWORD(norecurse);
@@ -657,6 +658,7 @@ lltok::Kind LLLexer::LexIdentifier() {
   KEYWORD(nonnull);
   KEYWORD(noredzone);
   KEYWORD(noreturn);
+  KEYWORD(nosync);
   KEYWORD(nocf_check);
   KEYWORD(nounwind);
   KEYWORD(optforfuzzing);
@@ -708,6 +710,7 @@ lltok::Kind LLLexer::LexIdentifier() {
   KEYWORD(xchg); KEYWORD(nand); KEYWORD(max); KEYWORD(min); KEYWORD(umax);
   KEYWORD(umin);
 
+  KEYWORD(vscale);
   KEYWORD(x);
   KEYWORD(blockaddress);
 

@@ -355,8 +355,12 @@ int main(int argc, char *argv[]) {
     InputStyle = JSONStreamStyle::Delimited;
     LogLevel = Logger::Verbose;
     PrettyPrint = true;
+    // Disable background index on lit tests by default to prevent disk writes.
+    if (!EnableBackgroundIndex.getNumOccurrences())
+      EnableBackgroundIndex = false;
     // Ensure background index makes progress.
-    BackgroundQueue::preventThreadStarvationInTests();
+    else if (EnableBackgroundIndex)
+      BackgroundQueue::preventThreadStarvationInTests();
   }
   if (Test || EnableTestScheme) {
     static URISchemeRegistry::Add<TestScheme> X(
@@ -419,6 +423,17 @@ int main(int argc, char *argv[]) {
   llvm::errs().SetBuffered();
   StreamLogger Logger(llvm::errs(), LogLevel);
   LoggingSession LoggingSession(Logger);
+  // Write some initial logs before we start doing any real work.
+  log("{0}", clang::getClangToolFullVersion("clangd"));
+  {
+    SmallString<128> CWD;
+    if (auto Err = llvm::sys::fs::current_path(CWD))
+      log("Working directory unknown: {0}", Err.message());
+    else
+      log("Working directory: {0}", CWD);
+  }
+  for (int I = 0; I < argc; ++I)
+    log("argv[{0}]: {1}", I, argv[I]);
 
   // If --compile-commands-dir arg was invoked, check value and override default
   // path.
@@ -497,12 +512,14 @@ int main(int argc, char *argv[]) {
   std::unique_ptr<Transport> TransportLayer;
   if (getenv("CLANGD_AS_XPC_SERVICE")) {
 #if CLANGD_BUILD_XPC
+    log("Starting LSP over XPC service");
     TransportLayer = newXPCTransport();
 #else
     llvm::errs() << "This clangd binary wasn't built with XPC support.\n";
     return (int)ErrorResultCode::CantRunAsXPCService;
 #endif
   } else {
+    log("Starting LSP over stdin/stdout");
     TransportLayer = newJSONTransport(
         stdin, llvm::outs(),
         InputMirrorStream ? InputMirrorStream.getPointer() : nullptr,

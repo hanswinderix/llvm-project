@@ -96,7 +96,7 @@ public:
   // Enqueues an archive member load for the given symbol. If we've already
   // enqueued a load for the same archive member, this function does nothing,
   // which ensures that we don't load the same member more than once.
-  void addMember(const Archive::Symbol *sym);
+  void addMember(const Archive::Symbol &sym);
 
 private:
   std::unique_ptr<Archive> file;
@@ -119,7 +119,7 @@ public:
 
   ArrayRef<uint8_t> getDebugSection(StringRef secName);
 
-  // Returns a Symbol object for the SymbolIndex'th symbol in the
+  // Returns a Symbol object for the symbolIndex'th symbol in the
   // underlying object file.
   Symbol *getSymbol(uint32_t symbolIndex) {
     return symbols[symbolIndex];

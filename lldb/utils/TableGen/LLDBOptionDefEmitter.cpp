@@ -44,7 +44,6 @@ static void emitOption(Record *Option, raw_ostream &OS) {
     auto Groups = Option->getValueAsListOfInts("Groups");
     for (int Group : Groups)
       GroupsArg.push_back("LLDB_OPT_SET_" + std::to_string(Group));
-    OS << llvm::join(GroupsArg.begin(), GroupsArg.end(), " | ");
   } else if (Option->getValue("GroupStart")) {
     // The user specified a range of groups (with potentially only one element).
     int GroupStart = Option->getValueAsInt("GroupStart");
@@ -112,9 +111,11 @@ static void emitOption(Record *Option, raw_ostream &OS) {
   OS << ", ";
 
   // Add the description if there is any.
-  if (auto D = Option->getValue("Description"))
-    OS << D->getValue()->getAsString();
-  else
+  if (auto D = Option->getValue("Description")) {
+    OS << "\"";
+    llvm::printEscapedString(D->getValue()->getAsUnquotedString(), OS);
+    OS << "\"";
+  } else
     OS << "\"\"";
   OS << "},\n";
 }

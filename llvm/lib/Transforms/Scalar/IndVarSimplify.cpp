@@ -2688,10 +2688,12 @@ bool IndVarSimplify::optimizeLoopExits(Loop *L) {
       continue;
     }
 
-    // If we end up with a pointer exit count, bail.
+    // If we end up with a pointer exit count, bail.  Note that we can end up
+    // with a pointer exit count for one exiting block, and not for another in
+    // the same loop.
     if (!ExitCount->getType()->isIntegerTy() ||
         !MaxExitCount->getType()->isIntegerTy())
-      return false;
+      continue;
     
     Type *WiderType =
       SE->getWiderType(MaxExitCount->getType(), ExitCount->getType());
@@ -2810,7 +2812,12 @@ bool IndVarSimplify::run(Loop *L) {
       if (isa<SCEVCouldNotCompute>(ExitCount))
         continue;
 
-      assert(!ExitCount->isZero() && "Should have been folded above");
+      // This was handled above, but as we form SCEVs, we can sometimes refine
+      // existing ones; this allows exit counts to be folded to zero which
+      // weren't when optimizeLoopExits saw them.  Arguably, we should iterate
+      // until stable to handle cases like this better.
+      if (ExitCount->isZero())
+        continue;
       
       PHINode *IndVar = FindLoopCounter(L, ExitingBB, ExitCount, SE, DT);
       if (!IndVar)

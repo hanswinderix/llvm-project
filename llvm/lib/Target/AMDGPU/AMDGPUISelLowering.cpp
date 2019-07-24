@@ -39,80 +39,6 @@
 #include "llvm/Support/KnownBits.h"
 using namespace llvm;
 
-static bool allocateCCRegs(unsigned ValNo, MVT ValVT, MVT LocVT,
-                           CCValAssign::LocInfo LocInfo,
-                           ISD::ArgFlagsTy ArgFlags, CCState &State,
-                           const TargetRegisterClass *RC,
-                           unsigned NumRegs) {
-  ArrayRef<MCPhysReg> RegList = makeArrayRef(RC->begin(), NumRegs);
-  unsigned RegResult = State.AllocateReg(RegList);
-  if (RegResult == AMDGPU::NoRegister)
-    return false;
-
-  State.addLoc(CCValAssign::getReg(ValNo, ValVT, RegResult, LocVT, LocInfo));
-  return true;
-}
-
-static bool allocateSGPRTuple(unsigned ValNo, MVT ValVT, MVT LocVT,
-                              CCValAssign::LocInfo LocInfo,
-                              ISD::ArgFlagsTy ArgFlags, CCState &State) {
-  switch (LocVT.SimpleTy) {
-  case MVT::i64:
-  case MVT::f64:
-  case MVT::v2i32:
-  case MVT::v2f32:
-  case MVT::v4i16:
-  case MVT::v4f16: {
-    // Up to SGPR0-SGPR105
-    return allocateCCRegs(ValNo, ValVT, LocVT, LocInfo, ArgFlags, State,
-                          &AMDGPU::SGPR_64RegClass, 53);
-  }
-  default:
-    return false;
-  }
-}
-
-// Allocate up to VGPR31.
-//
-// TODO: Since there are no VGPR alignent requirements would it be better to
-// split into individual scalar registers?
-static bool allocateVGPRTuple(unsigned ValNo, MVT ValVT, MVT LocVT,
-                              CCValAssign::LocInfo LocInfo,
-                              ISD::ArgFlagsTy ArgFlags, CCState &State) {
-  switch (LocVT.SimpleTy) {
-  case MVT::i64:
-  case MVT::f64:
-  case MVT::v2i32:
-  case MVT::v2f32:
-  case MVT::v4i16:
-  case MVT::v4f16: {
-    return allocateCCRegs(ValNo, ValVT, LocVT, LocInfo, ArgFlags, State,
-                          &AMDGPU::VReg_64RegClass, 31);
-  }
-  case MVT::v4i32:
-  case MVT::v4f32:
-  case MVT::v2i64:
-  case MVT::v2f64: {
-    return allocateCCRegs(ValNo, ValVT, LocVT, LocInfo, ArgFlags, State,
-                          &AMDGPU::VReg_128RegClass, 29);
-  }
-  case MVT::v8i32:
-  case MVT::v8f32: {
-    return allocateCCRegs(ValNo, ValVT, LocVT, LocInfo, ArgFlags, State,
-                          &AMDGPU::VReg_256RegClass, 25);
-
-  }
-  case MVT::v16i32:
-  case MVT::v16f32: {
-    return allocateCCRegs(ValNo, ValVT, LocVT, LocInfo, ArgFlags, State,
-                          &AMDGPU::VReg_512RegClass, 17);
-
-  }
-  default:
-    return false;
-  }
-}
-
 #include "AMDGPUGenCallingConv.inc"
 
 // Find a larger type to do a load / store of a vector with.
@@ -2937,18 +2863,11 @@ bool AMDGPUTargetLowering::SelectFlatOffset(bool IsSigned,
     SDValue N1 = Addr.getOperand(1);
     int64_t COffsetVal = cast<ConstantSDNode>(N1)->getSExtValue();
 
-    if (ST.getGeneration() >= AMDGPUSubtarget::GFX10) {
-      if ((IsSigned && isInt<12>(COffsetVal)) ||
-          (!IsSigned && isUInt<11>(COffsetVal))) {
-        Addr = N0;
-        OffsetVal = COffsetVal;
-      }
-    } else {
-      if ((IsSigned && isInt<13>(COffsetVal)) ||
-          (!IsSigned && isUInt<12>(COffsetVal))) {
-        Addr = N0;
-        OffsetVal = COffsetVal;
-      }
+    const SIInstrInfo *TII = ST.getInstrInfo();
+    if (TII->isLegalFLATOffset(COffsetVal, findMemSDNode(N)->getAddressSpace(),
+                               IsSigned)) {
+      Addr = N0;
+      OffsetVal = COffsetVal;
     }
   }
 
@@ -4583,9 +4502,9 @@ void AMDGPUTargetLowering::computeKnownBitsForTargetNode(
         Known.One |= ((LHSKnown.One.getZExtValue() >> SelBits) & 0xff) << I;
         Known.Zero |= ((LHSKnown.Zero.getZExtValue() >> SelBits) & 0xff) << I;
       } else if (SelBits == 0x0c) {
-        Known.Zero |= 0xff << I;
+        Known.Zero |= 0xFFull << I;
       } else if (SelBits > 0x0c) {
-        Known.One |= 0xff << I;
+        Known.One |= 0xFFull << I;
       }
       Sel >>= 8;
     }

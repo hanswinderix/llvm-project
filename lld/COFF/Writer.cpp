@@ -335,7 +335,7 @@ void OutputSection::addContributingPartialSection(PartialSection *sec) {
 } // namespace lld
 
 // Check whether the target address S is in range from a relocation
-// of type RelType at address P.
+// of type relType at address P.
 static bool isInRange(uint16_t relType, uint64_t s, uint64_t p, int margin) {
   if (config->machine == ARMNT) {
     int64_t diff = AbsoluteDifference(s, p + 4) + margin;
@@ -427,7 +427,7 @@ static bool createThunks(OutputSection *os, int margin) {
 
       // The estimate of the source address P should be pretty accurate,
       // but we don't know whether the target Symbol address should be
-      // offset by ThunkSize or not (or by some of ThunksSize but not all of
+      // offset by thunksSize or not (or by some of thunksSize but not all of
       // it), giving us some uncertainty once we have added one thunk.
       uint64_t p = sc->getRVA() + rel.VirtualAddress + thunksSize;
 
@@ -762,6 +762,28 @@ void Writer::locateImportTables() {
   }
 }
 
+// Return whether a SectionChunk's suffix (the dollar and any trailing
+// suffix) should be removed and sorted into the main suffixless
+// PartialSection.
+static bool shouldStripSectionSuffix(SectionChunk *sc, StringRef name) {
+  // On MinGW, comdat groups are formed by putting the comdat group name
+  // after the '$' in the section name. For .eh_frame$<symbol>, that must
+  // still be sorted before the .eh_frame trailer from crtend.o, thus just
+  // strip the section name trailer. For other sections, such as
+  // .tls$$<symbol> (where non-comdat .tls symbols are otherwise stored in
+  // ".tls$"), they must be strictly sorted after .tls. And for the
+  // hypothetical case of comdat .CRT$XCU, we definitely need to keep the
+  // suffix for sorting. Thus, to play it safe, only strip the suffix for
+  // the standard sections.
+  if (!config->mingw)
+    return false;
+  if (!sc || !sc->isCOMDAT())
+    return false;
+  return name.startswith(".text$") || name.startswith(".data$") ||
+         name.startswith(".rdata$") || name.startswith(".pdata$") ||
+         name.startswith(".xdata$") || name.startswith(".eh_frame$");
+}
+
 // Create output section objects and add them to OutputSections.
 void Writer::createSections() {
   // First, create the builtin sections.
@@ -807,10 +829,7 @@ void Writer::createSections() {
       continue;
     }
     StringRef name = c->getSectionName();
-    // On MinGW, comdat groups are formed by putting the comdat group name
-    // after the '$' in the section name. Such a section name suffix shouldn't
-    // imply separate alphabetical sorting of those section chunks though.
-    if (config->mingw && sc && sc->isCOMDAT())
+    if (shouldStripSectionSuffix(sc, name))
       name = name.split('$').first;
     PartialSection *pSec = createPartialSection(name,
                                                 c->getOutputCharacteristics());
@@ -917,7 +936,7 @@ void Writer::createMiscChunks() {
   }
 
   // Create SEH table. x86-only.
-  if (config->machine == I386)
+  if (config->safeSEH)
     createSEHTable();
 
   // Create /guard:cf tables if requested.
@@ -1428,23 +1447,15 @@ void Writer::openFile(StringRef path) {
 }
 
 void Writer::createSEHTable() {
-  // Set the no SEH characteristic on x86 binaries unless we find exception
-  // handlers.
-  setNoSEHCharacteristic = true;
-
   SymbolRVASet handlers;
   for (ObjFile *file : ObjFile::instances) {
-    // FIXME: We should error here instead of earlier unless /safeseh:no was
-    // passed.
     if (!file->hasSafeSEH())
-      return;
-
+      error("/safeseh: " + file->getName() + " is not compatible with SEH");
     markSymbolsForRVATable(file, file->getSXDataChunks(), handlers);
   }
 
-  // Remove the "no SEH" characteristic if all object files were built with
-  // safeseh, we found some exception handlers, and there is a load config in
-  // the object.
+  // Set the "no SEH" characteristic if there really were no handlers, or if
+  // there is no load config object to point to the table of handlers.
   setNoSEHCharacteristic =
       handlers.empty() || !symtab->findUnderscore("_load_config_used");
 
@@ -1626,7 +1637,7 @@ void Writer::markSymbolsForRVATable(ObjFile *file,
 }
 
 // Replace the absolute table symbol with a synthetic symbol pointing to
-// TableChunk so that we can emit base relocations for it and resolve section
+// tableChunk so that we can emit base relocations for it and resolve section
 // relative relocations.
 void Writer::maybeAddRVATable(SymbolRVASet tableSymbols, StringRef tableSym,
                               StringRef countSym) {

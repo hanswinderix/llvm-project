@@ -235,12 +235,21 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
 static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
                                      const TemplateName &N1,
                                      const TemplateName &N2) {
-  if (N1.getKind() != N2.getKind())
+  TemplateDecl *TemplateDeclN1 = N1.getAsTemplateDecl();
+  TemplateDecl *TemplateDeclN2 = N2.getAsTemplateDecl();
+  if (TemplateDeclN1 && TemplateDeclN2) {
+    if (!IsStructurallyEquivalent(Context, TemplateDeclN1, TemplateDeclN2))
+      return false;
+    // If the kind is different we compare only the template decl.
+    if (N1.getKind() != N2.getKind())
+      return true;
+  } else if (TemplateDeclN1 || TemplateDeclN2)
     return false;
+  else if (N1.getKind() != N2.getKind())
+    return false;
+
+  // Check for special case incompatibilities.
   switch (N1.getKind()) {
-  case TemplateName::Template:
-    return IsStructurallyEquivalent(Context, N1.getAsTemplateDecl(),
-                                    N2.getAsTemplateDecl());
 
   case TemplateName::OverloadedTemplate: {
     OverloadedTemplateStorage *OS1 = N1.getAsOverloadedTemplate(),
@@ -259,14 +268,6 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
     return TN1->getDeclName() == TN2->getDeclName();
   }
 
-  case TemplateName::QualifiedTemplate: {
-    QualifiedTemplateName *QN1 = N1.getAsQualifiedTemplateName(),
-                          *QN2 = N2.getAsQualifiedTemplateName();
-    return IsStructurallyEquivalent(Context, QN1->getDecl(), QN2->getDecl()) &&
-           IsStructurallyEquivalent(Context, QN1->getQualifier(),
-                                    QN2->getQualifier());
-  }
-
   case TemplateName::DependentTemplate: {
     DependentTemplateName *DN1 = N1.getAsDependentTemplateName(),
                           *DN2 = N2.getAsDependentTemplateName();
@@ -281,15 +282,6 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
     return false;
   }
 
-  case TemplateName::SubstTemplateTemplateParm: {
-    SubstTemplateTemplateParmStorage *TS1 = N1.getAsSubstTemplateTemplateParm(),
-                                     *TS2 = N2.getAsSubstTemplateTemplateParm();
-    return IsStructurallyEquivalent(Context, TS1->getParameter(),
-                                    TS2->getParameter()) &&
-           IsStructurallyEquivalent(Context, TS1->getReplacement(),
-                                    TS2->getReplacement());
-  }
-
   case TemplateName::SubstTemplateTemplateParmPack: {
     SubstTemplateTemplateParmPackStorage
         *P1 = N1.getAsSubstTemplateTemplateParmPack(),
@@ -299,8 +291,16 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
            IsStructurallyEquivalent(Context, P1->getParameterPack(),
                                     P2->getParameterPack());
   }
+
+   case TemplateName::Template:
+   case TemplateName::QualifiedTemplate:
+   case TemplateName::SubstTemplateTemplateParm:
+     // It is sufficient to check value of getAsTemplateDecl.
+     break;
+
   }
-  return false;
+
+  return true;
 }
 
 /// Determine whether two template arguments are equivalent.
@@ -1085,6 +1085,19 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
   return true;
 }
 
+/// Determine structural equivalence of two lambda classes.
+static bool
+IsStructurallyEquivalentLambdas(StructuralEquivalenceContext &Context,
+                                CXXRecordDecl *D1, CXXRecordDecl *D2) {
+  assert(D1->isLambda() && D2->isLambda() &&
+         "Must be called on lambda classes");
+  if (!IsStructurallyEquivalent(Context, D1->getLambdaCallOperator(),
+                                D2->getLambdaCallOperator()))
+    return false;
+
+  return true;
+}
+
 /// Determine structural equivalence of two records.
 static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
                                      RecordDecl *D1, RecordDecl *D2) {
@@ -1164,6 +1177,13 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
       if (D1CXX->hasExternalLexicalStorage() &&
           !D1CXX->isCompleteDefinition()) {
         D1CXX->getASTContext().getExternalSource()->CompleteType(D1CXX);
+      }
+
+      if (D1CXX->isLambda() != D2CXX->isLambda())
+        return false;
+      if (D1CXX->isLambda()) {
+        if (!IsStructurallyEquivalentLambdas(Context, D1CXX, D2CXX))
+          return false;
       }
 
       if (D1CXX->getNumBases() != D2CXX->getNumBases()) {

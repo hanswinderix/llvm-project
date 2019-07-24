@@ -677,8 +677,7 @@ lldb::CompUnitSP SymbolFileDWARF::ParseCompileUnit(DWARFCompileUnit &dwarf_cu) {
 
           dwarf_cu.SetUserData(cu_sp.get());
 
-          m_obj_file->GetModule()->GetSymbolVendor()->SetCompileUnitAtIndex(
-              dwarf_cu.GetID(), cu_sp);
+          SetCompileUnitAtIndex(dwarf_cu.GetID(), cu_sp);
         }
       }
     }
@@ -715,7 +714,7 @@ llvm::Optional<uint32_t> SymbolFileDWARF::GetDWARFUnitIndex(uint32_t cu_idx) {
   return m_lldb_cu_to_dwarf_unit[cu_idx];
 }
 
-uint32_t SymbolFileDWARF::GetNumCompileUnits() {
+uint32_t SymbolFileDWARF::CalculateNumCompileUnits() {
   DWARFDebugInfo *info = DebugInfo();
   if (!info)
     return 0;
@@ -833,7 +832,7 @@ SymbolFileDWARF::GetTypeUnitSupportFiles(DWARFTypeUnit &tu) {
   auto iter_bool = m_type_unit_support_files.try_emplace(offset);
   FileSpecList &list = iter_bool.first->second;
   if (iter_bool.second) {
-    list.Append(FileSpec());
+    list.EmplaceBack();
     DWARFDebugLine::ParseSupportFiles(GetObjectFile()->GetModule(),
                                       m_context.getOrLoadLineData(), offset,
                                       list, &tu);
@@ -3713,7 +3712,10 @@ ConstString SymbolFileDWARF::GetPluginName() { return GetPluginNameStatic(); }
 
 uint32_t SymbolFileDWARF::GetPluginVersion() { return 1; }
 
-void SymbolFileDWARF::Dump(lldb_private::Stream &s) { m_index->Dump(s); }
+void SymbolFileDWARF::Dump(lldb_private::Stream &s) {
+  SymbolFile::Dump(s);
+  m_index->Dump(s);
+}
 
 void SymbolFileDWARF::DumpClangAST(Stream &s) {
   TypeSystem *ts = GetTypeSystemForLanguage(eLanguageTypeC_plus_plus);

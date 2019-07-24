@@ -1531,7 +1531,7 @@ bool SIInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     break;
   }
   case TargetOpcode::BUNDLE: {
-    if (!MI.mayLoad())
+    if (!MI.mayLoad() || MI.hasUnmodeledSideEffects())
       return false;
 
     // If it is a load it must be a memory clause
@@ -6117,6 +6117,25 @@ bool SIInstrInfo::isBufferSMRD(const MachineInstr &MI) const {
   const auto RCID = MI.getDesc().OpInfo[Idx].RegClass;
   return RCID == AMDGPU::SReg_128RegClassID;
 }
+
+bool SIInstrInfo::isLegalFLATOffset(int64_t Offset, unsigned AddrSpace,
+                                    bool Signed) const {
+  // TODO: Should 0 be special cased?
+  if (!ST.hasFlatInstOffsets())
+    return false;
+
+  if (ST.hasFlatSegmentOffsetBug() && AddrSpace == AMDGPUAS::FLAT_ADDRESS)
+    return false;
+
+  if (ST.getGeneration() >= AMDGPUSubtarget::GFX10) {
+    return (Signed && isInt<12>(Offset)) ||
+           (!Signed && isUInt<11>(Offset));
+  }
+
+  return (Signed && isInt<13>(Offset)) ||
+         (!Signed && isUInt<12>(Offset));
+}
+
 
 // This must be kept in sync with the SIEncodingFamily class in SIInstrInfo.td
 enum SIEncodingFamily {

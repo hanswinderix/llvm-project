@@ -17,6 +17,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Testing/Support/Error.h"
+#include "gmock/gmock-matchers.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include <cassert>
@@ -134,10 +135,9 @@ void checkApplyContainsError(llvm::StringRef ID, llvm::StringRef Input,
   auto Result = apply(ID, Input);
   ASSERT_FALSE(Result) << "expected error message:\n   " << ErrorMessage <<
                        "\non input:" << Input;
-  EXPECT_NE(std::string::npos,
-            llvm::toString(Result.takeError()).find(ErrorMessage))
-            << "Wrong error message:\n  " << llvm::toString(Result.takeError())
-            << "\nexpected:\n  " << ErrorMessage;
+  EXPECT_THAT(llvm::toString(Result.takeError()),
+              testing::HasSubstr(ErrorMessage))
+      << Input;
 }
 
 TEST(TweakTest, SwapIfBranches) {
@@ -291,74 +291,92 @@ TEST(TweakTest, DumpRecordLayout) {
   const char *Input = "struct ^X { int x; int y; }";
   EXPECT_THAT(getMessage(ID, Input), ::testing::HasSubstr("0 |   int x"));
 }
+
 TEST(TweakTest, ExtractVariable) {
   llvm::StringLiteral ID = "ExtractVariable";
   checkAvailable(ID, R"cpp(
-    int xyz() {
+    int xyz(int a = 1) {
+      struct T {
+        int bar(int a = 1);
+        int z;
+      } t;
       // return statement
-      return ^1;
+      return [[[[t.b[[a]]r]](t.z)]];
     }
     void f() {
-      int a = 5 + [[4 ^* ^xyz^()]];
+      int a = [[5 +]] [[4 * [[[[xyz]]()]]]];
       // multivariable initialization
       if(1)
-        int x = ^1, y = ^a + 1, a = ^1, z = a + 1;
+        int x = [[1]], y = [[a + 1]], a = [[1]], z = a + 1;
       // if without else
-      if(^1) {}
+      if([[1]])
+        a = [[1]];
       // if with else
-      if(a < ^3)
-        if(a == ^4)
-          a = ^5;
+      if(a < [[3]])
+        if(a == [[4]])
+          a = [[5]];
         else
-          a = ^6;
-      else if (a < ^4)
-        a = ^4;
+          a = [[5]];
+      else if (a < [[4]])
+        a = [[4]];
       else
-        a = ^5;
-      // for loop 
-      for(a = ^1; a > ^3^+^4; a++)
-        a = ^2;
-      // while 
-      while(a < ^1)
-        ^a++;
-      // do while 
+        a = [[5]];
+      // for loop
+      for(a = [[1]]; a > [[[[3]] + [[4]]]]; a++)
+        a = [[2]];
+      // while
+      while(a < [[1]])
+        [[a++]];
+      // do while
       do
-        a = ^1;
-      while(a < ^3);
+        a = [[1]];
+      while(a < [[3]]);
     }
   )cpp");
   // Should not crash.
   checkNotAvailable(ID, R"cpp(
     template<typename T, typename ...Args>
     struct Test<T, Args...> {
-    Test(const T &v) :val(^) {}
+    Test(const T &v) :val[[(^]]) {}
       T val;
     };
   )cpp");
   checkNotAvailable(ID, R"cpp(
-    int xyz(int a = ^1) {
-      return 1;
-      class T {
-        T(int a = ^1) {};
-        int xyz = ^1;
-      };
+    int xyz(int a = [[1]]) {
+      struct T {
+        int bar(int a = [[1]]);
+        int z = [[1]];
+      } t;
+      return [[t]].bar([[[[t]].z]]);
     }
+    void v() { return; }
     // function default argument
-    void f(int b = ^1) {
+    void f(int b = [[1]]) {
+      // empty selection
+      int a = ^1 ^+ ^2;
       // void expressions
       auto i = new int, j = new int;
-      de^lete i^, del^ete j;
+      [[[[delete i]], delete j]];
+      [[v]]();
       // if
       if(1)
-        int x = 1, y = a + 1, a = 1, z = ^a + 1;
+        int x = 1, y = a + 1, a = 1, z = [[a + 1]];
       if(int a = 1)
-        if(^a == 4)
-          a = ^a ^+ 1;
-      // for loop 
-      for(int a = 1, b = 2, c = 3; ^a > ^b ^+ ^c; ^a++)
-        a = ^a ^+ 1;
-      // lambda 
-      auto lamb = [&^a, &^b](int r = ^1) {return 1;}
+        if([[a + 1]] == 4)
+          a = [[[[a]] +]] 1;
+      // for loop
+      for(int a = 1, b = 2, c = 3; a > [[b + c]]; [[a++]])
+        a = [[a + 1]];
+      // lambda
+      auto lamb = [&[[a]], &[[b]]](int r = [[1]]) {return 1;}
+      // assigment
+      [[a = 5]];
+      // Variable DeclRefExpr
+      a = [[b]];
+      // label statement
+      goto label;
+      label:
+        a = [[1]];
     }
   )cpp");
   // vector of pairs of input and output strings
@@ -394,36 +412,72 @@ TEST(TweakTest, ExtractVariable) {
                              break;
                        }
                  })cpp"},*/
+          // Macros
+          {R"cpp(#define PLUS(x) x++
+                 void f(int a) {
+                   PLUS([[1+a]]);
+                 })cpp",
+           R"cpp(#define PLUS(x) x++
+                 void f(int a) {
+                   auto dummy = PLUS(1+a); dummy;
+                 })cpp"},
           // ensure InsertionPoint isn't inside a macro
-          {R"cpp(#define LOOP(x) {int a = x + 1;}
+          {R"cpp(#define LOOP(x) while (1) {a = x;}
                  void f(int a) {
                    if(1)
-                    LOOP(5 + ^3)
+                    LOOP(5 + [[3]])
                  })cpp",
-           R"cpp(#define LOOP(x) {int a = x + 1;}
+           /*FIXME: It should be extracted like this. SelectionTree needs to be
+            * fixed for macros.
+         R"cpp(#define LOOP(x) while (1) {a = x;}
+               void f(int a) {
+                 auto dummy = 3; if(1)
+                  LOOP(5 + dummy)
+               })cpp"},*/
+           R"cpp(#define LOOP(x) while (1) {a = x;}
+                 void f(int a) {
+                   auto dummy = LOOP(5 + 3); if(1)
+                    dummy
+                 })cpp"},
+          {R"cpp(#define LOOP(x) do {x;} while(1);
+                 void f(int a) {
+                   if(1)
+                    LOOP(5 + [[3]])
+                 })cpp",
+           R"cpp(#define LOOP(x) do {x;} while(1);
                  void f(int a) {
                    auto dummy = 3; if(1)
                     LOOP(5 + dummy)
                  })cpp"},
-          // label and attribute testing
+          // attribute testing
           {R"cpp(void f(int a) {
-                    label: [ [gsl::suppress("type")] ] for (;;) a = ^1;
+                    [ [gsl::suppress("type")] ] for (;;) a = [[1]];
                  })cpp",
            R"cpp(void f(int a) {
-                    auto dummy = 1; label: [ [gsl::suppress("type")] ] for (;;) a = dummy;
+                    auto dummy = 1; [ [gsl::suppress("type")] ] for (;;) a = dummy;
                  })cpp"},
-          // FIXME: Doesn't work because bug in selection tree
-          /*{R"cpp(#define PLUS(x) x++
-                 void f(int a) {
-                   PLUS(^a);
+          // MemberExpr
+          {R"cpp(class T {
+                   T f() {
+                     return [[T().f()]].f();
+                   }
+                 };)cpp",
+           R"cpp(class T {
+                   T f() {
+                     auto dummy = T().f(); return dummy.f();
+                   }
+                 };)cpp"},
+          // Function DeclRefExpr
+          {R"cpp(int f() {
+                   return [[f]]();
                  })cpp",
-           R"cpp(#define PLUS(x) x++
-                 void f(int a) {
-                   auto dummy = a; PLUS(dummy);
-                 })cpp"},*/
-          // FIXME: Doesn't work correctly for \[\[clang::uninitialized\]\] int b
-          // = 1; since the attr is inside the DeclStmt and the bounds of
-          // DeclStmt don't cover the attribute
+           R"cpp(int f() {
+                   auto dummy = f(); return dummy;
+                 })cpp"},
+          
+          // FIXME: Wrong result for \[\[clang::uninitialized\]\] int b = [[1]];
+          // since the attr is inside the DeclStmt and the bounds of
+          // DeclStmt don't cover the attribute.
       };
   for (const auto &IO : InputOutputs) {
     checkTransform(ID, IO.first, IO.second);
@@ -661,6 +715,20 @@ TEST(TweakTest, ExpandAutoType) {
   )cpp";
   Output = R"cpp(
     const char * x = "test";
+  )cpp";
+  checkTransform(ID, Input, Output);
+
+  Input = R"cpp(
+  namespace {
+  class Foo {};
+  }
+  au^to f = Foo();
+  )cpp";
+  Output = R"cpp(
+  namespace {
+  class Foo {};
+  }
+  Foo f = Foo();
   )cpp";
   checkTransform(ID, Input, Output);
 }

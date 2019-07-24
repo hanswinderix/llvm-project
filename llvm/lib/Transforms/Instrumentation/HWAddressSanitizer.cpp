@@ -277,12 +277,22 @@ public:
 
   StringRef getPassName() const override { return "HWAddressSanitizer"; }
 
+  bool doInitialization(Module &M) override {
+    HWASan = llvm::make_unique<HWAddressSanitizer>(M, CompileKernel, Recover);
+    return true;
+  }
+
   bool runOnFunction(Function &F) override {
-    HWAddressSanitizer HWASan(*F.getParent(), CompileKernel, Recover);
-    return HWASan.sanitizeFunction(F);
+    return HWASan->sanitizeFunction(F);
+  }
+
+  bool doFinalization(Module &M) override {
+    HWASan.reset();
+    return false;
   }
 
 private:
+  std::unique_ptr<HWAddressSanitizer> HWASan;
   bool CompileKernel;
   bool Recover;
 };
@@ -309,10 +319,13 @@ FunctionPass *llvm::createHWAddressSanitizerLegacyPassPass(bool CompileKernel,
 HWAddressSanitizerPass::HWAddressSanitizerPass(bool CompileKernel, bool Recover)
     : CompileKernel(CompileKernel), Recover(Recover) {}
 
-PreservedAnalyses HWAddressSanitizerPass::run(Function &F,
-                                              FunctionAnalysisManager &FAM) {
-  HWAddressSanitizer HWASan(*F.getParent(), CompileKernel, Recover);
-  if (HWASan.sanitizeFunction(F))
+PreservedAnalyses HWAddressSanitizerPass::run(Module &M,
+                                              ModuleAnalysisManager &MAM) {
+  HWAddressSanitizer HWASan(M, CompileKernel, Recover);
+  bool Modified = false;
+  for (Function &F : M)
+    Modified |= HWASan.sanitizeFunction(F);
+  if (Modified)
     return PreservedAnalyses::none();
   return PreservedAnalyses::all();
 }
@@ -765,8 +778,9 @@ Value *HWAddressSanitizer::getStackBaseTag(IRBuilder<> &IRB) {
   // FIXME: use addressofreturnaddress (but implement it in aarch64 backend
   // first).
   Module *M = IRB.GetInsertBlock()->getParent()->getParent();
-  auto GetStackPointerFn =
-      Intrinsic::getDeclaration(M, Intrinsic::frameaddress);
+  auto GetStackPointerFn = Intrinsic::getDeclaration(
+      M, Intrinsic::frameaddress,
+      IRB.getInt8PtrTy(M->getDataLayout().getAllocaAddrSpace()));
   Value *StackPointer = IRB.CreateCall(
       GetStackPointerFn, {Constant::getNullValue(IRB.getInt32Ty())});
 
@@ -899,8 +913,10 @@ void HWAddressSanitizer::emitPrologue(IRBuilder<> &IRB, bool WithFrameRecord) {
       PC = readRegister(IRB, "pc");
     else
       PC = IRB.CreatePtrToInt(F, IntptrTy);
-    auto GetStackPointerFn =
-        Intrinsic::getDeclaration(F->getParent(), Intrinsic::frameaddress);
+    Module *M = F->getParent();
+    auto GetStackPointerFn = Intrinsic::getDeclaration(
+        M, Intrinsic::frameaddress,
+        IRB.getInt8PtrTy(M->getDataLayout().getAllocaAddrSpace()));
     Value *SP = IRB.CreatePtrToInt(
         IRB.CreateCall(GetStackPointerFn,
                        {Constant::getNullValue(IRB.getInt32Ty())}),

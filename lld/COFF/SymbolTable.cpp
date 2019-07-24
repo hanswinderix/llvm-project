@@ -179,7 +179,7 @@ void SymbolTable::loadMinGWAutomaticImports() {
     log("Loading lazy " + l->getName() + " from " + l->file->getName() +
         " for automatic import");
     l->pendingArchiveLoad = true;
-    l->file->addMember(&l->sym);
+    l->file->addMember(l->sym);
   }
 }
 
@@ -192,7 +192,7 @@ bool SymbolTable::handleMinGWAutomaticImport(Symbol *sym, StringRef name) {
 
   // Replace the reference directly to a variable with a reference
   // to the import address table instead. This obviously isn't right,
-  // but we mark the symbol as IsRuntimePseudoReloc, and a later pass
+  // but we mark the symbol as isRuntimePseudoReloc, and a later pass
   // will add runtime pseudo relocations for every relocation against
   // this Symbol. The runtime pseudo relocation framework expects the
   // reference itself to point at the IAT entry.
@@ -363,13 +363,13 @@ Symbol *SymbolTable::addUndefined(StringRef name, InputFile *f,
   if (auto *l = dyn_cast<Lazy>(s)) {
     if (!s->pendingArchiveLoad) {
       s->pendingArchiveLoad = true;
-      l->file->addMember(&l->sym);
+      l->file->addMember(l->sym);
     }
   }
   return s;
 }
 
-void SymbolTable::addLazy(ArchiveFile *f, const Archive::Symbol sym) {
+void SymbolTable::addLazy(ArchiveFile *f, const Archive::Symbol &sym) {
   StringRef name = sym.getName();
   Symbol *s;
   bool wasInserted;
@@ -382,7 +382,7 @@ void SymbolTable::addLazy(ArchiveFile *f, const Archive::Symbol sym) {
   if (!u || u->weakAlias || s->pendingArchiveLoad)
     return;
   s->pendingArchiveLoad = true;
-  f->addMember(&sym);
+  f->addMember(sym);
 }
 
 void SymbolTable::reportDuplicate(Symbol *existing, InputFile *newFile) {

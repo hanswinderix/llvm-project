@@ -83,7 +83,7 @@ public:
   Symbol *addAbsolute(StringRef n, uint64_t va);
 
   Symbol *addUndefined(StringRef name, InputFile *f, bool isWeakAlias);
-  void addLazy(ArchiveFile *f, const Archive::Symbol sym);
+  void addLazy(ArchiveFile *f, const Archive::Symbol &sym);
   Symbol *addAbsolute(StringRef n, COFFSymbolRef s);
   Symbol *addRegular(InputFile *f, StringRef n,
                      const llvm::object::coff_symbol_generic *s = nullptr,
@@ -112,7 +112,7 @@ public:
 private:
   /// Inserts symbol if not already present.
   std::pair<Symbol *, bool> insert(StringRef name);
-  /// Same as insert(Name), but also sets IsUsedInRegularObj.
+  /// Same as insert(Name), but also sets isUsedInRegularObj.
   std::pair<Symbol *, bool> insert(StringRef name, InputFile *f);
 
   std::vector<Symbol *> getSymsWithPrefix(StringRef prefix);

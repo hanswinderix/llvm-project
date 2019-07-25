@@ -265,9 +265,17 @@ def ARMvshruImm  : SDNode<"ARMISD::VSHRuIMM", SDTARMVSHIMM>;
 def ARMvshls     : SDNode<"ARMISD::VSHLs", SDTARMVSH>;
 def ARMvshlu     : SDNode<"ARMISD::VSHLu", SDTARMVSH>;
 
+def SDTARMVCMP    : SDTypeProfile<1, 3, [SDTCisInt<0>, SDTCisSameAs<1, 2>,
+                                         SDTCisInt<3>]>;
+def SDTARMVCMPZ   : SDTypeProfile<1, 2, [SDTCisInt<2>]>;
+
+def ARMvcmp      : SDNode<"ARMISD::VCMP", SDTARMVCMP>;
+def ARMvcmpz     : SDNode<"ARMISD::VCMPZ", SDTARMVCMPZ>;
+
 def ARMWLS      : SDNode<"ARMISD::WLS", SDT_ARMLoLoop, [SDNPHasChain]>;
 def ARMLE       : SDNode<"ARMISD::LE", SDT_ARMLoLoop, [SDNPHasChain]>;
 def ARMLoopDec  : SDNode<"ARMISD::LOOP_DEC", SDTIntBinOp, [SDNPHasChain]>;
+
 //===----------------------------------------------------------------------===//
 // ARM Flag Definitions.
 

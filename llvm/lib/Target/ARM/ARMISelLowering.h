@@ -129,16 +129,10 @@ class VectorType;
       LOOP_DEC,     // Really a part of LE, performs the sub
       LE,           // Low-overhead loops, Loop End
 
-      VCEQ,         // Vector compare equal.
-      VCEQZ,        // Vector compare equal to zero.
-      VCGE,         // Vector compare greater than or equal.
-      VCGEZ,        // Vector compare greater than or equal to zero.
-      VCLEZ,        // Vector compare less than or equal to zero.
-      VCGEU,        // Vector compare unsigned greater than or equal.
-      VCGT,         // Vector compare greater than.
-      VCGTZ,        // Vector compare greater than zero.
-      VCLTZ,        // Vector compare less than zero.
-      VCGTU,        // Vector compare unsigned greater than.
+      PREDICATE_CAST, // Predicate cast for MVE i1 types
+
+      VCMP,         // Vector compare.
+      VCMPZ,        // Vector compare to zero.
       VTST,         // Vector test bits.
 
       // Vector shift by vector

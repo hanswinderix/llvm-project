@@ -220,6 +220,14 @@ BitVector SIRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
     reserveRegisterTuples(Reserved, Reg);
   }
 
+  // Reserve all the rest AGPRs if there are no instructions to use it.
+  if (!ST.hasMAIInsts()) {
+    for (unsigned i = 0; i < MaxNumVGPRs; ++i) {
+      unsigned Reg = AMDGPU::AGPR_32RegClass.getRegister(i);
+      reserveRegisterTuples(Reserved, Reg);
+    }
+  }
+
   const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
 
   unsigned ScratchWaveOffsetReg = MFI->getScratchWaveOffsetReg();
@@ -1353,7 +1361,7 @@ StringRef SIRegisterInfo::getRegAsmName(unsigned Reg) const {
 // FIXME: This is very slow. It might be worth creating a map from physreg to
 // register class.
 const TargetRegisterClass *SIRegisterInfo::getPhysRegClass(unsigned Reg) const {
-  assert(!TargetRegisterInfo::isVirtualRegister(Reg));
+  assert(!Register::isVirtualRegister(Reg));
 
   static const TargetRegisterClass *const BaseClasses[] = {
     &AMDGPU::VGPR_32RegClass,
@@ -1788,7 +1796,7 @@ ArrayRef<int16_t> SIRegisterInfo::getRegSplitParts(const TargetRegisterClass *RC
 const TargetRegisterClass*
 SIRegisterInfo::getRegClassForReg(const MachineRegisterInfo &MRI,
                                   unsigned Reg) const {
-  if (TargetRegisterInfo::isVirtualRegister(Reg))
+  if (Register::isVirtualRegister(Reg))
     return  MRI.getRegClass(Reg);
 
   return getPhysRegClass(Reg);
@@ -1960,7 +1968,7 @@ MachineInstr *SIRegisterInfo::findReachingDef(unsigned Reg, unsigned SubReg,
   SlotIndex UseIdx = LIS->getInstructionIndex(Use);
   SlotIndex DefIdx;
 
-  if (TargetRegisterInfo::isVirtualRegister(Reg)) {
+  if (Register::isVirtualRegister(Reg)) {
     if (!LIS->hasInterval(Reg))
       return nullptr;
     LiveInterval &LI = LIS->getInterval(Reg);

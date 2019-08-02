@@ -598,6 +598,10 @@ def ext_implicit_lib_function_decl : ExtWarn<
 def note_include_header_or_declare : Note<
   "include the header <%0> or explicitly provide a declaration for '%1'">;
 def note_previous_builtin_declaration : Note<"%0 is a builtin with type %1">;
+def warn_implicit_decl_no_jmp_buf
+    : Warning<"declaration of built-in function '%0' requires the declaration"
+    " of the 'jmp_buf' type, commonly provided in the header <setjmp.h>.">,
+      InGroup<DiagGroup<"incomplete-setjmp-declaration">>;
 def warn_implicit_decl_requires_sysheader : Warning<
   "declaration of built-in function '%1' requires inclusion of the header <%0>">,
   InGroup<BuiltinRequiresHeader>;
@@ -3262,6 +3266,14 @@ def warn_impcast_float_integer : Warning<
   "implicit conversion turns floating-point number into integer: %0 to %1">,
   InGroup<FloatConversion>, DefaultIgnore;
 
+// Implicit int -> float conversion precision loss warnings.
+def warn_impcast_integer_float_precision : Warning<
+  "implicit conversion from %0 to %1 may lose precision">,
+  InGroup<ImplicitIntFloatConversion>, DefaultIgnore;
+def warn_impcast_integer_float_precision_constant : Warning<
+  "implicit conversion from %2 to %3 changes value from %0 to %1">,
+  InGroup<ImplicitIntFloatConversion>;
+
 def warn_impcast_float_to_integer : Warning<
   "implicit conversion from %0 to %1 changes value from %2 to %3">,
   InGroup<FloatOverflowConversion>, DefaultIgnore;
@@ -5630,10 +5642,10 @@ def note_logical_instead_of_bitwise_remove_constant : Note<
   "remove constant to silence this warning">;
 
 def warn_bitwise_op_in_bitwise_op : Warning<
-  "'%0' within '%1'">, InGroup<BitwiseOpParentheses>;
+  "'%0' within '%1'">, InGroup<BitwiseOpParentheses>, DefaultIgnore;
 
 def warn_logical_and_in_logical_or : Warning<
-  "'&&' within '||'">, InGroup<LogicalOpParentheses>;
+  "'&&' within '||'">, InGroup<LogicalOpParentheses>, DefaultIgnore;
 
 def warn_overloaded_shift_in_comparison :Warning<
   "overloaded operator %select{>>|<<}0 has higher precedence than "

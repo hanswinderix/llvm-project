@@ -8191,6 +8191,11 @@ public:
                              LocalInstantiationScope *StartingScope,
                              bool InstantiatingVarTemplate = false,
                              VarTemplateSpecializationDecl *PrevVTSD = nullptr);
+
+  VarDecl *getVarTemplateSpecialization(
+      VarTemplateDecl *VarTempl, const TemplateArgumentListInfo *TemplateArgs,
+      const DeclarationNameInfo &MemberNameInfo, SourceLocation TemplateKWLoc);
+
   void InstantiateVariableInitializer(
       VarDecl *Var, VarDecl *OldVar,
       const MultiLevelTemplateArgumentList &TemplateArgs);
@@ -11131,6 +11136,7 @@ public:
   // Emitting members of dllexported classes is delayed until the class
   // (including field initializers) is fully parsed.
   SmallVector<CXXRecordDecl*, 4> DelayedDllExportClasses;
+  SmallVector<CXXMethodDecl*, 4> DelayedDllExportMemberFunctions;
 
 private:
   class SavePendingParsedClassStateRAII {

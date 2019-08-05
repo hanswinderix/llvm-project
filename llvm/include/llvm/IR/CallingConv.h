@@ -222,6 +222,9 @@ namespace CallingConv {
     // Calling convention between AArch64 Advanced SIMD functions
     AArch64_VectorCall = 97,
 
+    /// Calling convention between AArch64 SVE functions
+    AArch64_SVE_VectorCall = 98,
+
     /// Calling convention used for Sancus entry functions.
     SANCUS_ENTRY = 1001,
     SANCUS_DISPATCH = 1002,

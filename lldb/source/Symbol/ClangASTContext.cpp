@@ -8330,24 +8330,6 @@ clang::CXXMethodDecl *ClangASTContext::AddMethodToCXXRecordType(
   VerifyDecl(cxx_method_decl);
 #endif
 
-  //    printf ("decl->isPolymorphic()             = %i\n",
-  //    cxx_record_decl->isPolymorphic());
-  //    printf ("decl->isAggregate()               = %i\n",
-  //    cxx_record_decl->isAggregate());
-  //    printf ("decl->isPOD()                     = %i\n",
-  //    cxx_record_decl->isPOD());
-  //    printf ("decl->isEmpty()                   = %i\n",
-  //    cxx_record_decl->isEmpty());
-  //    printf ("decl->isAbstract()                = %i\n",
-  //    cxx_record_decl->isAbstract());
-  //    printf ("decl->hasTrivialConstructor()     = %i\n",
-  //    cxx_record_decl->hasTrivialConstructor());
-  //    printf ("decl->hasTrivialCopyConstructor() = %i\n",
-  //    cxx_record_decl->hasTrivialCopyConstructor());
-  //    printf ("decl->hasTrivialCopyAssignment()  = %i\n",
-  //    cxx_record_decl->hasTrivialCopyAssignment());
-  //    printf ("decl->hasTrivialDestructor()      = %i\n",
-  //    cxx_record_decl->hasTrivialDestructor());
   return cxx_method_decl;
 }
 
@@ -9065,39 +9047,6 @@ ClangASTContext::CreateMemberPointerType(const CompilerType &type,
                             ClangUtil::GetQualType(type).getTypePtr()));
   }
   return CompilerType();
-}
-
-size_t
-ClangASTContext::ConvertStringToFloatValue(lldb::opaque_compiler_type_t type,
-                                           const char *s, uint8_t *dst,
-                                           size_t dst_size) {
-  if (type) {
-    clang::QualType qual_type(GetCanonicalQualType(type));
-    uint32_t count = 0;
-    bool is_complex = false;
-    if (IsFloatingPointType(type, count, is_complex)) {
-      // TODO: handle complex and vector types
-      if (count != 1)
-        return false;
-
-      llvm::StringRef s_sref(s);
-      llvm::APFloat ap_float(getASTContext()->getFloatTypeSemantics(qual_type),
-                             s_sref);
-
-      const uint64_t bit_size = getASTContext()->getTypeSize(qual_type);
-      const uint64_t byte_size = bit_size / 8;
-      if (dst_size >= byte_size) {
-        Scalar scalar = ap_float.bitcastToAPInt().zextOrTrunc(
-            llvm::NextPowerOf2(byte_size) * 8);
-        lldb_private::Status get_data_error;
-        if (scalar.GetAsMemoryData(dst, byte_size,
-                                   lldb_private::endian::InlHostByteOrder(),
-                                   get_data_error))
-          return byte_size;
-      }
-    }
-  }
-  return 0;
 }
 
 // Dumping types

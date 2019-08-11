@@ -36,6 +36,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Mutex.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/Signals.h"
@@ -74,6 +75,18 @@ static llvm::cl::list<std::string> UserStylesheets(
     "stylesheets", llvm::cl::CommaSeparated,
     llvm::cl::desc("CSS stylesheets to extend the default styles."),
     llvm::cl::cat(ClangDocCategory));
+
+static llvm::cl::opt<std::string> SourceRoot("source-root", llvm::cl::desc(R"(
+Directory where processed files are stored.
+Links to definition locations will only be
+generated if the file is in this dir.)"),
+                                             llvm::cl::cat(ClangDocCategory));
+
+static llvm::cl::opt<std::string>
+    RepositoryUrl("repository", llvm::cl::desc(R"(
+URL of repository that hosts code.
+Used for links to definition locations.)"),
+                  llvm::cl::cat(ClangDocCategory));
 
 enum OutputFormatTy {
   md,
@@ -141,7 +154,7 @@ bool CreateDirectory(const Twine &DirName, bool ClearDirectory = false) {
 // <root>/A/B/C.<ext>
 //
 // namespace A {
-// namesapce B {
+// namespace B {
 //
 // class C {};
 //
@@ -190,10 +203,18 @@ int main(int argc, const char **argv) {
                                   tooling::ArgumentInsertPosition::END),
         ArgAdjuster);
 
+  llvm::SmallString<128> SourceRootDir;
+  // Check if the --source-root flag has a value
+  if (SourceRoot.empty())
+    // If it's empty the current path is used as the default
+    llvm::sys::fs::current_path(SourceRootDir);
+
   clang::doc::ClangDocContext CDCtx = {
       Exec->get()->getExecutionContext(),
       PublicOnly,
       OutDirectory,
+      SourceRootDir.str(),
+      RepositoryUrl,
       {UserStylesheets.begin(), UserStylesheets.end()},
       {"index.js", "index_json.js"}};
 
@@ -246,6 +267,7 @@ int main(int argc, const char **argv) {
   llvm::outs() << "Reducing " << USRToBitcode.size() << " infos...\n";
   std::atomic<bool> Error;
   Error = false;
+  llvm::sys::Mutex IndexMutex;
   // ExecutorConcurrency is a flag exposed by AllTUsExecution.h
   llvm::ThreadPool Pool(ExecutorConcurrency == 0 ? llvm::hardware_concurrency()
                                                  : ExecutorConcurrency);
@@ -289,8 +311,10 @@ int main(int argc, const char **argv) {
         return;
       }
 
+      IndexMutex.lock();
       // Add a reference to this Info in the Index
       clang::doc::Generator::addInfoToIndex(CDCtx.Idx, I);
+      IndexMutex.unlock();
 
       if (auto Err = G->get()->generateDocForInfo(I, InfoOS, CDCtx))
         llvm::errs() << toString(std::move(Err)) << "\n";

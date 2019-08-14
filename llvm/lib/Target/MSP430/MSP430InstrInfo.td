@@ -229,10 +229,13 @@ let isCodeGenOnly = 1, usesCustomInserter = 1 in {
 
 let isCodeGenOnly = 1 in {
 def eenter : Pseudo<(outs), (ins),
+                    "dint \n\t"
                     // TODO: Figure out why the following statement is necessary
                     "mov #sllvm_lr1, &sllvm_lr1_addr \n\t"
                     // Check if this is a return from an interrupt
                     "bit #1, &sllvm_lr1 \n\t"
+                    // Safe to handle IRQs now
+                    "eint \n\t"
                     "jz 1f \n\t"
                     "br #sllvm_reti \n"
                     "1:\n\t"

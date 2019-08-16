@@ -632,7 +632,7 @@ public:
 
   static std::unique_ptr<RISCVOperand> createToken(StringRef Str, SMLoc S,
                                                    bool IsRV64) {
-    auto Op = make_unique<RISCVOperand>(Token);
+    auto Op = std::make_unique<RISCVOperand>(Token);
     Op->Tok = Str;
     Op->StartLoc = S;
     Op->EndLoc = S;
@@ -642,7 +642,7 @@ public:
 
   static std::unique_ptr<RISCVOperand> createReg(unsigned RegNo, SMLoc S,
                                                  SMLoc E, bool IsRV64) {
-    auto Op = make_unique<RISCVOperand>(Register);
+    auto Op = std::make_unique<RISCVOperand>(Register);
     Op->Reg.RegNum = RegNo;
     Op->StartLoc = S;
     Op->EndLoc = E;
@@ -652,7 +652,7 @@ public:
 
   static std::unique_ptr<RISCVOperand> createImm(const MCExpr *Val, SMLoc S,
                                                  SMLoc E, bool IsRV64) {
-    auto Op = make_unique<RISCVOperand>(Immediate);
+    auto Op = std::make_unique<RISCVOperand>(Immediate);
     Op->Imm.Val = Val;
     Op->StartLoc = S;
     Op->EndLoc = E;
@@ -662,7 +662,7 @@ public:
 
   static std::unique_ptr<RISCVOperand>
   createSysReg(StringRef Str, SMLoc S, unsigned Encoding, bool IsRV64) {
-    auto Op = make_unique<RISCVOperand>(SystemRegister);
+    auto Op = std::make_unique<RISCVOperand>(SystemRegister);
     Op->SysReg.Data = Str.data();
     Op->SysReg.Length = Str.size();
     Op->SysReg.Encoding = Encoding;
@@ -1218,6 +1218,24 @@ OperandMatchResultTy RISCVAsmParser::parseBareSymbol(OperandVector &Operands) {
     Res = V;
   } else
     Res = MCSymbolRefExpr::create(Sym, MCSymbolRefExpr::VK_None, getContext());
+
+  MCBinaryExpr::Opcode Opcode;
+  switch (getLexer().getKind()) {
+  default:
+    Operands.push_back(RISCVOperand::createImm(Res, S, E, isRV64()));
+    return MatchOperand_Success;
+  case AsmToken::Plus:
+    Opcode = MCBinaryExpr::Add;
+    break;
+  case AsmToken::Minus:
+    Opcode = MCBinaryExpr::Sub;
+    break;
+  }
+
+  const MCExpr *Expr;
+  if (getParser().parseExpression(Expr))
+    return MatchOperand_ParseFail;
+  Res = MCBinaryExpr::create(Opcode, Res, Expr, getContext());
   Operands.push_back(RISCVOperand::createImm(Res, S, E, isRV64()));
   return MatchOperand_Success;
 }

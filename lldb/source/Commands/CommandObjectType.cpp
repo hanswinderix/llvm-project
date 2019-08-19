@@ -195,9 +195,7 @@ public:
 
                 Status error;
 
-                for (size_t i = 0; i < options->m_target_types.GetSize(); i++) {
-                  const char *type_name =
-                      options->m_target_types.GetStringAtIndex(i);
+                for (const std::string &type_name : options->m_target_types) {
                   CommandObjectTypeSummaryAdd::AddSummary(
                       ConstString(type_name), script_format,
                       (options->m_regex
@@ -437,13 +435,10 @@ protected:
 
                 Status error;
 
-                for (size_t i = 0; i < options->m_target_types.GetSize(); i++) {
-                  const char *type_name =
-                      options->m_target_types.GetStringAtIndex(i);
-                  ConstString const_type_name(type_name);
-                  if (const_type_name) {
+                for (const std::string &type_name : options->m_target_types) {
+                  if (!type_name.empty()) {
                     if (!CommandObjectTypeSynthAdd::AddSynth(
-                            const_type_name, synth_provider,
+                            ConstString(type_name), synth_provider,
                             options->m_regex
                                 ? CommandObjectTypeSynthAdd::eRegexSynth
                                 : CommandObjectTypeSynthAdd::eRegularSynth,

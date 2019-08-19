@@ -2750,8 +2750,11 @@ void MachineBlockPlacement::optimizeBranches() {
             Pred->ReplaceUsesOfBlockWith(TBB, ChainBB);
           }
 
-          for (MachineBasicBlock *Succ : TBB->successors())
+          while (!TBB->succ_empty()) {
+            MachineBasicBlock *Succ = *(TBB->succ_end() - 1);
             ChainBB->addSuccessor(Succ, MBPI->getEdgeProbability(TBB, Succ));
+            TBB->removeSuccessor(Succ);
+          }
 
           // Move all the instructions of TBB to ChainBB.
           ChainBB->splice(ChainBB->end(), TBB, TBB->begin(), TBB->end());

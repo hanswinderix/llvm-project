@@ -1879,8 +1879,9 @@ MSP430NemesisDefenderPass::IsPartOfSensitiveRegion(const MachineInstr *MI) {
 //  to stack slots and global variables.
 //
 // During taint analysis, it is also determined whether the CFG needs to be
-// canonicalized (i.e. transformed to a CFG with a single exit point). This
-// analysis cannot be done earlier, because there is no taint info yet.
+// canonicalized, i.e. transformed to a CFG with a single exit point (via calls
+// to IsPartOfSensitiveRegion()). This analysis could not be done earlier,
+// because there was no taint info yet.
 //
 // !TODO: Desperately needs optimization
 //         - Implement this as a worklist algo (needs a def-use chain)

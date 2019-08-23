@@ -1915,7 +1915,7 @@ void MSP430NemesisDefenderPass::PerformTaintAnalysis() {
           }
 
           // Mark every conditional branch that is part of a sensitive region
-          // senstive in turn.
+          // senstive in turn. (except for loop latches, see Taint())
           if (MI.isConditionalBranch()) {
             if (IsPartOfSensitiveRegion(&MI)) {
               Taint(&MI);

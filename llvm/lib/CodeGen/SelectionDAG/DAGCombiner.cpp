@@ -4364,6 +4364,18 @@ SDValue DAGCombiner::visitUMUL_LOHI(SDNode *N) {
   EVT VT = N->getValueType(0);
   SDLoc DL(N);
 
+  // (umul_lohi N0, 0) -> (0, 0)
+  if (isNullConstant(N->getOperand(1))) {
+    SDValue Zero = DAG.getConstant(0, DL, VT);
+    return CombineTo(N, Zero, Zero);
+  }
+
+  // (umul_lohi N0, 1) -> (N0, 0)
+  if (isOneConstant(N->getOperand(1))) {
+    SDValue Zero = DAG.getConstant(0, DL, VT);
+    return CombineTo(N, N->getOperand(0), Zero);
+  }
+
   // If the type is twice as wide is legal, transform the mulhu to a wider
   // multiply plus a shift.
   if (VT.isSimple() && !VT.isVector()) {
@@ -19522,6 +19534,37 @@ SDValue DAGCombiner::SimplifyVBinOp(SDNode *N) {
           DAG.getNode(Opcode, DL, VT, DAG.getUNDEF(VT), DAG.getUNDEF(VT));
       SDValue NarrowBO = DAG.getNode(Opcode, DL, NarrowVT, X, Y);
       return DAG.getNode(ISD::INSERT_SUBVECTOR, DL, VT, VecC, NarrowBO, Z);
+    }
+  }
+
+  // Make sure all but the first op are undef.
+  auto ConcatWithUndef = [](SDValue Concat) {
+    return Concat.getOpcode() == ISD::CONCAT_VECTORS &&
+           std::all_of(std::next(Concat->op_begin()), Concat->op_end(),
+                       [](const SDValue &Op) {
+                         return Op.isUndef();
+                       });
+  };
+
+  // The following pattern is likely to emerge with vector reduction ops. Moving
+  // the binary operation ahead of the concat may allow using a narrower vector
+  // instruction that has better performance than the wide version of the op:
+  // VBinOp (concat X, undef), (concat Y, undef) --> concat (VBinOp X, Y), VecC
+  if (ConcatWithUndef(LHS) && ConcatWithUndef(RHS) &&
+      (LHS.hasOneUse() || RHS.hasOneUse())) {
+    SDValue X = LHS.getOperand(0);
+    SDValue Y = RHS.getOperand(0);
+    EVT NarrowVT = X.getValueType();
+    if (NarrowVT == Y.getValueType() &&
+        TLI.isOperationLegalOrCustomOrPromote(Opcode, NarrowVT)) {
+      // (binop undef, undef) may not return undef, so compute that result.
+      SDLoc DL(N);
+      SDValue VecC =
+          DAG.getNode(Opcode, DL, NarrowVT, DAG.getUNDEF(NarrowVT),
+                      DAG.getUNDEF(NarrowVT));
+      SmallVector<SDValue, 4> Ops(LHS.getNumOperands(), VecC);
+      Ops[0] = DAG.getNode(Opcode, DL, NarrowVT, X, Y);
+      return DAG.getNode(ISD::CONCAT_VECTORS, DL, VT, Ops);
     }
   }
 

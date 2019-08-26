@@ -2099,6 +2099,9 @@ void MSP430NemesisDefenderPass::CompensateInstr(const MachineInstr &MI,
                                                 MachineBasicBlock::iterator I) {
   auto Latency = TII->getInstrLatency(nullptr, MI);
 
+  if (MI.isAnnotationLabel())
+    return;
+
   // TODO: This code is MSP430-specific. It must be target-independent and
   //        should probably be described in the target description files.
   // TODO: What about non-deterministic Sancus crypto instructions?
@@ -2154,6 +2157,12 @@ void MSP430NemesisDefenderPass::CompensateCall(const MachineInstr &Call,
 
       BuildMI(MBB, I, DL, TII->get(MSP430::CALLi)).addExternalSymbol(N->c_str());
       break;
+
+#if 0
+    // Sancus out calls
+    case MSP430::BRCALLr:
+      break;
+#endif
 
     case MSP430::CALLm:
     case MSP430::CALLn:
@@ -2918,12 +2927,19 @@ void MSP430NemesisDefenderPass::SecureCall(MachineInstr &Call) {
 
       break;
 
+#if 0
+    // Sancus out calls
+    case MSP430::BRCALLr:
+      break;
+#endif
+
     case MSP430::CALLm:
     case MSP430::CALLn:
     case MSP430::CALLp:
     case MSP430::CALLr:
     default:
       LLVM_DEBUG(dbgs() << "OPCODE=" << Call.getOpcode() << "\n");
+      LLVM_DEBUG(dbgs() << Call); 
       llvm_unreachable("Usupported call");
   }
 }
@@ -3137,7 +3153,11 @@ bool MSP430NemesisDefenderPass::runOnMachineFunction(MachineFunction &MF) {
   // TODO: assert(!MRI->isSSA());
 
   if (EmitCFG) {
+#if 0
+    MF.viewCFG(); // Dump unhardened CFG before any possible changes
+#else
     MF.viewCFGOnly(); // Dump unhardened CFG before any possible changes
+#endif
   }
 
   // Perform analysis
@@ -3154,7 +3174,11 @@ bool MSP430NemesisDefenderPass::runOnMachineFunction(MachineFunction &MF) {
   CanonicalizeCFG();
 
   if (EmitCFG) {
+#if 0
+    MF.viewCFG(); // Dump after canonicalization, before hardening
+#else
     MF.viewCFGOnly(); // Dump after canonicalization, before hardening
+#endif
   }
 
   // Analyses performed after canonicalization

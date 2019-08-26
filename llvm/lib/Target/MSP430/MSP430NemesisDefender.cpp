@@ -1957,12 +1957,16 @@ void MSP430NemesisDefenderPass::PerformTaintAnalysis() {
                 // Used by (un)conditional jumps
                 break;
 
+              case MachineOperand::MO_GlobalAddress    :
+                // Be conservative and mark as tainted
+                Taint(&MI);
+                break;
+
                 // TODO: Gradually support more operand types
-              case MachineOperand::MO_ConstantPoolIndex:
               case MachineOperand::MO_ExternalSymbol   :
+              case MachineOperand::MO_ConstantPoolIndex:
               case MachineOperand::MO_MCSymbol         :
               case MachineOperand::MO_FrameIndex       :
-              case MachineOperand::MO_GlobalAddress    :
               case MachineOperand::MO_BlockAddress     :
               case MachineOperand::MO_TargetIndex      :
               case MachineOperand::MO_JumpTableIndex   :
@@ -1973,10 +1977,8 @@ void MSP430NemesisDefenderPass::PerformTaintAnalysis() {
               case MachineOperand::MO_IntrinsicID      :
               case MachineOperand::MO_Predicate        :
               default:
-#if 0
                 LLVM_DEBUG(dbgs() << GetName(&MBB) << "\n");
                 MI.dump();
-#endif
                 llvm_unreachable("Unknown operand type");
             }
           }

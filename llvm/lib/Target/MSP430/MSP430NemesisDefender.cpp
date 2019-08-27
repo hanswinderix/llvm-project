@@ -1977,8 +1977,10 @@ void MSP430NemesisDefenderPass::PerformTaintAnalysis() {
               case MachineOperand::MO_IntrinsicID      :
               case MachineOperand::MO_Predicate        :
               default:
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
                 LLVM_DEBUG(dbgs() << GetName(&MBB) << "\n");
                 MI.dump();
+#endif
                 llvm_unreachable("Unknown operand type");
             }
           }

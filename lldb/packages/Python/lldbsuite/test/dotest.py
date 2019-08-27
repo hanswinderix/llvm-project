@@ -225,8 +225,12 @@ def parseOptionsAndInitTestdirs():
     platform_system = platform.system()
     platform_machine = platform.machine()
 
-    parser = dotest_args.create_parser()
-    args = dotest_args.parse_args(parser, sys.argv[1:])
+    try:
+        parser = dotest_args.create_parser()
+        args = dotest_args.parse_args(parser, sys.argv[1:])
+    except:
+        print(' '.join(sys.argv))
+        raise
 
     if args.unset_env_varnames:
         for env_var in args.unset_env_varnames:
@@ -362,9 +366,6 @@ def parseOptionsAndInitTestdirs():
         if any([x.startswith('-') for x in args.f]):
             usage(parser)
         configuration.filters.extend(args.f)
-
-    if args.l:
-        configuration.skip_long_running_test = False
 
     if args.framework:
         configuration.lldbFrameworkPath = args.framework
@@ -1139,10 +1140,6 @@ def run_suite():
 
     setupSysPath()
 
-    #
-    # If '-l' is specified, do not skip the long running tests.
-    if not configuration.skip_long_running_test:
-        os.environ["LLDB_SKIP_LONG_RUNNING_TEST"] = "NO"
 
     # For the time being, let's bracket the test runner within the
     # lldb.SBDebugger.Initialize()/Terminate() pair.

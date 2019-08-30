@@ -50,6 +50,10 @@ Non-comprehensive list of changes in this release
 
    Makes programs 10x faster by doing Special New Thing.
 
+* The Loop Idiom Recognition (``-loop-idiom``) pass has learned to recognize
+  ``bcmp`` pattern, and convert it into a call to ``bcmp`` (or ``memcmp``)
+  function.
+
 Changes to the LLVM IR
 ----------------------
 
@@ -97,6 +101,10 @@ Changes to the AVR Target
 -----------------------------
 
  During this release ...
+
+* Deprecated the mpx feature flag for the Intel MPX instructions. There were no
+  intrinsics for this feature. This change only this effects the results
+  returned by getHostCPUFeatures on CPUs that implement the MPX instructions.
 
 Changes to the WebAssembly Target
 ---------------------------------

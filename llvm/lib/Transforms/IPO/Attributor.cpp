@@ -428,16 +428,16 @@ void IRPosition::verify() {
     assert(KindOrArgNo >= 0 && "Expected argument or call site argument!");
     assert((isa<CallBase>(AnchorVal) || isa<Argument>(AnchorVal)) &&
            "Expected call base or argument for positive attribute index!");
-    if (auto *Arg = dyn_cast<Argument>(AnchorVal)) {
-      assert(Arg->getArgNo() == unsigned(getArgNo()) &&
+    if (isa<Argument>(AnchorVal)) {
+      assert(cast<Argument>(AnchorVal)->getArgNo() == unsigned(getArgNo()) &&
              "Argument number mismatch!");
-      assert(Arg == &getAssociatedValue() && "Associated value mismatch!");
+      assert(cast<Argument>(AnchorVal) == &getAssociatedValue() &&
+             "Associated value mismatch!");
     } else {
-      auto &CB = cast<CallBase>(*AnchorVal);
-      (void)CB;
-      assert(CB.arg_size() > unsigned(getArgNo()) &&
+      assert(cast<CallBase>(*AnchorVal).arg_size() > unsigned(getArgNo()) &&
              "Call site argument number mismatch!");
-      assert(CB.getArgOperand(getArgNo()) == &getAssociatedValue() &&
+      assert(cast<CallBase>(*AnchorVal).getArgOperand(getArgNo()) ==
+                 &getAssociatedValue() &&
              "Associated value mismatch!");
     }
     break;
@@ -1592,8 +1592,10 @@ struct AANoAliasCallSiteArgument final : AANoAliasImpl {
 
   /// See AbstractAttribute::initialize(...).
   void initialize(Attributor &A) override {
-    // TODO: It isn't sound to initialize as the same with `AANoAliasImpl`
-    // because `noalias` may not be valid in the current position.
+    // See callsite argument attribute and callee argument attribute.
+    ImmutableCallSite ICS(&getAnchorValue());
+    if (ICS.paramHasAttr(getArgNo(), Attribute::NoAlias))
+      indicateOptimisticFixpoint();
   }
 
   /// See AbstractAttribute::updateImpl(...).

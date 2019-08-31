@@ -558,6 +558,17 @@ namespace llvm {
 
 } // end namespace llvm
 
+std::string MachineFunction::writeCFG() const
+{
+#ifndef NDEBUG
+  return WriteGraph(this, "mf" + getName());
+#else
+  errs() << "MachineFunction::writeCFG is only available in debug builds on "
+         << "systems with Graphviz or gv!\n";
+  return "";
+#endif // NDEBUG
+}
+
 void MachineFunction::viewCFG() const
 {
 #ifndef NDEBUG

@@ -1,4 +1,5 @@
 #include <memory>
+#include <fstream>
 
 #include <llvm/CodeGen/MachineFrameInfo.h>
 #include "MSP430.h"
@@ -111,6 +112,10 @@ public:
       HasSecretDependentBranch(false),
       IsEntry(false), IsReturn(false) {}
   };
+
+  // Set to true when the sensitivity analysis detected at least one
+  // secret dependent branch
+  bool HasSecretDependentBranch = false;
 
   // Return type of ComputeSuccessors
   struct Successors {
@@ -274,6 +279,7 @@ private:
   std::vector<MachineBasicBlock *>
     AlignFingerprint(std::shared_ptr<Fingerprint> FP, std::vector<MachineBasicBlock *> MBBs);
 
+  void WriteCFG(std::string label);
   void DumpCFG();
   void DumpDebugInfo();
 };
@@ -1802,6 +1808,7 @@ void MSP430NemesisDefenderPass::Taint(MachineInstr * MI) {
     if (L == nullptr || (! L->isLoopLatch(MI->getParent()))) {
       auto BBI = GetInfo(*MI->getParent());
       BBI->HasSecretDependentBranch = true;
+      HasSecretDependentBranch = true;
     }
   }
 }
@@ -3002,6 +3009,18 @@ void MSP430NemesisDefenderPass::DumpDebugInfo() {
 }
 #endif
 
+void MSP430NemesisDefenderPass::WriteCFG(std::string label)
+{
+#if !defined(NDEBUG)
+  std::string Filename = MF->writeCFG();
+  assert(!Filename.empty());
+  std::ifstream Src(Filename, std::ios::binary);
+  std::ofstream Dst(
+      (MF->getName() + Twine("-", label) + ".dot").str(), std::ios::binary);
+  Dst << Src.rdbuf();
+#endif
+}
+
 void MSP430NemesisDefenderPass::DumpCFG() {
   // TODO: Compare with the CFG build by LLVM, not applying the
   //        transformations of this pass (graphs should be isomorphic)
@@ -3139,6 +3158,7 @@ bool MSP430NemesisDefenderPass::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG(dbgs() << "********** " << getPassName() << " : " << MF.getName()
                     << "**********\n");
 
+  HasSecretDependentBranch = false;
   bool Changed = false;
   const TargetSubtargetInfo &STI = MF.getSubtarget();
   this->MF = &MF;
@@ -3155,6 +3175,8 @@ bool MSP430NemesisDefenderPass::runOnMachineFunction(MachineFunction &MF) {
   MPDT = &getAnalysis<MachinePostDominatorTree>();
 
   // TODO: assert(!MRI->isSSA());
+
+  WriteCFG("before"); 
 
   if (EmitCFG) {
 #if 0
@@ -3198,6 +3220,9 @@ bool MSP430NemesisDefenderPass::runOnMachineFunction(MachineFunction &MF) {
   if (EmitCFG) {
     DumpCFG(); // Dump after hardening CFG
   }
+
+  if (HasSecretDependentBranch)
+    WriteCFG("after"); 
 
   return Changed;
 }

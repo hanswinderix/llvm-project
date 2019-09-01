@@ -3016,7 +3016,7 @@ void MSP430NemesisDefenderPass::WriteCFG(std::string label)
   assert(!Filename.empty());
   std::ifstream Src(Filename, std::ios::binary);
   std::ofstream Dst(
-      (MF->getName() + Twine("-", label) + ".dot").str(), std::ios::binary);
+      (MF->getName() + Twine(".", label) + ".dot").str(), std::ios::binary);
   Dst << Src.rdbuf();
 #endif
 }

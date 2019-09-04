@@ -1021,7 +1021,7 @@ static void BuildNOP1(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
   // MOV  #0, R3       ; 1 cycle , 1 word
-  BuildMI(MBB, I, DL, TII->get(MSP430::MOV16ri), MSP430::CG).addImm(0);
+  BuildMI(MBB, I, DL, TII->get(MSP430::MOV16rc), MSP430::CG).addImm(0);
 }
 
 static void BuildNOP2(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
@@ -2447,8 +2447,24 @@ MSP430NemesisDefenderPass::AlignFingerprint(
   //
   // Do this once for all MMBs.
   auto TLatch = CreateMachineBasicBlock("temp-latch", false);
-  BuildMI(TLatch, DL, TII->get(MSP430::ADD16ri), IVar).addReg(IVar).addImm(1);
-  BuildMI(TLatch, DL, TII->get(MSP430::CMP16ri), IVar).addImm(BBIH->TripCount);
+  BuildMI(TLatch, DL, TII->get(MSP430::ADD16rc), IVar).addReg(IVar).addImm(1);
+
+  // TODO: Move this logic (when is one of the constant generator regs used)
+  //    to MSP430InstrInfo
+  switch (BBIH->TripCount) {
+    case -1:
+    case  0:
+    case  1:
+    case  2:
+    case  4:
+    case  8:
+      BuildMI(TLatch, DL, TII->get(MSP430::CMP16rc), IVar).addImm(BBIH->TripCount);
+      break;
+    default:
+      BuildMI(TLatch, DL, TII->get(MSP430::CMP16ri), IVar).addImm(BBIH->TripCount);
+      break;
+  }
+
   // !!!LTODO: very ugly (find a better way to deal with this)
   bool AlreadyAligned = GetInfo(*LoopLatch)->IsAligned; // LTODO: UGLY
   if (!AlreadyAligned) {
@@ -2496,7 +2512,7 @@ MSP430NemesisDefenderPass::AlignFingerprint(
     auto T = LPH->getFirstTerminator();
     assert(T != nullptr); // Guaranteed by ComputeSuccessors
     BuildMI(*LPH, T, DL, TII->get(MSP430::PUSH16r), IVar);
-    BuildMI(*LPH, T, DL, TII->get(MSP430::MOV16ri), IVar).addImm(0);
+    BuildMI(*LPH, T, DL, TII->get(MSP430::MOV16rc), IVar).addImm(0);
     ReplaceSuccessor(LPH, Succ, LHeader);
 
     // 2) - Align the loop header with the loop fingerprint (modulo latch (!))
@@ -3096,7 +3112,7 @@ void MSP430NemesisDefenderPass::PrepareAnalysis() {
   int Reg   = MSP430::R12;
   // TODO: Stop after 4 iterations (for MSP430 at least)
   for (auto &Arg : MF->getFunction().args()) {
-    auto MI = BuildMI(MBB, MBBI, DL, TII->get(MSP430::MOV16ri), Reg++).addImm(0);
+    auto MI = BuildMI(MBB, MBBI, DL, TII->get(MSP430::MOV16rc), Reg++).addImm(0);
     if (IsSecret(Arg)) {
       TaintInfo.insert(MI);
     }

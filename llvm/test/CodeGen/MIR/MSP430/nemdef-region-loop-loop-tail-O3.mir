@@ -320,7 +320,7 @@ body: |
   ; CHECK-NEXT: 	pop	r10
   ; CHECK-NEXT: 	jmp	.LBB0_33
   ; CHECK-NEXT: .LBB0_31:
-  ; CHECK-NEXT: 	mov	2(r0), r0
+  ; CHECK-NEXT: 	mov	2(r0), r3
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jmp	.LBB0_4
   ; CHECK-NEXT: .LBB0_32:
@@ -434,7 +434,7 @@ body: |
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jmp	.LBB0_43
   ; CHECK-NEXT: .LBB0_50:
-  ; CHECK-NEXT: 	mov	2(r0), r0
+  ; CHECK-NEXT: 	mov	2(r0), r3
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jmp	.LBB0_3
   ; CHECK-NEXT: .LBB0_51:
@@ -490,7 +490,7 @@ body: |
   ; CHECK-NEXT: 	pop	r10
   ; CHECK-NEXT: 	jmp	.LBB0_64
   ; CHECK-NEXT: .LBB0_62:
-  ; CHECK-NEXT: 	mov	2(r0), r0
+  ; CHECK-NEXT: 	mov	2(r0), r3
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jmp	.LBB0_11
   ; CHECK-NEXT: .LBB0_63:
@@ -538,7 +538,7 @@ body: |
   ; CHECK-NEXT: .LBB0_72:
   ; CHECK-NEXT: 	jmp	.LBB0_66
   ; CHECK-NEXT: .LBB0_73:
-  ; CHECK-NEXT: 	mov	2(r0), r0
+  ; CHECK-NEXT: 	mov	2(r0), r3
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jmp	.LBB0_10
   ; CHECK-NEXT: .LBB0_74:
@@ -583,7 +583,7 @@ body: |
   ; CHECK-NEXT: 	pop	r10
   ; CHECK-NEXT: 	jmp	.LBB0_86
   ; CHECK-NEXT: .LBB0_84:
-  ; CHECK-NEXT: 	mov	2(r0), r0
+  ; CHECK-NEXT: 	mov	2(r0), r3
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jmp	.LBB0_15
   ; CHECK-NEXT: .LBB0_85:
@@ -624,7 +624,7 @@ body: |
   ; CHECK-NEXT: .LBB0_94:
   ; CHECK-NEXT: 	jmp	.LBB0_88
   ; CHECK-NEXT: .LBB0_95:
-  ; CHECK-NEXT: 	mov	2(r0), r0
+  ; CHECK-NEXT: 	mov	2(r0), r3
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jmp	.LBB0_14
   ; CHECK-NEXT: .LBB0_96:

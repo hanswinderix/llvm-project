@@ -43,8 +43,9 @@ autoconf/autom4te.cache
 /compile_commands.json
 # Visual Studio built-in CMake configuration
 /CMakeSettings.json
-# CLion project configuration
+# CLion project configuration and build folders
 /.idea
+cmake-build-debug/
 
 #==============================================================================#
 # Directories to ignore (do not add trailing '/'s, they skip symlinks).

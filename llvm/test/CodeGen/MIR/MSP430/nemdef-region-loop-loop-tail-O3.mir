@@ -162,7 +162,6 @@ body: |
   ; CHECK-NEXT: 	mov	r12, r8
   ; CHECK-NEXT: 	inc	r7
   ; CHECK-NEXT: 	cmp	#513, r7
-  ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jne	.LBB0_4
   ; CHECK-NEXT: 	jmp	.LBB0_32
   ; CHECK-NEXT: .LBB0_5:
@@ -182,11 +181,10 @@ body: |
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	inc	r9
   ; CHECK-NEXT: 	cmp	#1023, r9
-  ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jne	.LBB0_3
   ; CHECK-NEXT: 	jmp	.LBB0_51
   ; CHECK-NEXT: .LBB0_8:
-  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	cmp	#12, r10
   ; CHECK-NEXT: 	jne	.LBB0_21
   ; CHECK-NEXT: 	jmp	.LBB0_20
@@ -205,7 +203,6 @@ body: |
   ; CHECK-NEXT: 	mov	r12, r9
   ; CHECK-NEXT: 	inc	r8
   ; CHECK-NEXT: 	cmp	#513, r8
-  ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jne	.LBB0_11
   ; CHECK-NEXT: 	jmp	.LBB0_63
   ; CHECK-NEXT: .LBB0_12:
@@ -218,7 +215,6 @@ body: |
   ; CHECK-NEXT: 	call	#_nds_bar
   ; CHECK-NEXT: 	inc	r10
   ; CHECK-NEXT: 	cmp	#1023, r10
-  ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jne	.LBB0_10
   ; CHECK-NEXT: 	jmp	.LBB0_74
   ; CHECK-NEXT: .LBB0_13:
@@ -235,14 +231,12 @@ body: |
   ; CHECK-NEXT: 	call	#_nds_bar
   ; CHECK-NEXT: 	inc	r9
   ; CHECK-NEXT: 	cmp	#513, r9
-  ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jne	.LBB0_15
   ; CHECK-NEXT: 	jmp	.LBB0_85
   ; CHECK-NEXT: .LBB0_16:
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	inc	r10
   ; CHECK-NEXT: 	cmp	#1023, r10
-  ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jne	.LBB0_14
   ; CHECK-NEXT: 	jmp	.LBB0_96
   ; CHECK-NEXT: .LBB0_17:
@@ -258,42 +252,41 @@ body: |
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jmp	.LBB0_19
   ; CHECK-NEXT: .LBB0_19:
-  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jmp	.LBB0_22
   ; CHECK-NEXT: .LBB0_20:
   ; CHECK-NEXT: 	push	r10
-  ; CHECK-NEXT: 	mov	#0, r10
+  ; CHECK-NEXT: 	clr	r10
   ; CHECK-NEXT: 	jmp	.LBB0_24
   ; CHECK-NEXT: .LBB0_21:
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	push	r10
-  ; CHECK-NEXT: 	mov	#0, r10
+  ; CHECK-NEXT: 	clr	r10
   ; CHECK-NEXT: 	jmp	.LBB0_34
   ; CHECK-NEXT: .LBB0_22:
   ; CHECK-NEXT: 	push	r10
-  ; CHECK-NEXT: 	mov	#0, r10
+  ; CHECK-NEXT: 	clr	r10
   ; CHECK-NEXT: 	jmp	.LBB0_42
   ; CHECK-NEXT: .LBB0_23:
   ; CHECK-NEXT: 	mov	#42, r3
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	nop
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd___mspabi_mpyi
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	nop
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd_bar
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jmp	.LBB0_7
   ; CHECK-NEXT: .LBB0_24:
-  ; CHECK:      	mov	#42, r3
+  ; CHECK:      	nop
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	call	#_ndd_bar
-  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	jmp	.LBB0_27
   ; CHECK-NEXT: .LBB0_25:
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	add	#1, r10
+  ; CHECK-NEXT: 	inc	r10
   ; CHECK-NEXT: 	cmp	#1023, r10
   ; CHECK-NEXT: 	jl	.LBB0_24
   ; CHECK-NEXT: 	jmp	.LBB0_26
@@ -302,17 +295,16 @@ body: |
   ; CHECK-NEXT: 	jmp	.LBB0_9
   ; CHECK-NEXT: .LBB0_27:
   ; CHECK-NEXT: 	push	r10
-  ; CHECK-NEXT: 	mov	#0, r10
+  ; CHECK-NEXT: 	clr	r10
   ; CHECK-NEXT: 	jmp	.LBB0_28
   ; CHECK-NEXT: .LBB0_28:
   ; CHECK:      	jmp	.LBB0_29
   ; CHECK-NEXT: .LBB0_29:
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	inc	r10
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd_bar
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	add	#1, r10
+  ; CHECK-NEXT: 	nop
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	cmp	#513, r10
   ; CHECK-NEXT: 	jl	.LBB0_28
   ; CHECK-NEXT: 	jmp	.LBB0_30
@@ -321,7 +313,7 @@ body: |
   ; CHECK-NEXT: 	jmp	.LBB0_33
   ; CHECK-NEXT: .LBB0_31:
   ; CHECK-NEXT: 	mov	2(r0), r3
-  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	jmp	.LBB0_4
   ; CHECK-NEXT: .LBB0_32:
   ; CHECK-NEXT: 	mov	#42, r3
@@ -330,24 +322,23 @@ body: |
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	mov	#42, r3
-  ; CHECK-NEXT: 	mov	#42, r3
-  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	nop
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd___mspabi_mpyi
-  ; CHECK-NEXT: 	mov	#42, r3
-  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	nop
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd_bar
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jmp	.LBB0_25
   ; CHECK-NEXT: .LBB0_34:
-  ; CHECK:      	mov	#42, r3
+  ; CHECK:      	nop
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	call	#_ndd_bar
-  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	jmp	.LBB0_37
   ; CHECK-NEXT: .LBB0_35:
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	add	#1, r10
+  ; CHECK-NEXT: 	inc	r10
   ; CHECK-NEXT: 	cmp	#1023, r10
   ; CHECK-NEXT: 	jl	.LBB0_34
   ; CHECK-NEXT: 	jmp	.LBB0_36
@@ -356,17 +347,16 @@ body: |
   ; CHECK-NEXT: 	jmp	.LBB0_13
   ; CHECK-NEXT: .LBB0_37:
   ; CHECK-NEXT: 	push	r10
-  ; CHECK-NEXT: 	mov	#0, r10
+  ; CHECK-NEXT: 	clr	r10
   ; CHECK-NEXT: 	jmp	.LBB0_38
   ; CHECK-NEXT: .LBB0_38:
   ; CHECK:      	jmp	.LBB0_39
   ; CHECK-NEXT: .LBB0_39:
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	inc	r10
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd_bar
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	add	#1, r10
+  ; CHECK-NEXT: 	nop
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	cmp	#513, r10
   ; CHECK-NEXT: 	jl	.LBB0_38
   ; CHECK-NEXT: 	jmp	.LBB0_40
@@ -377,24 +367,23 @@ body: |
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	mov	#42, r3
-  ; CHECK-NEXT: 	mov	#42, r3
-  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	nop
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd___mspabi_mpyi
-  ; CHECK-NEXT: 	mov	#42, r3
-  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	nop
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd_bar
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jmp	.LBB0_35
   ; CHECK-NEXT: .LBB0_42:
-  ; CHECK:      	mov	#42, r3
+  ; CHECK:      	nop
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	call	#_ndd_bar
-  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	jmp	.LBB0_45
   ; CHECK-NEXT: .LBB0_43:
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	add	#1, r10
+  ; CHECK-NEXT: 	inc	r10
   ; CHECK-NEXT: 	cmp	#1023, r10
   ; CHECK-NEXT: 	jl	.LBB0_42
   ; CHECK-NEXT: 	jmp	.LBB0_44
@@ -403,17 +392,16 @@ body: |
   ; CHECK-NEXT: 	jmp	.LBB0_52
   ; CHECK-NEXT: .LBB0_45:
   ; CHECK-NEXT: 	push	r10
-  ; CHECK-NEXT: 	mov	#0, r10
+  ; CHECK-NEXT: 	clr	r10
   ; CHECK-NEXT: 	jmp	.LBB0_46
   ; CHECK-NEXT: .LBB0_46:
   ; CHECK:      	jmp	.LBB0_47
   ; CHECK-NEXT: .LBB0_47:
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	inc	r10
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd_bar
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	add	#1, r10
+  ; CHECK-NEXT: 	nop
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	cmp	#513, r10
   ; CHECK-NEXT: 	jl	.LBB0_46
   ; CHECK-NEXT: 	jmp	.LBB0_48
@@ -424,46 +412,45 @@ body: |
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	mov	#42, r3
-  ; CHECK-NEXT: 	mov	#42, r3
-  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	nop
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd___mspabi_mpyi
-  ; CHECK-NEXT: 	mov	#42, r3
-  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	nop
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd_bar
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jmp	.LBB0_43
   ; CHECK-NEXT: .LBB0_50:
   ; CHECK-NEXT: 	mov	2(r0), r3
-  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	jmp	.LBB0_3
   ; CHECK-NEXT: .LBB0_51:
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jmp	.LBB0_52
   ; CHECK-NEXT: .LBB0_52:
-  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jmp	.LBB0_54
   ; CHECK-NEXT: .LBB0_53:
   ; CHECK-NEXT: 	push	r10
-  ; CHECK-NEXT: 	mov	#0, r10
+  ; CHECK-NEXT: 	clr	r10
   ; CHECK-NEXT: 	jmp	.LBB0_55
   ; CHECK-NEXT: .LBB0_54:
   ; CHECK-NEXT: 	push	r10
-  ; CHECK-NEXT: 	mov	#0, r10
+  ; CHECK-NEXT: 	clr	r10
   ; CHECK-NEXT: 	jmp	.LBB0_65
   ; CHECK-NEXT: .LBB0_55:
-  ; CHECK:      	mov	#42, r3
+  ; CHECK:      	nop
   ; CHECK-NEXT: 	jmp	.LBB0_58
   ; CHECK-NEXT: .LBB0_56:
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	inc	r10
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd___mspabi_mpyi
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	nop
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd_bar
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	add	#1, r10
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	cmp	#1023, r10
   ; CHECK-NEXT: 	jl	.LBB0_55
   ; CHECK-NEXT: 	jmp	.LBB0_57
@@ -472,17 +459,16 @@ body: |
   ; CHECK-NEXT: 	jmp	.LBB0_95
   ; CHECK-NEXT: .LBB0_58:
   ; CHECK-NEXT: 	push	r10
-  ; CHECK-NEXT: 	mov	#0, r10
+  ; CHECK-NEXT: 	clr	r10
   ; CHECK-NEXT: 	jmp	.LBB0_59
   ; CHECK-NEXT: .LBB0_59:
   ; CHECK:      	jmp	.LBB0_60
   ; CHECK-NEXT: .LBB0_60:
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	inc	r10
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd_bar
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	add	#1, r10
+  ; CHECK-NEXT: 	nop
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	cmp	#513, r10
   ; CHECK-NEXT: 	jl	.LBB0_59
   ; CHECK-NEXT: 	jmp	.LBB0_61
@@ -491,7 +477,7 @@ body: |
   ; CHECK-NEXT: 	jmp	.LBB0_64
   ; CHECK-NEXT: .LBB0_62:
   ; CHECK-NEXT: 	mov	2(r0), r3
-  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	jmp	.LBB0_11
   ; CHECK-NEXT: .LBB0_63:
   ; CHECK-NEXT: 	mov	#42, r3
@@ -499,17 +485,16 @@ body: |
   ; CHECK-NEXT: .LBB0_64:
   ; CHECK-NEXT: 	jmp	.LBB0_56
   ; CHECK-NEXT: .LBB0_65:
-  ; CHECK:      	mov	#42, r3
+  ; CHECK:      	nop
   ; CHECK-NEXT: 	jmp	.LBB0_68
   ; CHECK-NEXT: .LBB0_66:
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	inc	r10
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd___mspabi_mpyi
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	nop
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd_bar
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	add	#1, r10
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	cmp	#1023, r10
   ; CHECK-NEXT: 	jl	.LBB0_65
   ; CHECK-NEXT: 	jmp	.LBB0_67
@@ -518,17 +503,16 @@ body: |
   ; CHECK-NEXT: 	jmp	.LBB0_75
   ; CHECK-NEXT: .LBB0_68:
   ; CHECK-NEXT: 	push	r10
-  ; CHECK-NEXT: 	mov	#0, r10
+  ; CHECK-NEXT: 	clr	r10
   ; CHECK-NEXT: 	jmp	.LBB0_69
   ; CHECK-NEXT: .LBB0_69:
   ; CHECK:      	jmp	.LBB0_70
   ; CHECK-NEXT: .LBB0_70:
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	inc	r10
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd_bar
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	add	#1, r10
+  ; CHECK-NEXT: 	nop
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	cmp	#513, r10
   ; CHECK-NEXT: 	jl	.LBB0_69
   ; CHECK-NEXT: 	jmp	.LBB0_71
@@ -539,25 +523,24 @@ body: |
   ; CHECK-NEXT: 	jmp	.LBB0_66
   ; CHECK-NEXT: .LBB0_73:
   ; CHECK-NEXT: 	mov	2(r0), r3
-  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	jmp	.LBB0_10
   ; CHECK-NEXT: .LBB0_74:
   ; CHECK-NEXT: 	mov	#42, r3
   ; CHECK-NEXT: 	jmp	.LBB0_76
   ; CHECK-NEXT: .LBB0_75:
   ; CHECK-NEXT: 	push	r10
-  ; CHECK-NEXT: 	mov	#0, r10
+  ; CHECK-NEXT: 	clr	r10
   ; CHECK-NEXT: 	jmp	.LBB0_77
   ; CHECK-NEXT: .LBB0_76:
   ; CHECK-NEXT: 	push	r10
-  ; CHECK-NEXT: 	mov	#0, r10
+  ; CHECK-NEXT: 	clr	r10
   ; CHECK-NEXT: 	jmp	.LBB0_87
   ; CHECK-NEXT: .LBB0_77:
-  ; CHECK:      	mov	#42, r3
+  ; CHECK:      	nop
   ; CHECK-NEXT: 	jmp	.LBB0_80
   ; CHECK-NEXT: .LBB0_78:
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	add	#1, r10
+  ; CHECK-NEXT: 	inc	r10
   ; CHECK-NEXT: 	cmp	#1023, r10
   ; CHECK-NEXT: 	jl	.LBB0_77
   ; CHECK-NEXT: 	jmp	.LBB0_79
@@ -566,16 +549,15 @@ body: |
   ; CHECK-NEXT: 	jmp	.LBB0_17
   ; CHECK-NEXT: .LBB0_80:
   ; CHECK-NEXT: 	push	r10
-  ; CHECK-NEXT: 	mov	#0, r10
+  ; CHECK-NEXT: 	clr	r10
   ; CHECK-NEXT: 	jmp	.LBB0_81
   ; CHECK-NEXT: .LBB0_81:
   ; CHECK:      	jmp	.LBB0_82
   ; CHECK-NEXT: .LBB0_82:
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	inc	r10
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd_bar
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	add	#1, r10
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	cmp	#513, r10
   ; CHECK-NEXT: 	jl	.LBB0_81
   ; CHECK-NEXT: 	jmp	.LBB0_83
@@ -584,7 +566,7 @@ body: |
   ; CHECK-NEXT: 	jmp	.LBB0_86
   ; CHECK-NEXT: .LBB0_84:
   ; CHECK-NEXT: 	mov	2(r0), r3
-  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	jmp	.LBB0_15
   ; CHECK-NEXT: .LBB0_85:
   ; CHECK-NEXT: 	mov	#42, r3
@@ -592,11 +574,10 @@ body: |
   ; CHECK-NEXT: .LBB0_86:
   ; CHECK-NEXT: 	jmp	.LBB0_78
   ; CHECK-NEXT: .LBB0_87:
-  ; CHECK:      	mov	#42, r3
+  ; CHECK:      	nop
   ; CHECK-NEXT: 	jmp	.LBB0_90
   ; CHECK-NEXT: .LBB0_88:
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	add	#1, r10
+  ; CHECK-NEXT: 	inc	r10
   ; CHECK-NEXT: 	cmp	#1023, r10
   ; CHECK-NEXT: 	jl	.LBB0_87
   ; CHECK-NEXT: 	jmp	.LBB0_89
@@ -605,16 +586,15 @@ body: |
   ; CHECK-NEXT: 	jmp	.LBB0_17
   ; CHECK-NEXT: .LBB0_90:
   ; CHECK-NEXT: 	push	r10
-  ; CHECK-NEXT: 	mov	#0, r10
+  ; CHECK-NEXT: 	clr	r10
   ; CHECK-NEXT: 	jmp	.LBB0_91
   ; CHECK-NEXT: .LBB0_91:
   ; CHECK:      	jmp	.LBB0_92
   ; CHECK-NEXT: .LBB0_92:
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	mov	#0, r3
+  ; CHECK-NEXT: 	inc	r10
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	call	#_ndd_bar
-  ; CHECK-NEXT: 	mov	#0, r3
-  ; CHECK-NEXT: 	add	#1, r10
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	cmp	#513, r10
   ; CHECK-NEXT: 	jl	.LBB0_91
   ; CHECK-NEXT: 	jmp	.LBB0_93
@@ -625,7 +605,7 @@ body: |
   ; CHECK-NEXT: 	jmp	.LBB0_88
   ; CHECK-NEXT: .LBB0_95:
   ; CHECK-NEXT: 	mov	2(r0), r3
-  ; CHECK-NEXT: 	mov	#42, r3
+  ; CHECK-NEXT: 	nop
   ; CHECK-NEXT: 	jmp	.LBB0_14
   ; CHECK-NEXT: .LBB0_96:
   ; CHECK-NEXT: 	mov	#42, r3

@@ -27,6 +27,10 @@ static cl::opt<bool>
     EmitCFG(DEBUG_TYPE "-emit-cfg",
             cl::desc("Emit control flow graph (GraphViz)"),
             cl::init(false), cl::Hidden);
+static cl::opt<bool>
+    EmitCFG(DEBUG_TYPE "-save-cfg",
+            cl::desc("Save control flow graph (GraphViz)"),
+            cl::init(false), cl::Hidden);
 
 // TODO: Give credit to IfConversion pass?
 //         (only if idea of branch-patterns is used)
@@ -3028,12 +3032,14 @@ void MSP430NemesisDefenderPass::DumpDebugInfo() {
 void MSP430NemesisDefenderPass::WriteCFG(std::string label)
 {
 #if !defined(NDEBUG)
-  std::string Filename = MF->writeCFG();
-  assert(!Filename.empty());
-  std::ifstream Src(Filename, std::ios::binary);
-  std::ofstream Dst(
+  if (WriteCFG) {
+    std::string Filename = MF->writeCFG();
+    assert(!Filename.empty());
+    std::ifstream Src(Filename, std::ios::binary);
+    std::ofstream Dst(
       (MF->getName() + Twine(".", label) + ".dot").str(), std::ios::binary);
-  Dst << Src.rdbuf();
+    Dst << Src.rdbuf();
+  }
 #endif
 }
 

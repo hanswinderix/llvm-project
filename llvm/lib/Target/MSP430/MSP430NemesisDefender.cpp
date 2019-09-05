@@ -28,7 +28,7 @@ static cl::opt<bool>
             cl::desc("Emit control flow graph (GraphViz)"),
             cl::init(false), cl::Hidden);
 static cl::opt<bool>
-    EmitCFG(DEBUG_TYPE "-save-cfg",
+    SaveCFG(DEBUG_TYPE "-save-cfg",
             cl::desc("Save control flow graph (GraphViz)"),
             cl::init(false), cl::Hidden);
 
@@ -3032,7 +3032,7 @@ void MSP430NemesisDefenderPass::DumpDebugInfo() {
 void MSP430NemesisDefenderPass::WriteCFG(std::string label)
 {
 #if !defined(NDEBUG)
-  if (WriteCFG) {
+  if (SaveCFG) {
     std::string Filename = MF->writeCFG();
     assert(!Filename.empty());
     std::ifstream Src(Filename, std::ios::binary);

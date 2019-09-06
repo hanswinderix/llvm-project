@@ -1643,10 +1643,29 @@ template <typename ELFT> void ELFDumper<ELFT>::parseDynamicTable() {
     case ELF::DT_STRSZ:
       StringTableSize = Dyn.getVal();
       break;
-    case ELF::DT_SYMTAB:
-      DynSymRegion.Addr = toMappedAddr(Dyn.getTag(), Dyn.getPtr());
-      DynSymRegion.EntSize = sizeof(Elf_Sym);
+    case ELF::DT_SYMTAB: {
+      // Often we find the information about the dynamic symbol table
+      // location in the SHT_DYNSYM section header. However, the value in
+      // DT_SYMTAB has priority, because it is used by dynamic loaders to
+      // locate .dynsym at runtime. The location we find in the section header
+      // and the location we find here should match. If we can't map the
+      // DT_SYMTAB value to an address (e.g. when there are no program headers), we
+      // ignore its value.
+      if (const uint8_t *VA = toMappedAddr(Dyn.getTag(), Dyn.getPtr())) {
+        // EntSize is non-zero if the dynamic symbol table has been found via a
+        // section header.
+        if (DynSymRegion.EntSize && VA != DynSymRegion.Addr)
+          reportWarning(
+              createError(
+                  "SHT_DYNSYM section header and DT_SYMTAB disagree about "
+                  "the location of the dynamic symbol table"),
+              ObjF->getFileName());
+
+        DynSymRegion.Addr = VA;
+        DynSymRegion.EntSize = sizeof(Elf_Sym);
+      }
       break;
+    }
     case ELF::DT_RELA:
       DynRelaRegion.Addr = toMappedAddr(Dyn.getTag(), Dyn.getPtr());
       break;
@@ -3092,6 +3111,12 @@ static std::string getSectionTypeString(unsigned Arch, unsigned Type) {
     return "LLVM_ADDRSIG";
   case SHT_LLVM_DEPENDENT_LIBRARIES:
     return "LLVM_DEPENDENT_LIBRARIES";
+  case SHT_LLVM_SYMPART:
+    return "LLVM_SYMPART";
+  case SHT_LLVM_PART_EHDR:
+    return "LLVM_PART_EHDR";
+  case SHT_LLVM_PART_PHDR:
+    return "LLVM_PART_PHDR";
   // FIXME: Parse processor specific GNU attributes
   case SHT_GNU_ATTRIBUTES:
     return "ATTRIBUTES";

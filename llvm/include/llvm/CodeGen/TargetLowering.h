@@ -923,6 +923,7 @@ public:
     case ISD::SMULFIX:
     case ISD::SMULFIXSAT:
     case ISD::UMULFIX:
+    case ISD::UMULFIXSAT:
       Supported = isSupportedFixedPointOperation(Op, VT, Scale);
       break;
     }
@@ -2104,25 +2105,21 @@ protected:
     TargetDAGCombineArray[NT >> 3] |= 1 << (NT&7);
   }
 
-  /// Set the target's minimum function alignment (in log2(bytes))
-  void setMinFunctionLogAlignment(unsigned LogAlign) {
-    MinFunctionAlignment = llvm::Align(1ULL << LogAlign);
+  /// Set the target's minimum function alignment.
+  void setMinFunctionAlignment(llvm::Align Align) {
+    MinFunctionAlignment = Align;
   }
 
   /// Set the target's preferred function alignment.  This should be set if
-  /// there is a performance benefit to higher-than-minimum alignment (in
-  /// log2(bytes))
-  void setPrefFunctionLogAlignment(unsigned LogAlign) {
-    PrefFunctionAlignment = llvm::Align(1ULL << LogAlign);
+  /// there is a performance benefit to higher-than-minimum alignment
+  void setPrefFunctionAlignment(llvm::Align Align) {
+    PrefFunctionAlignment = Align;
   }
 
-  /// Set the target's preferred loop alignment. Default alignment is zero, it
-  /// means the target does not care about loop alignment.  The alignment is
-  /// specified in log2(bytes). The target may also override
-  /// getPrefLoopAlignment to provide per-loop values.
-  void setPrefLoopLogAlignment(unsigned LogAlign) {
-    PrefLoopAlignment = llvm::Align(1ULL << LogAlign);
-  }
+  /// Set the target's preferred loop alignment. Default alignment is one, it
+  /// means the target does not care about loop alignment. The target may also
+  /// override getPrefLoopAlignment to provide per-loop values.
+  void setPrefLoopAlignment(llvm::Align Align) { PrefLoopAlignment = Align; }
 
   /// Set the minimum stack alignment of an argument.
   void setMinStackArgumentAlignment(unsigned Align) {
@@ -4101,8 +4098,8 @@ public:
   /// method accepts integers as its arguments.
   SDValue expandAddSubSat(SDNode *Node, SelectionDAG &DAG) const;
 
-  /// Method for building the DAG expansion of ISD::SMULFIX. This method accepts
-  /// integers as its arguments.
+  /// Method for building the DAG expansion of ISD::[U|S]MULFIX[SAT]. This
+  /// method accepts integers as its arguments.
   SDValue expandFixedPointMul(SDNode *Node, SelectionDAG &DAG) const;
 
   /// Method for building the DAG expansion of ISD::U(ADD|SUB)O. Expansion

@@ -3253,6 +3253,10 @@ void MSP430NemesisDefenderPass::releaseMemory() {
   BBAnalysis.clear(); // TODO: Does this also clear Defs and Deps?
   InstIds.clear();
   TaintInfo.clear();
+
+  CanonicalExit = nullptr;
+  EntryBBI = nullptr;
+  HasSecretDependentBranch = false;
 }
 
 #if 0

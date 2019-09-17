@@ -45,6 +45,7 @@ autoconf/autom4te.cache
 /CMakeSettings.json
 # CLion project configuration and build folders
 /.idea
+/clang/.idea
 cmake-build-debug/
 
 #==============================================================================#

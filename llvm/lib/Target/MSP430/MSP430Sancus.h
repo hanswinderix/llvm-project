@@ -304,6 +304,8 @@ sllvm_attest:
   ; TODO: call #sllvm_excall
   ;  (is not a call anymore)
   mov &sllvm_r1, r1
+  ; set CPUOFF bit in status register 
+  bis #0x210, r2
   call #exit
   )";
 

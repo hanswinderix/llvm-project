@@ -1115,6 +1115,11 @@ SDValue MSP430TargetLowering::LowerCCCCallTo(
   if (CLI.CallConv == CallingConv::SANCUS_ENTRY)
       Ops.push_back(DAG.getRegister(MSP430::R7, PtrVT));
 
+  if (isOCall(CLI)) {
+    // R8 is live on OCalls (contains the target address)
+    Ops.push_back(DAG.getRegister(MSP430::R8, PtrVT));
+  }
+
   if (InFlag.getNode())
     Ops.push_back(InFlag);
   
@@ -1167,6 +1172,17 @@ SDValue MSP430TargetLowering::LowerCallResult(
     InVals.push_back(Chain.getValue(0));
   }
 
+  // TODO:
+  //  The annotation label (ACL) created by LowerSancusCallResult(), if any,
+  //  should come before lowering the result of the call, to make sure the
+  //  function resumes at the correct location, just after the call. However
+  //  when putting the LowerSancusCallResult() call before the preceding
+  //  for-loop, llc crashes with an out-of-memory error. A workaround for this
+  //  issue has been implemented in the SancusTransformation pass at the
+  //  IR-level by splitting the basic block just after the call.
+  //
+  //  See test/sancus/keypad/keypad.c (in sllvm repo) as an example of where
+  //  it can go wrong.
   Chain = LowerSancusCallResult(CLI, Chain, dl, DAG);
 
   return Chain;
@@ -1777,6 +1793,22 @@ MSP430TargetLowering::EmitAttestInstr(MachineInstr &MI,
   const TargetInstrInfo &TII = *MF->getSubtarget().getInstrInfo();
   const Function &F = MF->getFunction();
 
+  bool isR13Live = false;
+  if (MI.getParent()->isLiveIn(MSP430::R13)) {
+    BuildMI(*BB, MI, dl, TII.get(MSP430::PUSH16r), MSP430::R13);
+    isR13Live = true;
+  }
+  bool isR14Live = false;
+  if (MI.getParent()->isLiveIn(MSP430::R14)) {
+    BuildMI(*BB, MI, dl, TII.get(MSP430::PUSH16r), MSP430::R14);
+    isR14Live = true;
+  }
+  bool isR15Live = false;
+  if (MI.getParent()->isLiveIn(MSP430::R15)) {
+    BuildMI(*BB, MI, dl, TII.get(MSP430::PUSH16r), MSP430::R15);
+    isR15Live = true;
+  }
+
   BuildMI(*BB, MI, dl, TII.get(MSP430::MOV16rr), MSP430::R14)
     .addReg(MI.getOperand(0).getReg());
   BuildMI(*BB, MI, dl, TII.get(MSP430::MOV16rr), MSP430::R15)
@@ -1785,7 +1817,20 @@ MSP430TargetLowering::EmitAttestInstr(MachineInstr &MI,
     .addReg(MI.getOperand(2).getReg());
   // TODO: Get rid of strdup
   BuildMI(*BB, MI, dl, TII.get(MSP430::CALLi))
-    .addExternalSymbol(strdup(sllvm::sancus::getAttestName(&F).c_str()));
+    .addExternalSymbol(strdup(sllvm::sancus::getAttestName(&F).c_str()))
+    .addUse(MSP430::R13, RegState::Implicit)
+    .addUse(MSP430::R14, RegState::Implicit)
+    .addUse(MSP430::R15, RegState::Implicit);
+
+  if (isR13Live) {
+    BuildMI(*BB, MI, dl, TII.get(MSP430::POP16r), MSP430::R13);
+  }
+  if (isR14Live) {
+    BuildMI(*BB, MI, dl, TII.get(MSP430::POP16r), MSP430::R14);
+  }
+  if (isR15Live) {
+    BuildMI(*BB, MI, dl, TII.get(MSP430::POP16r), MSP430::R15);
+  }
 
   MI.eraseFromParent(); // The pseudo instruction is gone now.
   return BB;

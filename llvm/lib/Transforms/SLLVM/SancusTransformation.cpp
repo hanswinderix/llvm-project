@@ -1,6 +1,7 @@
 #include "SancusTransformation.h"
 #include "Analysis.h"
 #include "../lib/Target/MSP430/MSP430Sancus.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/IRBuilder.h"
 
@@ -412,6 +413,9 @@ void SancusTransformation::handleCalls(Module &M) {
   }
 
   for (auto I : ECalls) {
+    // FIXME: See remark in MSP430SelLowering::lowerSancusCallResult() to
+    //  understand why this basic block needs to be split.
+    SplitBlock(I->getParent(), I);
     I->eraseFromParent();
   }
 }

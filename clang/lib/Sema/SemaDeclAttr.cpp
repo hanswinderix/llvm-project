@@ -1825,10 +1825,8 @@ static void handleSLLVMAttribute(Sema &S, Decl *D, const ParsedAttr &AL) {
     return;
   }
 
-  auto index = AL.getAttributeSpellingListIndex();
-
   D->addAttr(
-      ::new (S.Context) AttrType(AL.getRange(), S.Context, LI->Ident, index));
+      ::new (S.Context) AttrType(S.Context, {AL.getRange()}, LI->Ident));
 }
 
 static void handleAliasAttr(Sema &S, Decl *D, const ParsedAttr &AL) {

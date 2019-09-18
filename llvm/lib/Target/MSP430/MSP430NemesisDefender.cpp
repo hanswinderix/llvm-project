@@ -1289,7 +1289,9 @@ MSP430NemesisDefenderPass::ComputeSuccessors(
         if ((L2 != nullptr) && (L1 != L2)) {
           R.Loop = L2; // Loop found
 
-          LLVM_DEBUG(dbgs() << "Loop found:"
+          LLVM_DEBUG(dbgs() << "Loop found :"
+                            << " MBB=" << GetName(MBB)
+                            << " S=" << GetName(S)
                             << " header=" << GetName(L2->getHeader())
                             << " latch=" << GetName(L2->getLoopLatch())
                             << " exit=" << GetName(L2->getExitBlock())
@@ -1409,8 +1411,16 @@ MSP430NemesisDefenderPass::ComputeSuccessors(
             //      but let's be conservative)
             ReAnalyzeControlFlow(
                 *MBB); // TODO: Already done by ReplaceSuccessor
-            ReAnalyzeControlFlow(*EmptyMBB); // Re-analyze because the empty MBB
-            //  might be reused here.
+            // Re-analyze because the empty MBB might be reused here.
+            ReAnalyzeControlFlow(*EmptyMBB);
+
+            // Loop analysis has to be redone because EmptyMBB might be part
+            // of a loop, and loop analysis should be correct for the loop
+            // detector to work correctly.
+            // TODO: Optimize (see remark at function definition)
+            // TODO: Optimize (this should be done only when EmptyMBB is created)
+            RedoAnalysisPasses();
+
             assert(GetInfo(*EmptyMBB)->FallThroughBB == nullptr);
           } else if (SBBI->IsReturn) {
             llvm_unreachable("Canonical CFG expected");
@@ -1969,6 +1979,7 @@ void MSP430NemesisDefenderPass::PerformTaintAnalysis() {
                 break;
 
               case MachineOperand::MO_GlobalAddress    :
+              case MachineOperand::MO_MCSymbol         :
                 // Be conservative and mark as tainted
                 Taint(&MI);
                 break;
@@ -1976,7 +1987,6 @@ void MSP430NemesisDefenderPass::PerformTaintAnalysis() {
                 // TODO: Gradually support more operand types
               case MachineOperand::MO_ExternalSymbol   :
               case MachineOperand::MO_ConstantPoolIndex:
-              case MachineOperand::MO_MCSymbol         :
               case MachineOperand::MO_FrameIndex       :
               case MachineOperand::MO_BlockAddress     :
               case MachineOperand::MO_TargetIndex      :

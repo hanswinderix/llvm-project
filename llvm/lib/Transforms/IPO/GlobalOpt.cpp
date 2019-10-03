@@ -2288,7 +2288,7 @@ OptimizeFunctions(Module &M,
     if (!F->isDeclaration()) {
       auto &DT = LookupDomTree(*F);
       DomTreeUpdater DTU(DT, DomTreeUpdater::UpdateStrategy::Lazy);
-      Changed |= removeUnreachableBlocks(*F, nullptr, &DTU);
+      Changed |= removeUnreachableBlocks(*F, &DTU);
     }
 
     Changed |= processGlobal(*F, GetTLI, LookupDomTree);

@@ -1600,7 +1600,7 @@ void CodeGenModule::SetLLVMFunctionAttributesForDefinition(const Decl *D,
 
   if (!D->hasAttr<AlignedAttr>())
     if (LangOpts.FunctionAlignment)
-      F->setAlignment(llvm::Align(1 << LangOpts.FunctionAlignment));
+      F->setAlignment(llvm::Align(1ull << LangOpts.FunctionAlignment));
 
   // Some C++ ABIs require 2-byte alignment for member functions, in order to
   // reserve a bit for differentiating between virtual and non-virtual member
@@ -4799,7 +4799,7 @@ QualType CodeGenModule::getObjCFastEnumerationStateType() {
       Context.getPointerType(Context.getObjCIdType()),
       Context.getPointerType(Context.UnsignedLongTy),
       Context.getConstantArrayType(Context.UnsignedLongTy,
-                           llvm::APInt(32, 5), ArrayType::Normal, 0)
+                           llvm::APInt(32, 5), nullptr, ArrayType::Normal, 0)
     };
 
     for (size_t i = 0; i < 4; ++i) {

@@ -788,10 +788,23 @@ public:
   /// Additional properties of an operand's values.
   enum OperandValueProperties { OP_None = 0, OP_PowerOf2 = 1 };
 
-  /// \return The number of scalar or vector registers that the target has.
-  /// If 'Vectors' is true, it returns the number of vector registers. If it is
-  /// set to false, it returns the number of scalar registers.
-  unsigned getNumberOfRegisters(bool Vector) const;
+  /// \return the number of registers in the target-provided register class.
+  unsigned getNumberOfRegisters(unsigned ClassID) const;
+
+  /// \return the target-provided register class ID for the provided type,
+  /// accounting for type promotion and other type-legalization techniques that the target might apply.
+  /// However, it specifically does not account for the scalarization or splitting of vector types.
+  /// Should a vector type require scalarization or splitting into multiple underlying vector registers,
+  /// that type should be mapped to a register class containing no registers.
+  /// Specifically, this is designed to provide a simple, high-level view of the register allocation
+  /// later performed by the backend. These register classes don't necessarily map onto the
+  /// register classes used by the backend.
+  /// FIXME: It's not currently possible to determine how many registers
+  /// are used by the provided type.
+  unsigned getRegisterClassForType(bool Vector, Type *Ty = nullptr) const;
+
+  /// \return the target-provided register class name
+  const char* getRegisterClassName(unsigned ClassID) const;
 
   /// \return The width of the largest scalar or vector register type.
   unsigned getRegisterBitWidth(bool Vector) const;
@@ -1129,16 +1142,6 @@ private:
   /// Returns -1 if the cost is unknown.
   int getInstructionThroughput(const Instruction *I) const;
 
-  /// Given an input value that is an element of an 'or' reduction, check if the
-  /// reduction is composed of narrower loaded values. Assuming that a
-  /// legal-sized reduction of shifted/zexted loaded values can be load combined
-  /// in the backend, create a relative cost that accounts for the removal of
-  /// the intermediate ops and replacement by a single wide load.
-  /// TODO: If load combining is allowed in the IR optimizer, this analysis
-  ///       may not be necessary.
-  Optional<int> getLoadCombineCost(unsigned Opcode,
-                                   ArrayRef<const Value *> Args) const;
-
   /// The abstract base class used to type erase specific TTI
   /// implementations.
   class Concept;
@@ -1253,7 +1256,9 @@ public:
                             Type *Ty) = 0;
   virtual int getIntImmCost(Intrinsic::ID IID, unsigned Idx, const APInt &Imm,
                             Type *Ty) = 0;
-  virtual unsigned getNumberOfRegisters(bool Vector) = 0;
+  virtual unsigned getNumberOfRegisters(unsigned ClassID) const = 0;
+  virtual unsigned getRegisterClassForType(bool Vector, Type *Ty = nullptr) const = 0;
+  virtual const char* getRegisterClassName(unsigned ClassID) const = 0;
   virtual unsigned getRegisterBitWidth(bool Vector) const = 0;
   virtual unsigned getMinVectorRegisterBitWidth() = 0;
   virtual bool shouldMaximizeVectorBandwidth(bool OptSize) const = 0;
@@ -1596,8 +1601,14 @@ public:
                     Type *Ty) override {
     return Impl.getIntImmCost(IID, Idx, Imm, Ty);
   }
-  unsigned getNumberOfRegisters(bool Vector) override {
-    return Impl.getNumberOfRegisters(Vector);
+  unsigned getNumberOfRegisters(unsigned ClassID) const override {
+    return Impl.getNumberOfRegisters(ClassID);
+  }
+  unsigned getRegisterClassForType(bool Vector, Type *Ty = nullptr) const override {
+    return Impl.getRegisterClassForType(Vector, Ty);
+  }
+  const char* getRegisterClassName(unsigned ClassID) const override {
+    return Impl.getRegisterClassName(ClassID);
   }
   unsigned getRegisterBitWidth(bool Vector) const override {
     return Impl.getRegisterBitWidth(Vector);

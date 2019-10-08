@@ -5237,7 +5237,7 @@ bool SLPVectorizerPass::runImpl(Function &F, ScalarEvolution *SE_,
 
   // If the target claims to have no vector registers don't attempt
   // vectorization.
-  if (!TTI->getNumberOfRegisters(true))
+  if (!TTI->getNumberOfRegisters(TTI->getRegisterClassForType(true)))
     return false;
 
   // Don't vectorize when the attribute NoImplicitFloat is used.
@@ -6499,19 +6499,10 @@ private:
 
     int ScalarReduxCost = 0;
     switch (ReductionData.getKind()) {
-    case RK_Arithmetic: {
-      // Note: Passing in the reduction operands allows the cost model to match
-      //       load combining patterns for this reduction.
-      auto *ReduxInst = cast<Instruction>(ReductionRoot);
-      SmallVector<const Value *, 2> OperandList;
-      for (Value *Operand : ReduxInst->operands())
-        OperandList.push_back(Operand);
-      ScalarReduxCost = TTI->getArithmeticInstrCost(ReductionData.getOpcode(),
-          ScalarTy, TargetTransformInfo::OK_AnyValue,
-          TargetTransformInfo::OK_AnyValue, TargetTransformInfo::OP_None,
-          TargetTransformInfo::OP_None, OperandList);
+    case RK_Arithmetic:
+      ScalarReduxCost =
+          TTI->getArithmeticInstrCost(ReductionData.getOpcode(), ScalarTy);
       break;
-    }
     case RK_Min:
     case RK_Max:
     case RK_UMin:

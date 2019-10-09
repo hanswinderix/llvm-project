@@ -3336,7 +3336,7 @@ def OMPDeclareVariant : InheritableAttr {
                  [
                    "CtxUnknown", "CtxVendor"
                  ]>,
-    StringArgument<"ImplVendor", 1>
+    VariadicStringArgument<"ImplVendors">
   ];
   let AdditionalMembers = [{
     void printScore(raw_ostream & OS, const PrintingPolicy &Policy) const {
@@ -3364,7 +3364,11 @@ def OMPDeclareVariant : InheritableAttr {
         case CtxVendor:
           OS << "vendor(";
           printScore(OS, Policy);
-          OS << getImplVendor();
+          if (implVendors_size() > 0) {
+            OS << *implVendors(). begin();
+            for (StringRef VendorName : llvm::drop_begin(implVendors(), 1))
+              OS << ", " << VendorName;
+          }
           OS << ")";
           break;
         case CtxUnknown:

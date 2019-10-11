@@ -4875,12 +4875,35 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-fuse-line-directives");
 
   // -fms-compatibility=0 is default.
-  if (Args.hasFlag(options::OPT_fms_compatibility,
-                   options::OPT_fno_ms_compatibility,
-                   (IsWindowsMSVC &&
-                    Args.hasFlag(options::OPT_fms_extensions,
-                                 options::OPT_fno_ms_extensions, true))))
+  bool IsMSVCCompat = Args.hasFlag(
+      options::OPT_fms_compatibility, options::OPT_fno_ms_compatibility,
+      (IsWindowsMSVC && Args.hasFlag(options::OPT_fms_extensions,
+                                     options::OPT_fno_ms_extensions, true)));
+  if (IsMSVCCompat)
     CmdArgs.push_back("-fms-compatibility");
+
+  // Handle -fgcc-version, if present.
+  VersionTuple GNUCVer;
+  if (Arg *A = Args.getLastArg(options::OPT_fgnuc_version_EQ)) {
+    // Check that the version has 1 to 3 components and the minor and patch
+    // versions fit in two decimal digits.
+    StringRef Val = A->getValue();
+    Val = Val.empty() ? "0" : Val; // Treat "" as 0 or disable.
+    bool Invalid = GNUCVer.tryParse(Val);
+    unsigned Minor = GNUCVer.getMinor().getValueOr(0);
+    unsigned Patch = GNUCVer.getSubminor().getValueOr(0);
+    if (Invalid || GNUCVer.getBuild() || Minor >= 100 || Patch >= 100) {
+      D.Diag(diag::err_drv_invalid_value)
+          << A->getAsString(Args) << A->getValue();
+    }
+  } else if (!IsMSVCCompat) {
+    // Imitate GCC 4.2.1 by default if -fms-compatibility is not in effect.
+    GNUCVer = VersionTuple(4, 2, 1);
+  }
+  if (!GNUCVer.empty()) {
+    CmdArgs.push_back(
+        Args.MakeArgString("-fgnuc-version=" + GNUCVer.getAsString()));
+  }
 
   VersionTuple MSVT = TC.computeMSVCVersion(&D, Args);
   if (!MSVT.empty())
@@ -6462,4 +6485,58 @@ void OffloadBundler::ConstructJobMultipleOutputs(
       JA, *this,
       TCArgs.MakeArgString(getToolChain().GetProgramPath(getShortName())),
       CmdArgs, None));
+}
+
+void OffloadWrapper::ConstructJob(Compilation &C, const JobAction &JA,
+                                  const InputInfo &Output,
+                                  const InputInfoList &Inputs,
+                                  const ArgList &Args,
+                                  const char *LinkingOutput) const {
+  ArgStringList CmdArgs;
+
+  const llvm::Triple &Triple = getToolChain().getEffectiveTriple();
+
+  // Add the "effective" target triple.
+  CmdArgs.push_back("-target");
+  CmdArgs.push_back(Args.MakeArgString(Triple.getTriple()));
+
+  assert(JA.getInputs().size() == Inputs.size() &&
+         "Not have inputs for all dependence actions??");
+
+  // Add offload targets. It is a comma-separated list of offload target
+  // triples.
+  SmallString<128> Targets;
+  Targets += "-offload-targets=";
+  for (unsigned I = 0; I < Inputs.size(); ++I) {
+    if (I)
+      Targets += ',';
+
+    // Get input's Offload Kind and ToolChain.
+    const auto *OA = cast<OffloadAction>(JA.getInputs()[I]);
+    assert(OA->hasSingleDeviceDependence(/*DoNotConsiderHostActions=*/true) &&
+           "Expected one device dependence!");
+    const ToolChain *DeviceTC = nullptr;
+    OA->doOnEachDependence([&DeviceTC](Action *, const ToolChain *TC,
+                                       const char *) { DeviceTC = TC; });
+
+    // And add it to the offload targets.
+    Targets += DeviceTC->getTriple().normalize();
+  }
+  CmdArgs.push_back(Args.MakeArgString(Targets));
+
+  // Add the output file name.
+  assert(Output.isFilename() && "Invalid output.");
+  CmdArgs.push_back("-o");
+  CmdArgs.push_back(Output.getFilename());
+
+  // Add inputs.
+  for (const InputInfo &I : Inputs) {
+    assert(I.isFilename() && "Invalid input.");
+    CmdArgs.push_back(I.getFilename());
+  }
+
+  C.addCommand(std::make_unique<Command>(
+    JA, *this,
+    Args.MakeArgString(getToolChain().GetProgramPath(getShortName())),
+    CmdArgs, Inputs));
 }

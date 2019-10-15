@@ -70,6 +70,8 @@ public:
     bool IsConditionalBranch        : 1;
     bool IsPartOfSensitiveRegion    : 1;
     bool IsLoopHeader               : 1;
+    bool IsLoopLatch                : 1;
+    bool IsCanonicalLoopBlock       : 1;
     bool HasSecretDependentBranch   : 1;
     bool IsEntry                    : 1;
     bool IsReturn                   : 1;
@@ -84,8 +86,8 @@ public:
     MachineBasicBlock *FalseBB = nullptr;
     MachineBasicBlock *FallThroughBB = nullptr;
     SmallVector<MachineOperand, 4> BrCond;
- 
-    // !TODO: Figure out if the implemenation cannot use the 
+
+    // !TODO: Figure out if the implemenation cannot use the
     //         MachineRegisterInfo (MRI) class for this...
     //        (there seems to be some redundancy with what I implemented
     //         and with what this class provides...)
@@ -99,7 +101,7 @@ public:
     BranchClass BClass = BCNotClassified;
     union {
       struct {
-        MachineBasicBlock *LeftBB; 
+        MachineBasicBlock *LeftBB;
         MachineBasicBlock *RightBB;
       } Fork;
       struct {
@@ -112,7 +114,8 @@ public:
 
     MBBInfo() : IsDone(false), IsAligned(false), IsAnalyzable(false),
       IsBranch(false), IsConditionalBranch(false),
-      IsPartOfSensitiveRegion(false), IsLoopHeader(false), 
+      IsPartOfSensitiveRegion(false), IsLoopHeader(false), IsLoopLatch(false),
+      IsCanonicalLoopBlock(false),
       HasSecretDependentBranch(false),
       IsEntry(false), IsReturn(false) {}
   };
@@ -195,7 +198,8 @@ private:
   void ReplaceSuccessor(MachineBasicBlock *MBB, MachineBasicBlock *Old,
                         MachineBasicBlock *New);
 
-  std::shared_ptr<Fingerprint> GetFingerprint(MachineLoop *L);
+  std::vector<MachineBasicBlock *> GetFingerprint(MachineLoop *L);
+  void BuildFingerprint(MachineLoop *L, std::vector<MachineBasicBlock *> &FP);
 
   // Exit is the "join block" or the "point of convergence" of the originating
   //  sensitive region.
@@ -203,7 +207,7 @@ private:
   ComputeSuccessors(std::vector<MachineBasicBlock *> L, MachineBasicBlock *Exit);
 
   void AlignNonTerminatingInstructions(std::vector<MachineBasicBlock *> L);
-  void AlignTerminatingInstructions(MachineBasicBlock *MBB);
+  void CanonicalizeTerminatingInstructions(MachineBasicBlock *MBB);
   void AlignTwoWayBranch(MachineBasicBlock &MBB);
 
   MachineBasicBlock::iterator GetPosBeforeBranchingCode(MachineBasicBlock *MBB)
@@ -272,6 +276,7 @@ private:
   void DetectOuterSensitiveBranches();
   void AnalyzeLoops();
 
+  void CanonicalizeSensitiveLoop(MachineLoop *Loop);
   void AlignContainedRegions(MachineLoop *L);
 
   void SecureCalls();
@@ -281,7 +286,7 @@ private:
   std::vector<MachineBasicBlock *>
     AlignSensitiveLoop(MachineLoop *Loop, std::vector<MachineBasicBlock *> MBBs);
   std::vector<MachineBasicBlock *>
-    AlignFingerprint(std::shared_ptr<Fingerprint> FP, std::vector<MachineBasicBlock *> MBBs);
+    AlignFingerprint(std::vector<MachineBasicBlock *> FP, std::vector<MachineBasicBlock *> MBBs);
 
   void WriteCFG(std::string label);
   void DumpCFG();
@@ -318,6 +323,30 @@ static MachineBasicBlock *GetEntryMBB(MachineFunction *MF) {
   assert(MBB != nullptr);
   assert(MBB->pred_size() == 0);
   return MBB;
+}
+
+// TODO: Move this logic to MSP430InstrInfo
+static bool isCGConstant(const int immediateValue) {
+  switch (immediateValue) {
+    case -1:
+    case 0:
+    case 1:
+    case 2:
+    case 4:
+    case 8:
+      return true;
+    default:
+      return false;
+  }
+}
+
+// TODO: Move this logic (when to use one of the constant generator regs)
+//    to MSP430InstrInfo
+static const MCInstrDesc &
+getCompareInstr(const TargetInstrInfo *TII, const int immediateValue) {
+  return isCGConstant(immediateValue)
+         ? TII->get(MSP430::CMP16rc)
+         : TII->get(MSP430::CMP16ri);
 }
 
 /// Analyze the terminators of a given MBB (uses TII->analyzeBranch):
@@ -471,6 +500,7 @@ MSP430NemesisDefenderPass::GetInfo(MachineBasicBlock &MBB) {
 #endif
 }
 
+// Creates a corresponding BBInfo entry in BBAnalysis
 void MSP430NemesisDefenderPass::AnalyzeControlFlow(MachineBasicBlock &MBB) {
   auto BBI = GetInfo(MBB);
 
@@ -808,7 +838,7 @@ void MSP430NemesisDefenderPass::ReAnalyzeControlFlow(MachineBasicBlock &MBB) {
   BBI->IsConditionalBranch = false;
   // HasSecretDependentBranch is set in PerformTaintAnalysis, not in
   //  AnalyzeControlFlow
-  //BBI->HasSecretDependentBranch = false; 
+  //BBI->HasSecretDependentBranch = false;
   // IsPartOfSensitiveRegion is set during outer region analysis
   /// BBI->IsPartOfSensitiveRegion
   BBI->IsEntry = false;
@@ -819,6 +849,7 @@ void MSP430NemesisDefenderPass::ReAnalyzeControlFlow(MachineBasicBlock &MBB) {
 
   // Dont' touch loop analysis (loop analysis should not change)
   // BBI->IsLoopHeader = false;
+  // BBI->IsLoopLatch = false;
   // BBI->TripCount = 0;
   BBI->Next = nullptr;
   BBI->TrueBB = nullptr;
@@ -909,8 +940,8 @@ MachineBasicBlock * MSP430NemesisDefenderPass::CreateMachineBasicBlock(
   MachineBasicBlock *MBB = MF->CreateMachineBasicBlock(nullptr);
   if (addToMF) {
     MF->push_back(MBB);
+    LLVM_DEBUG(dbgs() << "New MBB: " << GetName(MBB) << " (" << debug << ")\n");
   }
-  LLVM_DEBUG(dbgs() << "New MBB: " << GetName(MBB) << " (" << debug << ")\n");
   return MBB;
 }
 
@@ -1088,23 +1119,19 @@ static void BuildNOP6(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
 // TODO: MSP430 specific
 // According to the MSP430 manual, a branch instruction always takes two cycles
 // two execute, independent on whether a branch is taken or not
-static void BuildBranchCompensator(MachineBasicBlock &MBB, 
-                                   MachineBasicBlock::iterator I,
-                                   const TargetInstrInfo *TII) {
+static void BuildNOPBranch(MachineBasicBlock &MBB,
+                           MachineBasicBlock::iterator I,
+                           const TargetInstrInfo *TII) {
   BuildNOP2(MBB, I, TII);
 }
 
-// Retrieves the fingerprint of the loop. The fingerprint is a slice of the 
-//  loop,
-//    a list of dummy instructions that represents a sequence of instruction
-//    types in all possible paths of the aligned loop.
-
-// Note that the fingerprint does not include the latch blocks of a loop
-//  because it is not clear yet what the exact fingerprint of the latch block
-//  will look like.
+// Builds the fingerprint of the region. The fingerprint is a slice of the
+//  region, a list of basic blocks that represents a unique path of through the
+//  aligned region. It kind of represents "all possible paths" of the aligned
+//  loop.
 //
-// PRE: The loop region (from header to latch) must be aligned for the
-//       fingerprint to be correct. This means alignment of
+// PRE: The region (from header to latch in the case of loop regions) must be
+//       aligned for the fingerprint to be correct. This means alignment of
 //         - terminating instructions
 //         - non-terminating instructions
 //         - two-way branches
@@ -1113,81 +1140,77 @@ static void BuildBranchCompensator(MachineBasicBlock &MBB,
 //  the loop region is already aligned (precondition) which means that all
 //  possible paths from header to latch are observably equivalent.
 //  Therefore, do a DFS traversal through the sensitive region.
-std::shared_ptr<MSP430NemesisDefenderPass::Fingerprint>
-MSP430NemesisDefenderPass::GetFingerprint(MachineLoop *L) {
+void MSP430NemesisDefenderPass::BuildFingerprint(
+    MachineLoop *L, std::vector<MachineBasicBlock *> &Result) {
 
-  std::shared_ptr<Fingerprint> Result(new Fingerprint);
-
-  MachineBasicBlock *FPBB = CreateMachineBasicBlock("fingerprint1", false);
-
-  // Outer loop
-  Result->LoopHeader = L->getHeader();
-  assert(Result->LoopHeader != nullptr && "Loop is not well-formed");
-  Result->Head = FPBB;
-
-  // According to the well-formedness criterion, the last block of a DFS in
-  //   any path should be the loop latch
+  auto Header = L->getHeader();
+  assert(Header != nullptr && "Well-formed loop expected");
   auto Latch = L->getLoopLatch();
-  assert(Latch != nullptr);
-  auto CurBB = L->getHeader();
-  MachineBasicBlock *PrevBB = nullptr;
+  assert(Latch != nullptr && "Well-formed loop expected");
 
-  // Make sure this loop terminates (i.e when latch post-dominates the header)
-  assert(MPDT->dominates(Latch, CurBB));
+  // Build the fingerprint by performing a dept-first traversal.
+  //  - Because of the well-formedness criterion, the last block of a DFS (in
+  //    any path) should be the loop latch.
+  //  - Assert that the following while-loop terminates, which is the case when
+  //    the latch block post-dominates the header.
+  assert(MPDT->dominates(Latch, Header) && "Well-formed loop expected");
   std::set<MachineBasicBlock *> Visited;
+  MachineBasicBlock *PrevBB = nullptr;
+  MachineBasicBlock *CurBB = Header;
 
   while (CurBB != Latch) {
-    assert(Visited.find(CurBB) == Visited.end());
+    assert(Visited.find(CurBB) == Visited.end() && "Well-formed loop expected");
     Visited.insert(CurBB);
 
     auto L2 = MLI->getLoopFor(CurBB);
     assert(L2 != nullptr);
 
-    if (L2 != L) {
-      assert(L2->getLoopPreheader() == PrevBB && "Well-formed loop expected");
-
-      // Deal with nested loop
-      FPBB = CreateMachineBasicBlock("fingerprint2", false);
-      Result->Tail.push_back(std::make_pair(GetFingerprint(L2), FPBB));
-
-      // Continue with thex loop-exit block
-      assert(CurBB != nullptr && "Well-formed loop expected");
-      PrevBB = CurBB;
-      CurBB = L2->getExitBlock();
-    }
-    else {
+    if (L2 == L) {
       auto BBI = GetInfo(*CurBB);
 
-      for (auto &MI : *CurBB) {
-        if (MI.isCall()) {
-          CompensateCall(MI, *FPBB, FPBB->end());
-        }
-        else {
-          CompensateInstr(MI, *FPBB, FPBB->end());
-        }
-      }
+      Result.push_back(CurBB);
 
-      // All sensitive regions should be aligned by now, so the number
-      // of statements should be the same, for any path that is taken
-      // Still, caution has to be taken for two-way branches.
+      // It is a precondition of this function that all sensitive regions in the
+      // given loop are aligned. This means that the number of statements
+      // should be the same for any path that is taken in the loop region. Still,
+      // caution has to be taken for two-way branches because the second JMP is
+      // only executed in the false branch.
+      PrevBB = CurBB;
       if (BBI->IsConditionalBranch) {
-        assert(CurBB->succ_size() == 2);
+        assert(CurBB->succ_size() == 2 && "Well-formed MBB expected");
+
         // Follow the false path to avoid compensating for the
         //   1) the "JMP" instruction from the (JCC, JMP) pair _and_
         //   2) the JMP-compensated instruction in the true path
-        // to the fingerprint.
         assert(BBI->BB->isSuccessor(BBI->TrueBB));
         assert(BBI->BB->isSuccessor(BBI->FalseBB));
-        PrevBB = CurBB;
+
         CurBB = BBI->FalseBB;
       } else {
-        assert(CurBB->succ_size() == 1);
-        PrevBB = CurBB;
+        assert(CurBB->succ_size() == 1 && "Well-formed MBB expected");
+
         CurBB = *CurBB->succ_begin();
       }
+    } else {
+      // Deal with this nested loop
+      assert(L2->getLoopPreheader() == PrevBB && "Well-formed loop expected");
+      BuildFingerprint(L2, Result);
+
+      // Continue with the loop-exit block
+      PrevBB = CurBB;
+      CurBB = L2->getExitBlock();
+      assert(CurBB != nullptr && "Well-formed loop expected");
     }
   }
 
+  Result.push_back(Latch);
+}
+
+// Fingerprint as a vector of MBBs
+std::vector<MachineBasicBlock *>
+MSP430NemesisDefenderPass::GetFingerprint(MachineLoop *L) {
+  std::vector<MachineBasicBlock *> Result;
+  BuildFingerprint(L, Result);
   return Result;
 }
 
@@ -1210,7 +1233,7 @@ void MSP430NemesisDefenderPass::AlignTwoWayBranch(MachineBasicBlock &MBB) {
 #if 1
   // Compensate for the unconditional jump when the conditional jump has
   // been taken (in the true path).
-  BuildBranchCompensator(*BBI->TrueBB, BBI->TrueBB->begin(), TII);
+  BuildNOPBranch(*BBI->TrueBB, BBI->TrueBB->begin(), TII);
 #else
   // Add a "jump block" between MBB and TrueBB to contain a single
   // unconditional jump statement)
@@ -1228,7 +1251,7 @@ void MSP430NemesisDefenderPass::AlignTwoWayBranch(MachineBasicBlock &MBB) {
   AnalyzeControlFlow(*JBB);
 
   auto JBBI = GetInfo(*JBB);
-  JBBI->Orig = CloneMBB(JBB, false); // TODO: Refactor the bookkeeping of 
+  JBBI->Orig = CloneMBB(JBB, false); // TODO: Refactor the bookkeeping of
                                      //        the original block contents
   assert(JBB->succ_size() == 1);
   assert(JBB->pred_size() == 1);
@@ -1237,9 +1260,9 @@ void MSP430NemesisDefenderPass::AlignTwoWayBranch(MachineBasicBlock &MBB) {
 
 // Returns
 //   1) when one of the direct successors represents the header of a loop
-//      - Successors.Loop points to the detected loop
-//      - Successors.Union represents the union of the direct successors of
-//         every MMB in MBBs (modulo the Loop header )
+//      - Successors.Loop points to the hedear of the detected loop
+//      - Successors.Union represents the union of all successors of alls MBBs
+//         modulo the detected Loop header
 //     The CFG will not be mutated.
 //
 //   2) otherwise
@@ -1263,7 +1286,7 @@ void MSP430NemesisDefenderPass::AlignTwoWayBranch(MachineBasicBlock &MBB) {
 MSP430NemesisDefenderPass::Successors
 MSP430NemesisDefenderPass::ComputeSuccessors(
     std::vector<MachineBasicBlock *> MBBs, MachineBasicBlock *Exit) {
-  LLVM_DEBUG(dbgs() << "> Compute successors: ");
+  LLVM_DEBUG(dbgs() << "> Compute successors of ");
   LLVM_DEBUG(for (auto MBB: MBBs) dbgs() << GetName(MBB) << ", ");
   LLVM_DEBUG(dbgs() << "\n");
 
@@ -1297,6 +1320,9 @@ MSP430NemesisDefenderPass::ComputeSuccessors(
                             << " exit=" << GetName(L2->getExitBlock())
                             << "\n");
 
+          if (! MLI->isLoopHeader(S)) {
+            MF->viewCFG();
+          }
           assert(MLI->isLoopHeader(S));
           // TODO: When a loop has more than one predecessor,
           //    getLoopPredecessor() returns nullptr. Fix this by duplicating
@@ -1345,7 +1371,6 @@ MSP430NemesisDefenderPass::ComputeSuccessors(
     }
 
     if (R.Loop != nullptr) {
-
       // Deal with detected loop
       for (auto MBB : MBBs) {
         for (auto S : MBB->successors()) {
@@ -1353,20 +1378,16 @@ MSP430NemesisDefenderPass::ComputeSuccessors(
             auto SBBI = GetInfo(*S);
             assert(! SBBI->IsAligned);
 
-            // TODO: Blocks with the same successor can share an empty block
-            auto EmptyMBB = CreateMachineBasicBlock("empty-for-loopif", true);
-            GetInfo(*EmptyMBB)->Orig = CloneMBB(EmptyMBB, false);
-            ReplaceSuccessor(MBB, S, EmptyMBB);
-            EmptyMBB->addSuccessor(S);
-            TII->insertBranch(*EmptyMBB, S, nullptr, {}, DebugLoc());
-            AnalyzeControlFlow(*EmptyMBB);
-            R.Union.push_back(EmptyMBB);
+            // Duplicates are not allowed in the Union
+            if (Set.find(S) == Set.end()) {
+              Set.insert(S);
+              R.Union.push_back(S);
+            }
           }
         }
       }
     }
     else {
-      R.Loop = nullptr;
 
       MachineBasicBlock *EmptyMBB = nullptr;
 
@@ -1374,124 +1395,126 @@ MSP430NemesisDefenderPass::ComputeSuccessors(
       std::map<MachineBasicBlock *, MachineBasicBlock *> Clones; // DenseMap?
       for (auto MBB : MBBs) {
         for (auto S : MBB->successors()) {
-          auto BBI = GetInfo(*MBB);
-          auto SBBI = GetInfo(*S);
+          if ( (R.Loop == nullptr) || (S != R.Loop->getHeader()) ) {
+            auto BBI = GetInfo(*MBB);
+            auto SBBI = GetInfo(*S);
 
-          // Ignore self-cycles
-          // self-cycles should have been dealt with already, just like any
-          // other loop (i.e. no single-block loop) inside a senstive region
-          assert(S != MBB && (BBI->Orig != SBBI->Orig) && "Undetected loop");
+            // Ignore self-cycles
+            // self-cycles should have been dealt with already, just like any
+            // other loop (i.e. no single-block loop) inside a senstive region
+            assert(S != MBB && (BBI->Orig != SBBI->Orig) && "Undetected loop");
 
-          // !!TODO: Factor out the common logic between the three branches
-          //          (when (S == Exit), (S == Return) and (S == Aligned))
-          if (S == Exit) {
+            // !!TODO: Factor out the common logic between the three branches
+            //          (when (S == Exit), (S == Return) and (S == Aligned))
+            if (S == Exit) {
 
-            // Create an empty block, if has not been created before, and
-            // add CFG info and termination code. (A correct CFG is a precondition
-            // for TII->insertBranch.)
-            if (EmptyMBB == nullptr) {
-              EmptyMBB = CreateMachineBasicBlock("empty", true);
-              GetInfo(*EmptyMBB)->Orig = CloneMBB(EmptyMBB, false);
-              // Update CFG
-              EmptyMBB->addSuccessor(Exit);
-              // Add termination code
-              TII->insertBranch(*EmptyMBB, S, nullptr, {}, DebugLoc());
+              // Create an empty block, if has not been created before, and
+              // add CFG info and termination code. (A correct CFG is a precondition
+              // for TII->insertBranch.)
+              if (EmptyMBB == nullptr) {
+                EmptyMBB = CreateMachineBasicBlock("empty", true);
+                GetInfo(*EmptyMBB)->Orig = CloneMBB(EmptyMBB, false);
+                // Update CFG
+                EmptyMBB->addSuccessor(Exit);
+                // Add termination code
+                TII->insertBranch(*EmptyMBB, S, nullptr, {}, DebugLoc());
 
-              R.Union.push_back(EmptyMBB);
-            }
-
-            // Update MBB
-            assert((!BBI->IsReturn) && "Blocks with successors cannot return.");
-            ReplaceSuccessor(MBB, S, EmptyMBB);
-
-            // Create/update CF analysis for the new/changed blocks. This analysis
-            //  is required by the alignment algo. Make sure to do this after
-            //  updating the basic block's termination code and the CFG.
-            //   (not sure if the CFG is actually used for this,
-            //      but let's be conservative)
-            ReAnalyzeControlFlow(
-                *MBB); // TODO: Already done by ReplaceSuccessor
-            // Re-analyze because the empty MBB might be reused here.
-            ReAnalyzeControlFlow(*EmptyMBB);
-
-            // Loop analysis has to be redone because EmptyMBB might be part
-            // of a loop, and loop analysis should be correct for the loop
-            // detector to work correctly.
-            // TODO: Optimize (see remark at function definition)
-            // TODO: Optimize (this should be done only when EmptyMBB is created)
-            RedoAnalysisPasses();
-
-            assert(GetInfo(*EmptyMBB)->FallThroughBB == nullptr);
-          } else if (SBBI->IsReturn) {
-            llvm_unreachable("Canonical CFG expected");
-          } else if (SBBI->IsAligned) {
-            // Create clone - The current successor has been aligned before.
-            // Clone its original contents, if it has not been cloned before,
-            //  and add CFG info and termination code. (A correct CFG is a
-            //  precondition for TII->insertBranch.)
-            assert(SBBI->Orig != nullptr);
-            auto KV = Clones.find(SBBI->Orig);
-            MachineBasicBlock *Clone = nullptr;
-            if (KV != Clones.end()) {
-              Clone = KV->second;
-            } else {
-              LLVM_DEBUG(dbgs() << "Cloning " << GetName(SBBI->BB) << "\n");
-              Clone = CloneMBB(SBBI->Orig, true);
-              Clones[SBBI->Orig] = Clone;
-              for (auto SS : S->successors()) {
-                Clone->addSuccessor(SS);
-                // These successors will be cloned in turn during the next
-                //  ComputeSuccessors call.
-                // Ad-hoc pattern matching might prevent a cascade of cloning
+                R.Union.push_back(EmptyMBB);
               }
 
-              // Update termination code
-              // TODO: Fix copy-paste from
-              //         MSP430NemesisDefenderPass::ReplaceSuccessor()::4
-              TII->removeBranch(*Clone);
-              if (SBBI->IsBranch) {
-                if (SBBI->IsConditionalBranch) {
-                  TII->insertBranch(*Clone, SBBI->TrueBB, SBBI->FalseBB,
-                                    SBBI->BrCond, DebugLoc());
-                  // Update taint analysis and containedness
-                  //   - HasSecretDependentBranch is set during taint analysis
-                  //   - IsPartOfSensitiveRegion is set during outer region analysis
-                  GetInfo(*Clone)->HasSecretDependentBranch = true;
-                  GetInfo(*Clone)->IsPartOfSensitiveRegion = true;
-                } else {
-                  TII->insertBranch(
-                      *Clone, SBBI->TrueBB, nullptr, {}, DebugLoc());
-                }
+              // Update MBB
+              assert((!BBI->IsReturn) && "Blocks with successors cannot return.");
+              ReplaceSuccessor(MBB, S, EmptyMBB);
+
+              // Create/update CF analysis for the new/changed blocks. This analysis
+              //  is required by the alignment algo. Make sure to do this after
+              //  updating the basic block's termination code and the CFG.
+              //   (not sure if the CFG is actually used for this,
+              //      but let's be conservative)
+              ReAnalyzeControlFlow(
+                  *MBB); // TODO: Already done by ReplaceSuccessor
+              // Re-analyze because the empty MBB might be reused here.
+              ReAnalyzeControlFlow(*EmptyMBB);
+
+              // Loop analysis has to be redone because EmptyMBB might be part
+              // of a loop, and loop analysis should be correct for the loop
+              // detector to work correctly.
+              // TODO: Optimize (see remark at function definition)
+              // TODO: Optimize (this should be done only when EmptyMBB is created)
+              RedoAnalysisPasses();
+
+              assert(GetInfo(*EmptyMBB)->FallThroughBB == nullptr);
+            } else if (SBBI->IsReturn) {
+              llvm_unreachable("Canonical CFG expected");
+            } else if (SBBI->IsAligned) {
+              // Create clone - The current successor has been aligned before.
+              // Clone its original contents, if it has not been cloned before,
+              //  and add CFG info and termination code. (A correct CFG is a
+              //  precondition for TII->insertBranch.)
+              assert(SBBI->Orig != nullptr);
+              auto KV = Clones.find(SBBI->Orig);
+              MachineBasicBlock *Clone = nullptr;
+              if (KV != Clones.end()) {
+                Clone = KV->second;
               } else {
-                // A block with a successor cannot return
-                assert(!SBBI->IsReturn);
-                assert(SBBI->FallThroughBB != nullptr);
-                TII->insertBranch(
-                    *Clone, SBBI->FallThroughBB, nullptr, {}, DebugLoc());
+                LLVM_DEBUG(dbgs() << "Cloning " << GetName(SBBI->BB) << "\n");
+                Clone = CloneMBB(SBBI->Orig, true);
+                Clones[SBBI->Orig] = Clone;
+                for (auto SS : S->successors()) {
+                  Clone->addSuccessor(SS);
+                  // These successors will be cloned in turn during the next
+                  //  ComputeSuccessors call.
+                  // Ad-hoc pattern matching might prevent a cascade of cloning
+                }
+
+                // Update termination code
+                // TODO: Fix copy-paste from
+                //         MSP430NemesisDefenderPass::ReplaceSuccessor()::4
+                TII->removeBranch(*Clone);
+                if (SBBI->IsBranch) {
+                  if (SBBI->IsConditionalBranch) {
+                    TII->insertBranch(*Clone, SBBI->TrueBB, SBBI->FalseBB,
+                                      SBBI->BrCond, DebugLoc());
+                    // Update taint analysis and containedness
+                    //   - HasSecretDependentBranch is set during taint analysis
+                    //   - IsPartOfSensitiveRegion is set during outer region analysis
+                    GetInfo(*Clone)->HasSecretDependentBranch = true;
+                    GetInfo(*Clone)->IsPartOfSensitiveRegion = true;
+                  } else {
+                    TII->insertBranch(
+                        *Clone, SBBI->TrueBB, nullptr, {}, DebugLoc());
+                  }
+                } else {
+                  // A block with a successor cannot return
+                  assert(!SBBI->IsReturn);
+                  assert(SBBI->FallThroughBB != nullptr);
+                  TII->insertBranch(
+                      *Clone, SBBI->FallThroughBB, nullptr, {}, DebugLoc());
+                }
+
+                R.Union.push_back(Clone);
               }
 
-              R.Union.push_back(Clone);
-            }
+              // Update MBB
+              ReplaceSuccessor(MBB, S, Clone);
 
-            // Update MBB
-            ReplaceSuccessor(MBB, S, Clone);
-
-            // Create/update CF analysis for the new/changed blocks. This
-            //  analysis
-            //  is required by the alignment algo. Make sure to do this after
-            //  updating the basic block's termination code and the CFG.
-            //   (not sure if the CFG is actually used for this,
-            //      but let's be conservative)
-            ReAnalyzeControlFlow(
-                *MBB); // TODO: Already done by ReplaceSuccessor
-            if (KV == Clones.end()) {
-              AnalyzeControlFlow(*Clone);
-            }
-          } else {
-            // Duplicates are not allowed in the Union
-            if (Set.find(S) == Set.end()) {
-              Set.insert(S);
-              R.Union.push_back(S);
+              // Create/update CF analysis for the new/changed blocks. This
+              //  analysis
+              //  is required by the alignment algo. Make sure to do this after
+              //  updating the basic block's termination code and the CFG.
+              //   (not sure if the CFG is actually used for this,
+              //      but let's be conservative)
+              ReAnalyzeControlFlow(
+                  *MBB); // TODO: Already done by ReplaceSuccessor
+              if (KV == Clones.end()) {
+                AnalyzeControlFlow(*Clone);
+              }
+            } else {
+              // Duplicates are not allowed in the Union
+              if (Set.find(S) == Set.end()) {
+                Set.insert(S);
+                R.Union.push_back(S);
+              }
             }
           }
         }
@@ -1508,6 +1531,10 @@ MSP430NemesisDefenderPass::ComputeSuccessors(
   // the order in which the individual MBBs take the role as the reference block.
   std::set<MachineBasicBlock *> S(R.Union.begin(), R.Union.end());
   assert(S.size() == R.Union.size());
+
+  LLVM_DEBUG(dbgs() << "> successors: ");
+  LLVM_DEBUG(for (auto MBB: R.Union) dbgs() << GetName(MBB) << ", ");
+  LLVM_DEBUG(dbgs() << "\n");
 
   return R;
 }
@@ -1624,9 +1651,11 @@ void MSP430NemesisDefenderPass::AlignNonTerminatingInstructions(
 //       formedness criterium).
 // TODO: Optimize. It is not always necessary to assume that there are
 //           always two terminating instructions...
-void MSP430NemesisDefenderPass::AlignTerminatingInstructions(
+void MSP430NemesisDefenderPass::CanonicalizeTerminatingInstructions(
     MachineBasicBlock *MBB) {
   auto T = MBB->getFirstTerminator();
+  LLVM_DEBUG(dbgs() 
+      << "Canonicalize terminating instructions: " << GetName(MBB) << "\n");
   //LLVM_DEBUG(dbgs() << *MBB);
   //LLVM_DEBUG(dbgs() << *T);
   auto BBI = GetInfo(*MBB);
@@ -1816,7 +1845,7 @@ void MSP430NemesisDefenderPass::Taint(MachineInstr * MI) {
   if (MI->isConditionalBranch()) {
     assert(MI->getParent() != nullptr);
     auto L = MLI->getLoopFor(MI->getParent());
-    /* Loop latches are treated differently than ordinary branches and are not 
+    /* Loop latches are treated differently than ordinary branches and are not
      *  considered "ordinary" secret dependent branches.
      */
     if (L == nullptr || (! L->isLoopLatch(MI->getParent()))) {
@@ -2011,7 +2040,7 @@ void MSP430NemesisDefenderPass::PerformTaintAnalysis() {
   }
 }
 
-// Matchess the fork pattern. Typical for this pattern is that the branches 
+// Matchess the fork pattern. Typical for this pattern is that the branches
 // never join again.
 //
 //       EMBB
@@ -2180,6 +2209,8 @@ void MSP430NemesisDefenderPass::CompensateCall(const MachineInstr &Call,
         N->insert(0, PREFIX_NEMDEF_DUMMY);
       }
 
+      LLVM_DEBUG(dbgs() 
+          << "  " << GetName(&MBB) << ": insert call (" << N->c_str() << ")\n");
       BuildMI(MBB, I, DL, TII->get(MSP430::CALLi)).addExternalSymbol(N->c_str());
       break;
 
@@ -2344,11 +2375,124 @@ MSP430NemesisDefenderPass::GetExitOfSensitiveBranch(MachineBasicBlock *Entry) {
   return IPDom->getBlock();
 }
 
+// Canonicalizes the sensitive loop
+//
+// It is important that this is done exactly once for every sensitive loop.
+//   Canonicalization happens during a call to AlignContainedRegions which gets
+//   called exactly once for every sensitive loop.
+//
+// ----------------------------------------------------------------------------
+// Important principle to make sure the rest of the implementation does not
+// get overly complicated:
+//   => Once a region is aligned, it may not be changed anymore
+// ----------------------------------------------------------------------------
+void MSP430NemesisDefenderPass::CanonicalizeSensitiveLoop(MachineLoop *Loop) {
+  auto Preheader = Loop->getLoopPreheader();
+  auto Header = Loop->getHeader();
+  auto Exit = Loop->getExitBlock();
+  auto Latch = Loop->getLoopLatch();
+
+  // Verify relevant parts of the well-formedness criterion
+  assert(Preheader != nullptr);
+  assert(Header != nullptr);
+  assert(Latch != nullptr);
+  assert(Exit != nullptr);
+
+  DebugLoc DL; // FIXME: Where to get DebugLoc from?
+
+  LLVM_DEBUG(dbgs() << "Canonicalize sensitive loop (H=" << GetName (Header) << ")\n");
+
+  // 1) Create a new canonical loop preheader
+  assert(Preheader->succ_size() == 1);
+  assert(Preheader->isSuccessor(Header));
+  auto NewPreheader = CreateMachineBasicBlock("loop-pheader", true);
+  auto BBIPH = GetInfo(*NewPreheader);
+  BBIPH->IsPartOfSensitiveRegion = true;
+  BBIPH->IsCanonicalLoopBlock = true;
+  // Compensate for (see AlignFingerprint)
+  //   - push of induction register (MSP430::PUSH16r)
+  //   - initialization of induction register to zero (MSP430::MOV16rc)
+  BuildNOP3(*NewPreheader, NewPreheader->end(), TII);
+  BuildNOP1(*NewPreheader, NewPreheader->end(), TII);
+  NewPreheader->addSuccessor(Header);
+  TII->insertBranch(*NewPreheader, Header, nullptr, {}, DL);
+  ReplaceSuccessor(Preheader, Header, NewPreheader);
+
+  // 2) Canonicalize the header block
+  assert(Header->pred_size() == 2); // Preheader + latch
+  auto BBIH = GetInfo(*Header);
+  assert(BBIH->IsPartOfSensitiveRegion && "Sensitive loop expected");
+
+  // 3) Canonicalize the latch block
+  // Compensate for, just before the first terminator, (see AlignFingerprint)
+  //   - the increment of induction register (MSP430::ADD16rc)
+  //   - the comparison of the trip count with induction register
+  //       (MSP430::CMP16ri or MSP430::CMP16rc)
+  auto LT = Latch->getFirstTerminator();
+  assert(LT != nullptr); // Guaranteed by well-formedness criterion, verified
+                        //  by ComputeSuccessors. Every latch block should
+                        //  have two successors, the loop header and the loop
+                        //  exit block.
+  BuildNOP1(*Latch, LT, TII);
+  if (isCGConstant(BBIH->TripCount)) {
+    BuildNOP1(*Latch, LT, TII);
+  } else {
+    BuildNOP2(*Latch, LT, TII);
+  }
+  // Make sure that there are exacaly two terminating instructions
+  //   - one conditional jump to header
+  //   - one unconditional jump to exit
+  assert(Latch->succ_size() == 2);
+  assert(Latch->isSuccessor(Header));
+  assert(Latch->isSuccessor(Exit));
+
+  // 4) Create a new canonical loop exit block
+  auto NewExit = CreateMachineBasicBlock("loop-exit", true);
+  auto BBIE = GetInfo(*NewExit);
+  BBIE->IsPartOfSensitiveRegion = true;
+  BBIE->IsCanonicalLoopBlock = true;
+  // Compensate for pop of induction register (see AlignFingerprint)
+  //       (MSP430::POP16r, emulated by MSP430::MOV16rp)
+  BuildNOP2(*NewExit, NewExit->end(), TII);
+  NewExit->addSuccessor(Exit);
+  TII->insertBranch(*NewExit, Exit, nullptr, {}, DL);
+  ReplaceSuccessor(Latch, Exit, NewExit);
+
+  // (Re)do the necessary analyses
+  AnalyzeControlFlow(*NewExit);
+  AnalyzeControlFlow(*NewPreheader);
+  RedoAnalysisPasses(); // TODO: Optimize, by manually updating the MLI
+                        //         according to this canonicalization
+
+  // Call CanonicalizeTerminatingInstructions here on the header, because the 
+  //   sensitive loop region should be completely aligned when the fingerprint 
+  //   is to be computed. AlignFingerprint depends on the principle:
+  //             "aligned regions cannot change anymore"
+  // It is important to canonicalize the terminating instructions after
+  //  connecting the new preheader to the header (and creating an explicit
+  //  unconditional jump)
+  CanonicalizeTerminatingInstructions(Header);
+}
+
+static MachineLoop *
+getLoopForHeader(MachineLoopInfo *MLI, MachineBasicBlock *Header) {
+  auto L = MLI->getLoopFor(Header);
+  assert(L != nullptr);
+  assert(L->getHeader() != nullptr);
+  assert(L->getHeader() == Header);
+  return L;
+}
+
 // Remark: Recomputes analysis passes
 void MSP430NemesisDefenderPass::AlignContainedRegions(MachineLoop *Loop)
 {
   auto Header = Loop->getHeader();
   assert(Header != nullptr);
+
+  // First canonicalize this sensitive loop
+  auto BBIH = GetInfo(*Header);
+  assert(BBIH->IsPartOfSensitiveRegion);
+  CanonicalizeSensitiveLoop(Loop);
 
   // !TODO: Factor out "for (auto &&KV : BBAnalysis)" for-loop from
   //         AlignSensitiveBranches() and this one
@@ -2384,311 +2528,254 @@ void MSP430NemesisDefenderPass::AlignContainedRegions(MachineLoop *Loop)
       // Both AlignSensitiveBranch() and AlignContainedRegions() might
       //  give rise the recomputing the analysis passes
       // TODO: Make this less error prone and optimize this (see remark RedoAnalysisPasses)
-      Loop = MLI->getLoopFor(Header);
-      assert(Loop != nullptr);
-      assert(Loop->getHeader() == Header);
+      Loop = getLoopForHeader(MLI, Header);
     }
   }
-}
-
-static MachineLoop * 
-getLoopFromHeader(MachineLoopInfo *MLI, MachineBasicBlock *Header) {
-  auto L = MLI->getLoopFor(Header);
-  assert(L != nullptr);
-  assert(L->getHeader() != nullptr);
-  assert(L->getHeader() == Header);
-  return L;
 }
 
 // Aligns all MBBs with the given fingerprint
 //
+//   Loopification code that is generated by this method is already compensated
+//   for in the original loop by the "sensitive loop canonicalization" phase
+//     (see CanonicalizeSensitiveLoop)
+//
 // Returns the list of successors of all sensitive regions, including the newly
-//  ceated ones. This is required for the next call to ComputeSuccessors to
-//  compute the successors based on the correct set.
+//  ceated ones (the exit blocks in the case of loop regions). This is required
+//  for the next call to ComputeSuccessors to compute the successors based on
+//  the correct set.
 //
 // Remark: Recomputes analysis passes
 //
-// FIXME: Contains a recursive call that invalidates all pointers in 
-//          analysis results. (see !!TODOS in body of this function)
-//        (AlignFingerprint calls RedoAnalysisPasses...)
-//
 // TODO: Generalize to support arbitary regions (e.g. can be used as primitive
 //     for ad-hoc, pattern-based optimizations (see notes))
+//
+// TODO: Optimize generated code for size, by
+//   1) putting the generated loop in a separate block and
+//   2) generating calls to this block
 std::vector<MachineBasicBlock *>
 MSP430NemesisDefenderPass::AlignFingerprint(
-    std::shared_ptr<Fingerprint> FP, std::vector<MachineBasicBlock *> MBBs) {
-
-  DebugLoc DL; // FIXME: Where to get DebugLoc from?
-
-  // Get necessary loop information
-  assert(FP->LoopHeader != nullptr);
-  // LTODO: In a generalized implemtation, it is necessary to check first that
-  //   FP.LoopHeader <> nullptr
-  auto FPLoop = getLoopFromHeader(MLI, FP->LoopHeader);
-  auto LoopPreheader = FPLoop->getLoopPreheader();
-  auto Header = FPLoop->getHeader();
-  auto LoopLatch = FPLoop->getLoopLatch();
-  auto ExitBlock = FPLoop->getExitBlock();
-
-  auto BBIH = GetInfo(*Header);
-  assert(BBIH->IsPartOfSensitiveRegion);
-  assert(BBIH->IsLoopHeader);
-  assert(BBIH->TripCount > 0);
+        std::vector<MachineBasicBlock *> FP, std::vector<MachineBasicBlock *> MBBs) {
 
   std::vector<MachineBasicBlock *> Result;
 
-  // TODO: Optimize generated code for size, by 1) putting the generated loop in
-  //        a separate block and 2) generating calls to this block
+  assert(FP.size() > 0);
+  assert(MBBs.size() > 0);
 
-  // Start of loopification
-  //   The generated code for loopification will be compensated for in the
-  //    control-flow path of Loop (See code after this for-loop)
-  LLVM_DEBUG(dbgs() << ">> START OF LOOPIFICATION (H=" 
-      << GetName (FP->LoopHeader) << " TC=" << BBIH->TripCount << ")\n");
+  // - Pick an arbitrary register to act as the "induction register"
+  //     TODO: Optimize: use one that is not live
+  unsigned IReg = MSP430::R10;
 
-  // Pick an arbitrary register to act as the "induction register"
-  unsigned IVar = MSP430::R10;
+  LLVM_DEBUG(dbgs() << ">> Align fingerprint: FP= ");
+  LLVM_DEBUG(for (auto FPMBB : FP) dbgs() << GetName(FPMBB) << ",");
+  LLVM_DEBUG(dbgs() << " MBBs=");
+  LLVM_DEBUG(for (auto MBB : MBBs) dbgs() << GetName(MBB) << ",");
+  LLVM_DEBUG(dbgs() << "\n");
 
-  // Align the artifical loop latch(es) with the "real loop latch", after adding
-  //     instructions to
-  //   - increment the induction variable
-  //   - compare the induction variable with the trip count
-  //
-  // REMARK: The loop latch needs to be treated separately from the rest of
-  //   the loop because of these two instructions. These instructions might
-  //   give rise to compensating instructions in the "real loop latch", which is
-  //   not the case for the other blocks of the loop.
-  //
-  // Do this once for all MMBs.
-  auto TLatch = CreateMachineBasicBlock("temp-latch", false);
-  BuildMI(TLatch, DL, TII->get(MSP430::ADD16rc), IVar).addReg(IVar).addImm(1);
-
-  // TODO: Move this logic (when is one of the constant generator regs used)
-  //    to MSP430InstrInfo
-  switch (BBIH->TripCount) {
-    case -1:
-    case  0:
-    case  1:
-    case  2:
-    case  4:
-    case  8:
-      BuildMI(TLatch, DL, TII->get(MSP430::CMP16rc), IVar).addImm(BBIH->TripCount);
-      break;
-    default:
-      BuildMI(TLatch, DL, TII->get(MSP430::CMP16ri), IVar).addImm(BBIH->TripCount);
-      break;
+  // When the last block of the fingerprint is a loop latch, push
+  //  add loop-exit block to the result
+  auto BBI = GetInfo(*FP.back());
+  if (BBI->IsLoopLatch) {
+    auto Loop = MLI->getLoopFor(FP.back());
+    assert(Loop != nullptr);
+    assert(Loop->getLoopLatch() == FP.back());
+    auto Exit = Loop->getExitBlock();
+    assert(Exit != nullptr && "Well-formed loop expected");
+    assert(GetInfo(*Exit)->IsCanonicalLoopBlock);
+    Result.push_back(Exit);
+  } else {
+    Result.push_back(FP.back());
+    llvm_unreachable("Non loop fingerprints not supported yet");
+    // TODO: Requires changes to the computation of the Result vector
   }
 
-  // !!!LTODO: very ugly (find a better way to deal with this)
-  bool AlreadyAligned = GetInfo(*LoopLatch)->IsAligned; // LTODO: UGLY
-  if (!AlreadyAligned) {
-    AlignNonTerminatingInstructions({LoopLatch, TLatch});
-    // Because of the "branch compensating" operation, aligning with the
-    // latch is an operation that is not idempotent.
-    // This is important because the recursive nature of 
-    // this function might result in invocating AlignNonTerminatingInstructions 
-    // more than once for nested loops. (see region-loop-loop-tail.c with -O3)
-    BuildBranchCompensator(*LoopLatch, LoopLatch->begin(), TII); // !!! LTODO: Document where this comes from
-  }
-  else {
-    // Avoid compensating for extra jump over and over again (operation is not 
-    //   idempotent)
-    auto BBI = GetInfo(*LoopLatch);
-    auto CLatch = CloneMBB(BBI->Orig, false);
-    AlignNonTerminatingInstructions({CLatch, TLatch});
-  }
-
-  // After aligning the MBBs, the loop-header and the loop-exit need to be
-  // compensated for the artifical loop-headers and artificial loop-exits
-  // Therefore, LPH and LExit need to be visible in this scope.
-  MachineBasicBlock *LPH = nullptr;
-  MachineBasicBlock *LExit = nullptr;
-
-  // First, align each of the MBBs
+  // Align each of the MBBs with the fingperprint
   for (auto MBB : MBBs) {
- 
-    assert(MBB->succ_size() == 1); // Guaranteed by ComputeSuccessors
-    auto Succ = *MBB->succ_begin();
 
-    LLVM_DEBUG(dbgs() << ">>>> LOOPIFY FOR " << GetName(FP->LoopHeader) 
-        << " @ " << GetName(Succ) << "\n");
+    DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-    LPH = MBB; /* MBB will be the loop preheader */
-    auto LHeader = CreateMachineBasicBlock("loop-header", true);
-    auto LLatch = CreateMachineBasicBlock("loop-latch", true);
-    //GetInfo(*LHeader)->Orig = CloneMBB(EmptyMBB, false); // LTODO ?
-    LExit = CreateMachineBasicBlock("loop-exit", true);
+    MachineBasicBlock *PrevMBB = nullptr;
+    std::vector<MachineBasicBlock *> Headers;
 
-    // 1) - Add instructions to LPH that
-    //      o push the current value of induction register on the stack
-    //      o initialize the induction register
-    //    - Set the loop header as its successor
-    auto T = LPH->getFirstTerminator();
-    assert(T != nullptr); // Guaranteed by ComputeSuccessors
-    BuildMI(*LPH, T, DL, TII->get(MSP430::PUSH16r), IVar);
-    BuildMI(*LPH, T, DL, TII->get(MSP430::MOV16rc), IVar).addImm(0);
-    ReplaceSuccessor(LPH, Succ, LHeader);
+    // Iterate over the fingerprint blocks
+    for (auto FPMBB : FP) {
 
-    // 2) - Align the loop header with the loop fingerprint (modulo latch (!))
-    //      The loop fingerprint is empty when the loop consists of a single
-    //      MBB (in which case the MBB is both loop header and loop latch)
-    //    - Set loop-latch as successor
-    if (FP->Head->size() > 0) {
-      // It is ok to pass FP->Head several times to the alignment function
-      //  because LHeader will be empty each time at this point in the program.
-      //  If this would not be the 
-      //  case, FP->Head _could_ change after each invocation the alignment 
-      //  function, in which case LHeader should be aligned against a copy of
-      //  FP->Head.
-      // LTODO: 
-      //    1) Maybe it is a better idea to do it once outside of this loop
-      // in a "temp-header" and copy its contents for every MBB in MBBs, similar
-      // to the "temp-latch" block.
-      //    2) Or maybe it is even better to just copy the contents of FP->Head
-      //       here, since it exclusively exists of "dummy" instructions.
-      assert(LHeader->size() == 0 && "Header not empty");
-      AlignNonTerminatingInstructions({FP->Head, LHeader});
+      auto FPBBI = GetInfo(*FPMBB);
+      assert(FPBBI->IsPartOfSensitiveRegion);
+
+      // Ignore canonical loop blocks of nested loops to avoid creating a BB
+      // twice for them, since the pre-header and exit blocks are always
+      //  (as in hardcoded) created by this method.
+      //  (No need to do this for the outer most loop because the canonical
+      //  loop blocks of the outer most loop are not part of the fingerprint).
+      if (! FPBBI->IsCanonicalLoopBlock) {
+
+        // Create a dummy MBB to align with this fingerprint block
+        //  and insert it into the CFG
+        auto CurMBB = CreateMachineBasicBlock("align-fp", true);
+        auto CurBBI = GetInfo(*CurMBB);
+        CurBBI->Orig = CloneMBB(CurMBB, false);
+        CurBBI->IsPartOfSensitiveRegion = true;
+        if (PrevMBB == nullptr) {
+          assert(FPBBI->IsLoopHeader);
+          auto Loop = getLoopForHeader(MLI, FPMBB);
+          assert(Loop != nullptr);
+          assert(MBB->pred_size() >= 1);
+          std::vector<MachineBasicBlock *> L;
+          for (auto Pred : MBB->predecessors()) {
+            if (GetInfo(*Pred)->IsAligned) {
+            // !!!! TODO: Make sure this is well-understood
+            //       (wrt nemdef-region-loop-loop-tail-O3.mir)
+            //if (! MPDT->dominates(Pred, Loop->getHeader())) {
+              L.push_back(Pred);
+            }
+          }
+          for (auto Pred : L) {
+            ReplaceSuccessor(Pred, MBB, CurMBB);
+          }
+        }
+        else {
+          ReplaceSuccessor(PrevMBB, MBB, CurMBB);
+        }
+        CurMBB->addSuccessor(MBB);
+        TII->insertBranch(*CurMBB, MBB, nullptr, {}, DL);
+        AnalyzeControlFlow(*CurMBB);
+
+        if (FPBBI->IsLoopHeader) {
+
+          LLVM_DEBUG(dbgs()
+              << ">> LOOPIFY FOR " << GetName(FPBBI->BB)
+              << " @ " << GetName(CurMBB) << "\n");
+
+          assert(FPBBI->TripCount > 0);
+
+          // Make CurMBB the loop preheader
+          //  (This block is already anticipated for in the real loop by
+          //    CanonicalizeSensitiveLoop)
+          //
+          // Add instructions to the loop preheader that
+          //    o push the current value of the induction register on the stack
+          //    o initialize the induction register
+          auto Preheader = CurMBB;
+          CurBBI->IsCanonicalLoopBlock = true;
+          auto T = Preheader->getFirstTerminator();
+          assert(T != nullptr);
+          BuildMI(*Preheader, T, DL, TII->get(MSP430::PUSH16r), IReg);
+          BuildMI(*Preheader, T, DL, TII->get(MSP430::MOV16rc), IReg).addImm(0);
+
+          // Create a new CurMBB and put it between the preheader and MBB blocks
+          CurMBB = CreateMachineBasicBlock("align-fp-preheader", true);
+          CurBBI = GetInfo(*CurMBB);
+          CurBBI->Orig = CloneMBB(CurMBB, false);
+          CurBBI->IsPartOfSensitiveRegion = true;
+          assert(Preheader->succ_size() == 1);
+          ReplaceSuccessor(Preheader, MBB, CurMBB);
+          CurMBB->addSuccessor(MBB);
+          TII->insertBranch(*CurMBB, MBB, nullptr, {}, DL);
+          AnalyzeControlFlow(*CurMBB);
+
+          // CurMBB will act as the loop header
+          CurBBI->IsLoopHeader = true;
+          CurBBI->TripCount = FPBBI->TripCount;
+
+          Headers.push_back(CurMBB);
+        }
+
+        // Align non-terminating instructions
+        // TODO: assert(noNonTerminatingInstructions(CurMBB);
+        //    => otherwise, contents of FPMBB might change because of this
+        //             (violates principle that aligned regions cannot change
+        //               anymore)
+        FPBBI->IsAligned = false; // HACK (The fingerprint represents an
+                                  //          aligned region, so safe to do) 
+                                  // (Aligned regions should not change anymore)
+        AlignNonTerminatingInstructions({FPMBB, CurMBB});
+        FPBBI->IsAligned= true;
+
+        if (! FPBBI->IsLoopLatch) {
+          // Align/fix terminating instructions
+          // Every block in the *aligned* loop region 
+          //    either ends with exactly two terminating instructions 
+          //    or either contains compensating instructions for two terminating
+          //    instructions (guaranteed by CanonicalizeTerminatingInstructions)
+          // !!!TODO: Hacky, there should be a more elgant way of dealing with 
+          //      the (compensated) terminating instructions in the fingerprint
+          if (FPBBI->TerminatorCount != 1) {
+            auto T = CurMBB->getFirstTerminator();
+            if (FPBBI->TerminatorCount == 0) {
+              T--;
+              T->removeFromParent();
+            }
+            else {
+              assert(FPBBI->TerminatorCount == 2);
+              BuildNOPBranch(*CurMBB, T, TII);
+            }
+          }
+        }
+        else {
+          // A Canonical latch always end in two terminators
+          assert(! Headers.empty());
+          auto Header = Headers.back();
+          assert(Header != nullptr);
+          Headers.pop_back();
+          auto HeaderBBI = GetInfo(*Header);
+
+          CurBBI->IsLoopLatch = true;
+
+          // Create the loop-exit block
+          auto Exit = CreateMachineBasicBlock("align-fp-exit", true);
+          auto ExitBBI = GetInfo(*Exit);
+          ExitBBI->Orig = CloneMBB(Exit, false);
+          ExitBBI->IsPartOfSensitiveRegion = true;
+          ExitBBI->IsCanonicalLoopBlock = true;
+          ExitBBI->IsAligned = true;
+
+          // Connect latch to exit and header blocks
+          auto BrCond = MachineOperand::CreateImm(MSP430CC::CondCodes::COND_L);
+          CurMBB->replaceSuccessor(MBB, Exit);
+          CurMBB->addSuccessor(Header);
+          RemoveTerminationCode(*CurMBB);
+          TII->insertBranch(*CurMBB, Header, Exit, BrCond, DL);
+          ReAnalyzeControlFlow(*CurMBB);
+
+          // Connect exit to MBB
+          Exit->addSuccessor(MBB);
+          TII->insertBranch(*Exit, MBB, nullptr, {}, DL);
+          AnalyzeControlFlow(*Exit);
+
+          // Restore the value of the induction register in the exit block
+          BuildMI(*Exit, Exit->begin(), DL, TII->get(MSP430::POP16r), IReg);
+
+          // Replace the two instructions preceding the terminators
+          auto T = CurMBB->getFirstTerminator();
+          auto MI1 = --T;
+          auto MI2 = --T;
+          T = CurMBB->getFirstTerminator();
+          MI1->removeFromParent();
+          MI2->removeFromParent();
+          BuildMI(*CurMBB, T, DL, TII->get(MSP430::ADD16rc), IReg)
+            .addReg(IReg)
+            .addImm(1);
+          BuildMI(*CurMBB, T, DL, getCompareInstr(TII, HeaderBBI->TripCount), IReg)
+            .addImm(HeaderBBI->TripCount);
+
+           CurMBB = Exit;
+        }
+
+        PrevMBB = CurMBB;
+      }
     }
-    LHeader->addSuccessor(LLatch);
-    TII->insertBranch(*LHeader, LLatch, nullptr, {}, DL); // !!LTODO: Compensate for this in "real loop"
 
-    // 3) - Populate the loop latch (by copying instructions from temp-latch)
-    //    - Connect loop-latch to loop-header and loop-exit by adding
-    //       o a conditional jump to the loop header with the correct condition
-    //       o an unconditional jump to the loop exit
-    for (auto &MI : *TLatch) {
-      MF->CloneMachineInstrBundle(*LLatch, LLatch->end(), MI);
-    }
-    LLatch->addSuccessor(LHeader);
-    LLatch->addSuccessor(LExit);
-    auto BrCond = MachineOperand::CreateImm(MSP430CC::CondCodes::COND_L);
-    TII->insertBranch(*LLatch, LHeader, LExit, BrCond, DL);
+    assert(Headers.empty());
+    assert(PrevMBB != nullptr);
 
-    // 4) Restore the value of the induction register and connect the exit block
-    //    to MBB
-    BuildMI(LExit, DL, TII->get(MSP430::POP16r), IVar);
-    LExit->addSuccessor(Succ);
-    TII->insertBranch(*LExit, Succ, nullptr, {}, DL);
-
-    // 5) Analyze control flow for newly created blocks
-    AnalyzeControlFlow(*LPH);
-    AnalyzeControlFlow(*LHeader);
-    AnalyzeControlFlow(*LLatch);
-    AnalyzeControlFlow(*LExit);
-
-    // 6) Deal with nested loops (must be done _after_ analyzing the CF of
-    //     the newly created blocks)
-    for (auto &Tail : FP->Tail) {
-      // Tail is a (Fingerprint, MBB) pair
-      assert(Tail.first != nullptr);
-
-#if 1 // !!!LTODO
-        assert(LLatch->pred_size() == 1);
-        auto Pred = *LLatch->pred_begin();
-        auto EmptyMBB = CreateMachineBasicBlock("empty-for-loopif", true);
-        //GetInfo(*EmptyMBB)->Orig = CloneMBB(EmptyMBB, false);
-        ReplaceSuccessor(Pred, LLatch, EmptyMBB);
-        EmptyMBB->addSuccessor(LLatch);
-        TII->insertBranch(*EmptyMBB, LLatch, nullptr, {}, DebugLoc());
-        AnalyzeControlFlow(*EmptyMBB);
-#endif
-
-      AlignFingerprint(Tail.first, {EmptyMBB});
-
-      // Align with the rest (tail) of fingerprint
-      // LTODO: Same remark here as for aligning FP->Head (see above)
-      auto TailBB = CreateMachineBasicBlock("tail", true);
-      assert(TailBB->size() == 0 && "Header not empty");
-      AlignNonTerminatingInstructions({Tail.second, TailBB});
-
-      assert(LLatch->pred_size() == 1);
-      Pred = *LLatch->pred_begin(); // Should be exit block of nested loop
-      assert(Pred->pred_size() == 1);
-      auto PredPred = *Pred->pred_begin(); // Should be latch of nested loop
-
-      // Sanity check: LHeader should be disconnnected from LLatch at this point
-      assert(!LHeader->isSuccessor(*LLatch->pred_begin()));
-
-#if 1
-      // More santity checks: At this point in the program, the unique 
-      //   predecessor of the latch should be the latch of another loop.
-      assert(MLI->getLoopFor(Pred) != nullptr);
-      auto L = getLoopFromHeader(MLI, LHeader);
-      assert(MLI->getLoopFor(Pred) == L);
-      assert(MLI->getLoopFor(PredPred) != nullptr);
-      assert(MLI->getLoopFor(PredPred)->getLoopLatch() != nullptr);
-      assert(MLI->getLoopFor(PredPred)->getLoopLatch() == PredPred);
-#endif
-
-      // Insert TailBB between Pred and LLatch
-      ReplaceSuccessor(Pred, LLatch, TailBB);
-      TailBB->addSuccessor(LLatch);
-      TII->insertBranch(*TailBB, LLatch, nullptr, {}, DL); // !!!LTODO: Compensate for this in "real loop"
-
-      AnalyzeControlFlow(*TailBB);
-    }
-
-#if 0
-    // 7) Updated IsAligned information:
-    //  These MBBs will be aligned at the end of the current function
-    //  invocation.
-    GetInfo(*PH)->IsAligned = true;
-    GetInfo(*LExit)->IsAligned = true;
-    GetInfo(*Succ)->IsAligned = true;
-#endif
-
-    // Make sure that ComputeSuccessors computes the correct successor in the
-    //  current control-flow path (starting from the newly created exit node).
-    Result.push_back(LExit);
-
-    // CHECK POSTCONDITION:
-    // -> The latch should end with a conditional jump, followed by an 
-    // unconditional jump
-    assert(std::distance(LLatch->terminators().begin(),
-                         LLatch->terminators().end()) == 2);
+    Result.push_back(PrevMBB);
   }
-
-  // Compensate for the loopification in the real loop
-  //  by creating a new loop-preheader and loop-exit blocks
-  // (LTODO: OPTIMIZE
-  //     This can probably be avoided, by creating a temp-pheader and a
-  //      temp-exit similar to the temp-latch above...)
-  if (! AlreadyAligned) {
-    auto NewLoopPreheader = CreateMachineBasicBlock("loop-pheader", true);
-    assert(LPH != nullptr); //  Any PH will do as a reference, so let's take the last one
-    //GetInfo(*PH)->IsAligned = false; // Avoid assert from begin triggered
-    AlignNonTerminatingInstructions({NewLoopPreheader, LPH});
-    NewLoopPreheader->addSuccessor(Header);
-    TII->insertBranch(*NewLoopPreheader, Header, nullptr, {}, DL);
-    ReplaceSuccessor(LoopPreheader, Header, NewLoopPreheader);
-
-    auto NewExitBlock = CreateMachineBasicBlock("loop-exit", true);
-    assert(LExit != nullptr); //  Any LExit will do as a reference, so let's take the last one
-    //GetInfo(*LExit)->IsAligned = false; // Avoid assert from being triggered
-    AlignNonTerminatingInstructions({NewExitBlock, LExit});
-    NewExitBlock->addSuccessor(ExitBlock);
-    TII->insertBranch(*NewExitBlock, ExitBlock, nullptr, {}, DL);
-    ReplaceSuccessor(LoopLatch, ExitBlock, NewExitBlock);
-
-    // Make sure the successor of the loop will be computed correctly by
-    //  the next call to ComputeSuccessors...
-    Result.push_back(NewExitBlock);
-
-    // Analyze CF for newly created blocks
-    AnalyzeControlFlow(*NewLoopPreheader);
-    AnalyzeControlFlow(*NewExitBlock);
-  }
-
-  LLVM_DEBUG(dbgs() << ">> END OF LOOPIFICATION (" << GetName (FP->LoopHeader) 
-      << ")\n");
-
-  // CHECK POSTCONDITION:
-  // -> The latch should end with a conditional jump, followed by an unconditional
-  //     jump
-  assert(std::distance(LoopLatch->terminators().begin(),
-                       LoopLatch->terminators().end()) == 2);
 
   RedoAnalysisPasses(); // TODO: Optimize (see remark at function definition)
+
+  LLVM_DEBUG(dbgs() << "> successors: ");
+  LLVM_DEBUG(for (auto MBB: Result) dbgs() << GetName(MBB) << ", ");
+  LLVM_DEBUG(dbgs() << "\n");
 
   return Result;
 }
@@ -2729,15 +2816,14 @@ MSP430NemesisDefenderPass::AlignSensitiveLoop(MachineLoop *Loop,
   // First align the contained regions (no straigh-line code) of this loop,
   //  because an aligned loop region is a precondition for GetFingerprint.
   AlignContainedRegions(Loop); // Recomputes analyses passes
-  Loop = MLI->getLoopFor(Header);
-  assert(Loop != nullptr); // Header should still be part of a loop
-  assert(Header == Loop->getHeader());
-
-  // Sanity check (AlignContainedRegions might change the CFG, but the
-  //               special loop blocks should not change)
-  assert(LoopPreheader == Loop->getLoopPreheader());
+  Loop = getLoopForHeader(MLI, Header);
   assert(LoopLatch == Loop->getLoopLatch());
-  assert(ExitBlock == Loop->getExitBlock());
+
+#if 0
+  assert(Loop->getExitBlock() != nullptr);
+  auto BBIE = GetInfo(*Loop->getExitBlock());
+  //BBIE->IsAligned = true;
+#endif
 
   // GeFingerprint depends on a correct loop analysis (see comments above)
   return AlignFingerprint(GetFingerprint(Loop), MBBs);
@@ -2751,6 +2837,7 @@ void MSP430NemesisDefenderPass::RedoAnalysisPasses() {
   //        a cleaner and more automated and less hardcoded way
   //MF->viewCFG();
   MDT->runOnMachineFunction(*MF); // MLI depends on this
+  MPDT->runOnMachineFunction(*MF); // AlignFingerprint depends on this
   //MDT->dump();
   MLI->runOnMachineFunction(*MF); // !!TODO: Is this the right way to do this?
 }
@@ -2758,9 +2845,9 @@ void MSP430NemesisDefenderPass::RedoAnalysisPasses() {
 // Aligns the sensitive branch that starts with BBI.BB
 //
 // When this function returns,
-//   the sensitive branch defined by (BBI.BB, ExitOfSR) will be secure. All 
+//   the sensitive branch defined by (BBI.BB, ExitOfSR) will be secure. All
 //   possible paths in the region will have same fingerprint. This means that
-//   the complete region will be compensated for 
+//   the complete region will be compensated for
 //     - unbalanced non-terminating instructions
 //     - unbalanced terminating instructions
 //     - unbalanced two-way branches
@@ -2810,11 +2897,27 @@ void MSP430NemesisDefenderPass::AlignSensitiveBranch(MBBInfo &BBI) {
     else {
       // A loop has been detected by ComputeSuccessors, deal with it first
       auto Union = AlignSensitiveLoop(Succs.Loop, Succs.Union);
+
+#if 1
+      auto E = Succs.Loop->getExitBlock();
+      assert(E != nullptr);
+      auto BBIE = GetInfo(*E);
+      BBIE->IsAligned = true;
+#endif
+
+#if 0
+      // CanonicalizeTerminatingInstructions is already called in 
+      //   CanonicalizeSensitiveLoop for loop headers
+      auto H = Succs.Loop->getHeader();
+      assert(H != nullptr);
+      MBBs.push_back(H);
+#endif
+
       Succs = ComputeSuccessors(Union, ExitOfSR);
     }
   }
 
-  // 2) Align terminating instructions
+  // 2) Canonicalize terminating instructions
   for (auto MBB : MBBs) {
     MBBInfo *BBI = GetInfo(*MBB);
 
@@ -2824,7 +2927,7 @@ void MSP430NemesisDefenderPass::AlignSensitiveBranch(MBBInfo &BBI) {
     // the non-termination instructions of all MBBs in the sensitive branch.
     // This is because the termination code can still change when aligning
     // one of the successor blocks (e.g. when an empty block is inserted).
-    AlignTerminatingInstructions(BBI->BB);
+    CanonicalizeTerminatingInstructions(BBI->BB);
   }
 
   // 3) Align two-way branches
@@ -2836,8 +2939,8 @@ void MSP430NemesisDefenderPass::AlignSensitiveBranch(MBBInfo &BBI) {
     // non-terminating instructions because the instruction that gets inserted
     // in the true path, to compensate for the JMP in the false path,
     // does not have to be taken into account when aligning the MBBs at the
-    // same level (See AlignBlocks), because technically this compensating 
-    // instruction belongs the previous MBB (or you could say that it is an 
+    // same level (See AlignBlocks), because technically this compensating
+    // instruction belongs the previous MBB (or you could say that it is an
     // artifact of how two-way branches need to be represented in MIR).
     if (BBI->HasSecretDependentBranch) {
       if (BBI->IsConditionalBranch && (BBI->FallThroughBB == nullptr)) {
@@ -2862,18 +2965,28 @@ void MSP430NemesisDefenderPass::AnalyzeLoops() {
         // LTODO: check all constraints
         assert(L->getLoopPreheader() != nullptr);
         assert(L->getHeader() != nullptr);
-        assert(L->getLoopLatch() != nullptr);
+        auto Latch = L->getLoopLatch();
+        assert(Latch != nullptr);
         assert(L->getExitBlock() != nullptr);
         assert(L->getLoopLatch()->isSuccessor(L->getExitBlock()));
         assert(*L->getLoopPreheader()->succ_begin() == L->getHeader());
 
+#if 0
+        // !!TODO
+        // Check some constraints of the well-formedness criterion
+        // Latch should end with a conditional jump, followed by an
+        //   unconditional jump
+        assert(std::distance(Latch->terminators().begin(),
+                             Latch->terminators().end()) == 2);
+#endif
+
         // LTODO: Document this better
         // Register that this block is the header of a loop.
-        // In the nemdef pass, loops are represented by their header-MBB, a 
-        // property for loops that is invariant in this pass. (The preheader 
-        //  and exit blocks can be different before and after the 
+        // In the nemdef pass, loops are represented by their header-MBB, a
+        // property for loops that is invariant in this pass. (The preheader
+        //  and exit blocks can be different before and after the
         //  transformation.)
-        // Loop data structures retured by MLI are invalidated when 
+        // Loop data structures retured by MLI are invalidated when
         //  loop analysis is recomputed. For this reason, it is not safe
         //   to store loop pointers in nemdef data structures since they
         //    can become dangling.
@@ -2881,14 +2994,16 @@ void MSP430NemesisDefenderPass::AnalyzeLoops() {
         //  well-formedness criterion. ComputeTripCount for example
         //  expects that the initialization of the induction register
         //  occurs in the preheader block. However, nemdef might introduce
-        //  an new "artificial" loop between the preheader of a 
-        //  well-formed loop and the actual loop 
+        //  an new "artificial" loop between the preheader of a
+        //  well-formed loop and the actual loop
         //   (see nemdef-loop-loop-tail-O3 for example)
         BBI.IsLoopHeader = true;
 
-        // Compute the loop trip count. According to the well-formedness 
+        // Compute the loop trip count. According to the well-formedness
         // criterion this should be statically computable.
         BBI.TripCount = GetLoopTripCount(L);
+
+        GetInfo(*Latch)->IsLoopLatch = true;
       }
     }
   }
@@ -3084,11 +3199,11 @@ void MSP430NemesisDefenderPass::DumpCFG() {
     if (BBI.IsAnalyzable) {
       if (BBI.IsBranch) {
         assert(BBI.TerminatorCount > 0);
-        if (BBI.TrueBB) {
-          O << GetName(BBI.BB) << " ->" << GetName(BBI.TrueBB) << ";\n";
-        }
         if (BBI.FalseBB) {
           O << GetName(BBI.BB) << " ->" << GetName(BBI.FalseBB) << ";\n";
+        }
+        if (BBI.TrueBB) {
+          O << GetName(BBI.BB) << " ->" << GetName(BBI.TrueBB) << ";\n";
         }
       }
       if (BBI.TerminatorCount == 0) {

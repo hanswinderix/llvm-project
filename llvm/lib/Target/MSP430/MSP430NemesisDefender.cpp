@@ -35,7 +35,7 @@ static cl::opt<bool>
 // TODO: Give credit to IfConversion pass?
 //         (only if idea of branch-patterns is used)
 // TODO: Refactor: Decompose in several classes
-//        (taint analysis, shape matchers,...)
+//        (sensitivity analysis, shape matchers,...)
 
 namespace {
 
@@ -95,7 +95,8 @@ public:
     MBBDefsInfo Defs;
     MBBDepsInfo Deps;
 
-    // TODO: Transform to OO design with polymorhic method align()
+#if 0
+// TODO: Transform to OO design with polymorhic method align()
     //        and match() class method
     // Branch class info
     BranchClass BClass = BCNotClassified;
@@ -111,6 +112,7 @@ public:
         MachineBasicBlock *JoinBB; // Block where the branches rejoin
       } Triangle;
     } BCInfo;
+#endif
 
     MBBInfo() : IsDone(false), IsAligned(false), IsAnalyzable(false),
       IsBranch(false), IsConditionalBranch(false),
@@ -130,21 +132,6 @@ public:
     MachineLoop *Loop; // ! TODO: Beware of dangling pointers
   };
 
-  // Recursive data type to represent the fingerprint of an aligned(!) sensitive
-  // region. A sensitive region is either:
-  //                - a sensitive branch,
-  //                - a sensitive loop
-  //                - a sensitive function
-  // TODO: Document better
-  struct Fingerprint {
-    MachineBasicBlock *LoopHeader; // Enclosing Loop _or_ nullptr
-    MachineBasicBlock *Head; // Head of fingerprint (can be empty but not null)
-
-    // A possible empty vector of nested-fingerprint, rest-fingerprint) pairs
-    //   (the MachineBasicBlock element of the pair can be empty but not null)
-    std::vector<std::pair<std::shared_ptr<Fingerprint>, MachineBasicBlock *>> Tail;
-  };
-
   MSP430NemesisDefenderPass() : MachineFunctionPass(ID) {}
 
   StringRef getPassName() const override { return "MSP430 Nemesis Defender"; }
@@ -160,11 +147,11 @@ private:
   /// Maps instructions to their instruction Ids, relative to the beginning of
   /// their basic blocks.
   DenseMap<MachineInstr *, size_t> InstIds;
-  /// The set of tainted instructions
-  SmallPtrSet<const MachineInstr *, 10> TaintInfo;
+  /// The set of sensitive instructions
+  SmallPtrSet<const MachineInstr *, 10> SensitivityInfo;
 
   MachineFunction *MF;
-  // The taint analysis procedure determines whether canonicalization is
+  // The sensitivity analysis procedure determines whether canonicalization is
   // required (i.e. when a sensitive region contains a return node).
   MachineBasicBlock *CanonicalExit = nullptr;
   MachineRegisterInfo *MRI;
@@ -210,11 +197,8 @@ private:
   void CanonicalizeTerminatingInstructions(MachineBasicBlock *MBB);
   void AlignTwoWayBranch(MachineBasicBlock &MBB);
 
-  MachineBasicBlock::iterator GetPosBeforeBranchingCode(MachineBasicBlock *MBB)
-  const;
-
-  // Returns information about 'taintedness' or 'secret-dependendentness' of
-  //  machine instructions and basic block info.
+  // Returns information about sensitivity of machine instructions and basic
+  //  block info.
   bool IsSecretDependent(MachineInstr *MI);
   bool IsSecretDependent(MBBInfo *BBI);
 
@@ -231,10 +215,6 @@ private:
 
   void RegisterDefs(MBBInfo &BBI);
 
-  bool MatchFork(MBBInfo &EBBI);
-  bool MatchDiamond(MBBInfo &EBBI);
-  bool MatchTriangle(MBBInfo &EBBI, bool DivOnFalse);
-
   void CompensateInstr(const MachineInstr &MI, MachineBasicBlock &MBB,
                        MachineBasicBlock::iterator MBBI);
   void CompensateCall(const MachineInstr &Call, MachineBasicBlock &MBB,
@@ -242,6 +222,13 @@ private:
   void SecureCall(MachineInstr &Call);
 
 #if 0
+  MachineBasicBlock::iterator GetPosBeforeBranchingCode(MachineBasicBlock *MBB)
+  const;
+
+  bool MatchFork(MBBInfo &EBBI);
+  bool MatchDiamond(MBBInfo &EBBI);
+  bool MatchTriangle(MBBInfo &EBBI, bool DivOnFalse);
+
   MachineBasicBlock::iterator AlignBlock(MachineBasicBlock &Source,
                                          MachineBasicBlock::iterator SI,
                                          MachineBasicBlock &Target,
@@ -252,6 +239,8 @@ private:
   void AlignTriangle(MBBInfo &EBBI);
   void AlignDiamond(MBBInfo &EBBI);
   void AlignFork(MBBInfo &EBBI);
+
+  void ClassifyBranches();
 #endif
 
   // TODO: Move analyzeCompare to TargetInstrInfo?
@@ -270,8 +259,7 @@ private:
   void VerifyControlFlowAnalysis();
 
   void ComputeReachingDefs();
-  void PerformTaintAnalysis();
-  void ClassifyBranches();
+  void PeformSensitivityAnalysis();
 
   void DetectOuterSensitiveBranches();
   void AnalyzeLoops();
@@ -836,7 +824,7 @@ void MSP430NemesisDefenderPass::ReAnalyzeControlFlow(MachineBasicBlock &MBB) {
   BBI->IsAnalyzable = false;
   BBI->IsBranch = false;
   BBI->IsConditionalBranch = false;
-  // HasSecretDependentBranch is set in PerformTaintAnalysis, not in
+  // HasSecretDependentBranch is set in PeformSensitivityAnalysis, not in
   //  AnalyzeControlFlow
   //BBI->HasSecretDependentBranch = false;
   // IsPartOfSensitiveRegion is set during outer region analysis
@@ -859,7 +847,9 @@ void MSP430NemesisDefenderPass::ReAnalyzeControlFlow(MachineBasicBlock &MBB) {
   BBI->BrCond.clear();
   BBI->Defs.clear();
   BBI->Deps.clear();
+#if 0
   std::memset(&BBI->BCInfo, 0, sizeof(BBI->BCInfo));
+#endif
 
   AnalyzeControlFlow(MBB);
 }
@@ -1475,8 +1465,8 @@ MSP430NemesisDefenderPass::ComputeSuccessors(
                   if (SBBI->IsConditionalBranch) {
                     TII->insertBranch(*Clone, SBBI->TrueBB, SBBI->FalseBB,
                                       SBBI->BrCond, DebugLoc());
-                    // Update taint analysis and containedness
-                    //   - HasSecretDependentBranch is set during taint analysis
+                    // Update sensitivity analysis and containedness
+                    //   - HasSecretDependentBranch is set during sensitivity analysis
                     //   - IsPartOfSensitiveRegion is set during outer region analysis
                     GetInfo(*Clone)->HasSecretDependentBranch = true;
                     GetInfo(*Clone)->IsPartOfSensitiveRegion = true;
@@ -1829,16 +1819,16 @@ void MSP430NemesisDefenderPass::ComputeReachingDefs() {
 }
 
 bool MSP430NemesisDefenderPass::IsSecretDependent(MachineInstr *MI) {
-  return TaintInfo.find(MI) != TaintInfo.end();
+  return SensitivityInfo.find(MI) != SensitivityInfo.end();
 }
 
 bool MSP430NemesisDefenderPass::IsSecretDependent(MBBInfo *BBI) {
   return BBI->HasSecretDependentBranch;
 }
 
-// Marks the given machine instruction as tainted
+// Marks the given machine instruction as sensitive
 void MSP430NemesisDefenderPass::Taint(MachineInstr * MI) {
-  TaintInfo.insert(MI);
+  SensitivityInfo.insert(MI);
 
   //LLVM_DEBUG(dbgs() << GetName(MI->getParent()) << ": Tainting " << *MI);
 
@@ -1922,24 +1912,24 @@ MSP430NemesisDefenderPass::IsPartOfSensitiveRegion(const MachineInstr *MI) {
   return Result;
 }
 
-// Safe taint analysis (uses use-def chain, the result of the
+// Safe sensitivity analysis (uses use-def chain, the result of the
 //  reaching definitions analysis) to statically track confidential
 //  information. At first, only analyze registers, and conservatively
 //  consider the rest as secret. To be extended
 //  to stack slots and global variables.
 //
-// During taint analysis, it is also determined whether the CFG needs to be
+// During sensitivity analysis, it is also determined whether the CFG needs to be
 // canonicalized, i.e. transformed to a CFG with a single exit point (via calls
 // to IsPartOfSensitiveRegion()). This analysis could not be done earlier,
-// because there was no taint info yet.
+// because there was no sensitivity info yet.
 //
 // !TODO: Desperately needs optimization
 //         - Implement this as a worklist algo (needs a def-use chain)
-//         - Store the taint info in MBBInfo instead of a MF-level set?
-void MSP430NemesisDefenderPass::PerformTaintAnalysis() {
+//         - Store the sensitivity info in MBBInfo instead of a MF-level set?
+void MSP430NemesisDefenderPass::PeformSensitivityAnalysis() {
   size_t N = 0;
-  while (TaintInfo.size() > N) {
-    N = TaintInfo.size();
+  while (SensitivityInfo.size() > N) {
+    N = SensitivityInfo.size();
     for (auto &MBB : *MF) {
       // Ignore the canonical exit node. Code asserts because the reaching def
       // analysis has not been peformed on this node. (Fix this?)
@@ -1951,15 +1941,15 @@ void MSP430NemesisDefenderPass::PerformTaintAnalysis() {
       for (auto &MI : MBB.instrs()) {
         auto IID = InstIds[&MI];
         assert(IID < BBI->Deps.size());
-        if (TaintInfo.find(&MI) == TaintInfo.end()) {
+        if (SensitivityInfo.find(&MI) == SensitivityInfo.end()) {
 
           if (MI.isInlineAsm()) {
             llvm_unreachable("Inline assembly is not supported");
           }
 
           if (MI.isCall()) {
-            // TODO: the call should only be marked tainted if one of the
-            //       actual parameters is marked tainted
+            // TODO: the call should only be marked sensitive if one of the
+            //       actual parameters is marked sensitive
             Taint(&MI);
             //continue;
           }
@@ -1973,7 +1963,7 @@ void MSP430NemesisDefenderPass::PerformTaintAnalysis() {
           }
 
           for (auto &MO : MI.operands()) {
-            if (TaintInfo.find(&MI) != TaintInfo.end()) {
+            if (SensitivityInfo.find(&MI) != SensitivityInfo.end()) {
               break;
             }
             // !TODO: Gradually support more cases, by adding more test
@@ -2009,7 +1999,7 @@ void MSP430NemesisDefenderPass::PerformTaintAnalysis() {
 
               case MachineOperand::MO_GlobalAddress    :
               case MachineOperand::MO_MCSymbol         :
-                // Be conservative and mark as tainted
+                // Be conservative and mark as sensitive
                 Taint(&MI);
                 break;
 
@@ -2040,6 +2030,7 @@ void MSP430NemesisDefenderPass::PerformTaintAnalysis() {
   }
 }
 
+#if 0
 // Matchess the fork pattern. Typical for this pattern is that the branches
 // never join again.
 //
@@ -2113,7 +2104,7 @@ bool MSP430NemesisDefenderPass::MatchDiamond(MBBInfo &EBBI) {
   return false;
 }
 
-// The branch classifier considers only 'tainted' basic blocks as starting
+// The branch classifier considers only 'sensitive' basic blocks as starting
 //  points of the analysis. The result of this classification is input for
 //  the alignment code generator.
 void MSP430NemesisDefenderPass::ClassifyBranches() {
@@ -2138,6 +2129,7 @@ void MSP430NemesisDefenderPass::ClassifyBranches() {
     }
   }
 }
+#endif
 
 // ! TODO: Figure out if inserting (or removing) an element into an ilist does
 //         not invalidate iterators or pointers to other elements in the list.
@@ -2257,6 +2249,7 @@ MSP430NemesisDefenderPass::AlignBlock(MachineBasicBlock &Source,
 }
 
 // Returns the position in MBB right before the branching code at the end
+// TODO: Why not use MBB->getFirstTerminator()
 MachineBasicBlock::iterator MSP430NemesisDefenderPass::
 GetPosBeforeBranchingCode(MachineBasicBlock *MBB) const {
   if (MBB->begin() == MBB->end())
@@ -2623,9 +2616,9 @@ MSP430NemesisDefenderPass::AlignFingerprint(
           std::vector<MachineBasicBlock *> L;
           for (auto Pred : MBB->predecessors()) {
             if (GetInfo(*Pred)->IsAligned) {
-            // !!!! TODO: Make sure this is well-understood
+            // !!!!!!!TODO: Make sure this is well-understood
             //       (wrt nemdef-region-loop-loop-tail-O3.mir)
-            //if (! MPDT->dominates(Pred, Loop->getHeader())) {
+            //if (! MDT->dominates(Loop->getHeader(), Pred)) {
               L.push_back(Pred);
             }
           }
@@ -2837,7 +2830,7 @@ void MSP430NemesisDefenderPass::RedoAnalysisPasses() {
   //        a cleaner and more automated and less hardcoded way
   //MF->viewCFG();
   MDT->runOnMachineFunction(*MF); // MLI depends on this
-  MPDT->runOnMachineFunction(*MF); // AlignFingerprint depends on this
+  //MPDT->runOnMachineFunction(*MF);
   //MDT->dump();
   MLI->runOnMachineFunction(*MF); // !!TODO: Is this the right way to do this?
 }
@@ -3230,9 +3223,9 @@ void MSP430NemesisDefenderPass::PrepareAnalysis() {
 #endif
 
   // Create dummy machine instructions at the beginning of the entry MBB to
-  //  represent the CC defs. Add them to the taint set when their corresponding
+  //  represent the CC defs. Add them to the sensitivity set when their corresponding
   //  argument is marked "_secret". This allows for a uniform and therefore
-  //  simpler taint analysis implementation.
+  //  simpler sensitivity analysis implementation.
   // TODO: Code is MSP430-specific and should be platform independent
   //        -> Possible use the generated info from the TableGen CallingConv 
   //            backend?
@@ -3245,7 +3238,7 @@ void MSP430NemesisDefenderPass::PrepareAnalysis() {
   for (auto &Arg : MF->getFunction().args()) {
     auto MI = BuildMI(MBB, MBBI, DL, TII->get(MSP430::MOV16rc), Reg++).addImm(0);
     if (IsSecret(Arg)) {
-      TaintInfo.insert(MI);
+      SensitivityInfo.insert(MI);
     }
   }
 }
@@ -3261,7 +3254,7 @@ void MSP430NemesisDefenderPass::FinishAnalysis() {
   }
 }
 
-// Canonicalizes the CFG when necessary (determined during taint analysis).
+// Canonicalizes the CFG when necessary (determined during sensitivity analysis).
 // The canonicalization step transforms a CFG with multiple exit points into
 // one where there is only one.
 // TODO: Optimize
@@ -3339,8 +3332,10 @@ bool MSP430NemesisDefenderPass::runOnMachineFunction(MachineFunction &MF) {
   VerifyControlFlowAnalysis();
   ComputeReachingDefs();
 
-  PerformTaintAnalysis();
+  PeformSensitivityAnalysis();
+#if 0
   ClassifyBranches();
+#endif
   FinishAnalysis();
 
   // Canonicalize CFG, if needed
@@ -3377,7 +3372,7 @@ bool MSP430NemesisDefenderPass::runOnMachineFunction(MachineFunction &MF) {
 void MSP430NemesisDefenderPass::releaseMemory() {
   BBAnalysis.clear(); // TODO: Does this also clear Defs and Deps?
   InstIds.clear();
-  TaintInfo.clear();
+  SensitivityInfo.clear();
 
   CanonicalExit = nullptr;
   EntryBBI = nullptr;

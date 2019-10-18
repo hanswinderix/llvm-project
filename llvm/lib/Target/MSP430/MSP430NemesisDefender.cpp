@@ -128,7 +128,7 @@ public:
 
   // Return type of ComputeSuccessors
   struct Successors {
-    std::vector<MachineBasicBlock *> Union;
+    std::vector<MachineBasicBlock *> Succs;
     MachineLoop *Loop; // ! TODO: Beware of dangling pointers
   };
 
@@ -1249,21 +1249,22 @@ void MSP430NemesisDefenderPass::AlignTwoWayBranch(MachineBasicBlock &MBB) {
 }
 
 // Returns
-//   1) when one of the direct successors represents the header of a loop
+//   1) when one of the direct successors of MBBs represents the header of a
+//        loop,
 //      - Successors.Loop points to the hedear of the detected loop
-//      - Successors.Union represents the union of all successors of alls MBBs
+//      - Successors.Succs represents the union of all successors of all MBBs
 //         modulo the detected Loop header
 //     The CFG will not be mutated.
 //
 //   2) otherwise
 //      - Successors.Loop will be nullptr
-//      - Successors.Union represents the union of the direct successors of
+//      - Successors.Succs represents the union of the direct successors of
 //         every MMB in MBBs
-//      Possibly mutates the MF (and corresonding CFG) in order for the
-//      preconditions of AlignBlocks() to be valid.
+//      Possibly mutates the MF (and its corresonding CFG) in order for the
+//      preconditions of AlignNonTerminatingInstructions() to be valid.
 //
-// PRE: All MBB in MBBs are part of a SESE-region
-// POST: R.Union does not contain any duplicate blocks
+// PRE: All MBB in MBBs are part of a sensitive region
+// POST: R.Succs does not contain any duplicate blocks
 //
 // Param Exit is the "join block" or the "point of convergence" of the
 // originating sensitive region.
@@ -1368,10 +1369,10 @@ MSP430NemesisDefenderPass::ComputeSuccessors(
             auto SBBI = GetInfo(*S);
             assert(! SBBI->IsAligned);
 
-            // Duplicates are not allowed in the Union
+            // Duplicates are not allowed in the Succs
             if (Set.find(S) == Set.end()) {
               Set.insert(S);
-              R.Union.push_back(S);
+              R.Succs.push_back(S);
             }
           }
         }
@@ -1409,7 +1410,7 @@ MSP430NemesisDefenderPass::ComputeSuccessors(
                 // Add termination code
                 TII->insertBranch(*EmptyMBB, S, nullptr, {}, DebugLoc());
 
-                R.Union.push_back(EmptyMBB);
+                R.Succs.push_back(EmptyMBB);
               }
 
               // Update MBB
@@ -1482,7 +1483,7 @@ MSP430NemesisDefenderPass::ComputeSuccessors(
                       *Clone, SBBI->FallThroughBB, nullptr, {}, DebugLoc());
                 }
 
-                R.Union.push_back(Clone);
+                R.Succs.push_back(Clone);
               }
 
               // Update MBB
@@ -1500,10 +1501,10 @@ MSP430NemesisDefenderPass::ComputeSuccessors(
                 AnalyzeControlFlow(*Clone);
               }
             } else {
-              // Duplicates are not allowed in the Union
+              // Duplicates are not allowed in Succs
               if (Set.find(S) == Set.end()) {
                 Set.insert(S);
-                R.Union.push_back(S);
+                R.Succs.push_back(S);
               }
             }
           }
@@ -1512,18 +1513,18 @@ MSP430NemesisDefenderPass::ComputeSuccessors(
     }
   }
 
-  // Check postcondition: There should be no duplicates in the Union.
+  // Check postcondition: There should be no duplicates in Succs
   //
   // Remark: It is not possible to
   // use a std::set instead of a std::vector, because this would mean
   // that the order of insertion is not maintained. The order might be relevant
   // when effectively aligning the different blocks, because the order determines
   // the order in which the individual MBBs take the role as the reference block.
-  std::set<MachineBasicBlock *> S(R.Union.begin(), R.Union.end());
-  assert(S.size() == R.Union.size());
+  std::set<MachineBasicBlock *> S(R.Succs.begin(), R.Succs.end());
+  assert(S.size() == R.Succs.size());
 
   LLVM_DEBUG(dbgs() << "> successors: ");
-  LLVM_DEBUG(for (auto MBB: R.Union) dbgs() << GetName(MBB) << ", ");
+  LLVM_DEBUG(for (auto MBB: R.Succs) dbgs() << GetName(MBB) << ", ");
   LLVM_DEBUG(dbgs() << "\n");
 
   return R;
@@ -2773,7 +2774,7 @@ MSP430NemesisDefenderPass::AlignFingerprint(
   return Result;
 }
 
-// AlignSensitiveLoop peforms the following actions:
+// AlignSensitiveLoop performs the following actions:
 //  1) aligns all sensitive regions for which the "closest" loop is 'this' loop
 //  2) Aligns all MBBs with the aligned loop region
 //
@@ -2879,17 +2880,17 @@ void MSP430NemesisDefenderPass::AlignSensitiveBranch(MBBInfo &BBI) {
   // 1) Align non-terminating instructions
   Successors Succs;
   Succs = ComputeSuccessors({BBI.BB}, ExitOfSR);
-  while (!Succs.Union.empty()) {
+  while (!Succs.Succs.empty()) {
     // TODO: Make sure this loop terminates
     if (Succs.Loop == nullptr) {
-      assert(Succs.Union.size() > 1);
-      AlignNonTerminatingInstructions(Succs.Union);
-      std::copy(Succs.Union.begin(), Succs.Union.end(), std::back_inserter(MBBs));
-      Succs = ComputeSuccessors(Succs.Union, ExitOfSR);
+      assert(Succs.Succs.size() > 1);
+      AlignNonTerminatingInstructions(Succs.Succs);
+      std::copy(Succs.Succs.begin(), Succs.Succs.end(), std::back_inserter(MBBs));
+      Succs = ComputeSuccessors(Succs.Succs, ExitOfSR);
     }
     else {
       // A loop has been detected by ComputeSuccessors, deal with it first
-      auto Union = AlignSensitiveLoop(Succs.Loop, Succs.Union);
+      auto S = AlignSensitiveLoop(Succs.Loop, Succs.Succs);
 
 #if 1
       auto E = Succs.Loop->getExitBlock();
@@ -2906,7 +2907,7 @@ void MSP430NemesisDefenderPass::AlignSensitiveBranch(MBBInfo &BBI) {
       MBBs.push_back(H);
 #endif
 
-      Succs = ComputeSuccessors(Union, ExitOfSR);
+      Succs = ComputeSuccessors(S, ExitOfSR);
     }
   }
 
@@ -2932,7 +2933,8 @@ void MSP430NemesisDefenderPass::AlignSensitiveBranch(MBBInfo &BBI) {
     // non-terminating instructions because the instruction that gets inserted
     // in the true path, to compensate for the JMP in the false path,
     // does not have to be taken into account when aligning the MBBs at the
-    // same level (See AlignBlocks), because technically this compensating
+    // same level (See AlignNonTerminatingInstructions), because technically
+    // this compensating
     // instruction belongs the previous MBB (or you could say that it is an
     // artifact of how two-way branches need to be represented in MIR).
     if (BBI->HasSecretDependentBranch) {

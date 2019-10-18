@@ -80,8 +80,14 @@ llvm::Error SystemInitializerCommon::Initialize() {
     }
     if (llvm::Expected<std::string> cwd =
             loader->LoadBuffer<WorkingDirectoryProvider>()) {
-      FileSystem::Instance().GetVirtualFileSystem()->setCurrentWorkingDirectory(
-          *cwd);
+      cwd->erase(std::remove_if(cwd->begin(), cwd->end(),
+                                [](char c) { return std::iscntrl(c); }),
+                 cwd->end());
+      if (std::error_code ec = FileSystem::Instance()
+                                   .GetVirtualFileSystem()
+                                   ->setCurrentWorkingDirectory(*cwd)) {
+        return llvm::errorCodeToError(ec);
+      }
     } else {
       return cwd.takeError();
     }

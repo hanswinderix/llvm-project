@@ -1,6 +1,7 @@
 #ifndef SLLVM_SANCUS_TRANSFORMATION_H
 #define SLLVM_SANCUS_TRANSFORMATION_H
 
+#include "llvm/Pass.h"
 #include "llvm/IR/Module.h"
 
 using namespace llvm;

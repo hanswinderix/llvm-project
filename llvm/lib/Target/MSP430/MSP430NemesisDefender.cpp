@@ -2170,7 +2170,8 @@ void MSP430NemesisDefenderPass::CompensateInstr(const MachineInstr &MI,
 #define PREFIX_NEMDEF_SECURE "_nds_"
 #define PREFIX_NEMDEF_DUMMY  "_ndd_"
 
-// Compensates the call with a secure and dummy version of the callee
+// Compensates the call with a call to a dummy and secure transformation of
+//  the callee
 void MSP430NemesisDefenderPass::CompensateCall(const MachineInstr &Call,
                                                MachineBasicBlock &MBB,
                                                MachineBasicBlock::iterator I) {
@@ -2195,8 +2196,8 @@ void MSP430NemesisDefenderPass::CompensateCall(const MachineInstr &Call,
       }
 
       // TODO: Avoid string manipulation
-      if (N->find(PREFIX_NEMDEF_DUMMY) > 0) {
-        if (N->find(PREFIX_NEMDEF_SECURE) == 0) {
+      if (N->find(PREFIX_NEMDEF_DUMMY) > 0) {    // Read as: "if not startswith"
+        if (N->find(PREFIX_NEMDEF_SECURE) == 0) {// Read as: "if startswith"
           N->erase(0, strlen(PREFIX_NEMDEF_SECURE));
         }
         N->insert(0, PREFIX_NEMDEF_DUMMY);
@@ -3069,8 +3070,8 @@ void MSP430NemesisDefenderPass::SecureCall(MachineInstr &Call) {
       }
 
       // TODO: Avoid string manipulation
-      if (N->find(PREFIX_NEMDEF_SECURE) > 0) {
-        if (N->find(PREFIX_NEMDEF_DUMMY) > 0) {
+      if (N->find(PREFIX_NEMDEF_SECURE) > 0) {  // Read as: "if not startswith"
+        if (N->find(PREFIX_NEMDEF_DUMMY) > 0) { // Read as: "if not startswith"
           N->insert(0, PREFIX_NEMDEF_SECURE);
           MO.ChangeToES(N->c_str());
         }
@@ -3079,7 +3080,7 @@ void MSP430NemesisDefenderPass::SecureCall(MachineInstr &Call) {
       break;
 
 #if 0
-    // Sancus out calls
+    // !!!!TODO: Sancus out calls
     case MSP430::BRCALLr:
       break;
 #endif
@@ -3090,7 +3091,7 @@ void MSP430NemesisDefenderPass::SecureCall(MachineInstr &Call) {
     case MSP430::CALLr:
     default:
       LLVM_DEBUG(dbgs() << "OPCODE=" << Call.getOpcode() << "\n");
-      LLVM_DEBUG(dbgs() << Call); 
+      LLVM_DEBUG(dbgs() << Call);
       llvm_unreachable("Usupported call");
   }
 }

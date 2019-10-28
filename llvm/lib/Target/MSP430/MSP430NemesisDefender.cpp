@@ -2625,6 +2625,8 @@ MSP430NemesisDefenderPass::AlignFingerprint(
             }
           }
           for (auto Pred : L) {
+            // Update CFG must be done outside of previous for loop,
+            //  as it invalidates the Pred iterator
             ReplaceSuccessor(Pred, MBB, CurMBB);
           }
         }

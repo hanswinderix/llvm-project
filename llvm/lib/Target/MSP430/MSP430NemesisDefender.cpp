@@ -2170,7 +2170,7 @@ void MSP430NemesisDefenderPass::CompensateInstr(const MachineInstr &MI,
 #define PREFIX_NEMDEF_SECURE "_nds_"
 #define PREFIX_NEMDEF_DUMMY  "_ndd_"
 
-// Compensates the call with a call to a dummy and secure transformation of
+// Compensates the call with a call to a dummy and secure transformation of 
 //  the callee
 void MSP430NemesisDefenderPass::CompensateCall(const MachineInstr &Call,
                                                MachineBasicBlock &MBB,
@@ -2567,7 +2567,7 @@ MSP430NemesisDefenderPass::AlignFingerprint(
   LLVM_DEBUG(dbgs() << "\n");
 
   // When the last block of the fingerprint is a loop latch, push
-  //  add loop-exit block to the result
+  //  loop-exit block to the result
   auto BBI = GetInfo(*FP.back());
   if (BBI->IsLoopLatch) {
     auto Loop = MLI->getLoopFor(FP.back());

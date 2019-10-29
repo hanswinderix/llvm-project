@@ -1148,6 +1148,7 @@ void MSP430NemesisDefenderPass::BuildFingerprint(
   MachineBasicBlock *PrevBB = nullptr;
   MachineBasicBlock *CurBB = Header;
 
+  // REMARK: This must also work for paths that contain "artifical" loops
   while (CurBB != Latch) {
     assert(Visited.find(CurBB) == Visited.end() && "Well-formed loop expected");
     Visited.insert(CurBB);
@@ -2381,6 +2382,13 @@ MSP430NemesisDefenderPass::GetExitOfSensitiveBranch(MachineBasicBlock *Entry) {
 // get overly complicated:
 //   => Once a region is aligned, it may not be changed anymore
 // ----------------------------------------------------------------------------
+//
+// This method is called exactly once for each sensitive loop
+//
+// Adds a
+//   - dummy preheader
+//   - dummy exit
+//   - dummy latch
 void MSP430NemesisDefenderPass::CanonicalizeSensitiveLoop(MachineLoop *Loop) {
   auto Preheader = Loop->getLoopPreheader();
   auto Header = Loop->getHeader();
@@ -2458,6 +2466,7 @@ void MSP430NemesisDefenderPass::CanonicalizeSensitiveLoop(MachineLoop *Loop) {
   AnalyzeControlFlow(*NewPreheader);
   RedoAnalysisPasses(); // TODO: Optimize, by manually updating the MLI
                         //         according to this canonicalization
+                        // (=> update loop preheader and exit blocks)
 
   // Call CanonicalizeTerminatingInstructions here on the header, because the 
   //   sensitive loop region should be completely aligned when the fingerprint 

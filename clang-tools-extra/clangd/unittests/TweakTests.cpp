@@ -40,9 +40,9 @@
 #include <vector>
 
 using ::testing::AllOf;
+using ::testing::ElementsAre;
 using ::testing::HasSubstr;
 using ::testing::StartsWith;
-using ::testing::ElementsAre;
 
 namespace clang {
 namespace clangd {
@@ -131,6 +131,15 @@ TEST_F(DumpASTTest, Test) {
                     HasSubstr("'+'"), HasSubstr("|-IntegerLiteral"),
                     HasSubstr("<col:9> 'int' 2\n`-IntegerLiteral"),
                     HasSubstr("<col:13> 'int' 2")));
+}
+
+TWEAK_TEST(DumpSymbol);
+TEST_F(DumpSymbolTest, Test) {
+  std::string ID = R"("id":"CA2EBE44A1D76D2A")";
+  std::string USR = R"("usr":"c:@F@foo#")";
+  EXPECT_THAT(apply("void f^oo();"),
+              AllOf(StartsWith("message:"), testing::HasSubstr(ID),
+                    testing::HasSubstr(USR)));
 }
 
 TWEAK_TEST(ShowSelectionTree);
@@ -1377,7 +1386,7 @@ TEST_F(DefineInlineTest, TransformFunctionTempls) {
   // Template body is not parsed until instantiation time on windows, which
   // results in arbitrary failures as function body becomes NULL.
   ExtraArgs.push_back("-fno-delayed-template-parsing");
-  for(const auto &Case : Cases)
+  for (const auto &Case : Cases)
     EXPECT_EQ(apply(Case.first), Case.second) << Case.first;
 }
 
@@ -1420,7 +1429,7 @@ TEST_F(DefineInlineTest, TransformTypeLocs) {
 }
 
 TEST_F(DefineInlineTest, TransformDeclRefs) {
-  auto Test =R"cpp(
+  auto Test = R"cpp(
     namespace a {
       template <typename T> class Bar {
       public:
@@ -1489,6 +1498,70 @@ TEST_F(DefineInlineTest, StaticMembers) {
   EXPECT_EQ(apply(Test), Expected);
 }
 
+TEST_F(DefineInlineTest, TransformParamNames) {
+  std::pair<llvm::StringRef, llvm::StringRef> Cases[] = {
+      {R"cpp(
+        void foo(int, bool b, int T\
+est);
+        void ^foo(int f, bool x, int z) {})cpp",
+       R"cpp(
+        void foo(int f, bool x, int z){}
+        )cpp"},
+      {R"cpp(
+        #define PARAM int Z
+        void foo(PARAM);
+
+        void ^foo(int X) {})cpp",
+       "fail: Cant rename parameter inside macro body."},
+      {R"cpp(
+        #define TYPE int
+        #define PARAM TYPE Z
+        #define BODY(x) 5 * (x) + 2
+        template <int P>
+        void foo(PARAM, TYPE Q, TYPE, TYPE W = BODY(P));
+        template <int x>
+        void ^foo(int Z, int b, int c, int d) {})cpp",
+       R"cpp(
+        #define TYPE int
+        #define PARAM TYPE Z
+        #define BODY(x) 5 * (x) + 2
+        template <int x>
+        void foo(PARAM, TYPE b, TYPE c, TYPE d = BODY(x)){}
+        )cpp"},
+  };
+  for (const auto &Case : Cases)
+    EXPECT_EQ(apply(Case.first), Case.second) << Case.first;
+}
+
+TEST_F(DefineInlineTest, TransformTemplParamNames) {
+  auto Test = R"cpp(
+    struct Foo {
+      struct Bar {
+        template <class, class X,
+                  template<typename> class, template<typename> class Y,
+                  int, int Z>
+        void foo(X, Y<X>, int W = 5 * Z + 2);
+      };
+    };
+
+    template <class T, class U,
+              template<typename> class V, template<typename> class W,
+              int X, int Y>
+    void Foo::Bar::f^oo(U, W<U>, int Q) {})cpp";
+  auto Expected = R"cpp(
+    struct Foo {
+      struct Bar {
+        template <class T, class U,
+                  template<typename> class V, template<typename> class W,
+                  int X, int Y>
+        void foo(U, W<U>, int Q = 5 * Y + 2){}
+      };
+    };
+
+    )cpp";
+  EXPECT_EQ(apply(Test), Expected);
+}
+
 TEST_F(DefineInlineTest, TransformInlineNamespaces) {
   auto Test = R"cpp(
     namespace a { inline namespace b { namespace { struct Foo{}; } } }
@@ -1527,7 +1600,7 @@ TEST_F(DefineInlineTest, TokensBeforeSemicolon) {
           void fo^o() { return ; })cpp",
        "fail: Couldn't find semicolon for target declaration."},
   };
-  for(const auto& Case: Cases)
+  for (const auto &Case : Cases)
     EXPECT_EQ(apply(Case.first), Case.second) << Case.first;
 }
 
@@ -1585,7 +1658,7 @@ TEST_F(DefineInlineTest, HandleMacros) {
           void TARGET(){ return; }
           )cpp"},
   };
-  for(const auto& Case: Cases)
+  for (const auto &Case : Cases)
     EXPECT_EQ(apply(Case.first), Case.second) << Case.first;
 }
 

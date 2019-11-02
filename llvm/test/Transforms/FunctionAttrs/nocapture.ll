@@ -1,7 +1,7 @@
 ; RUN: opt -functionattrs -S < %s | FileCheck %s --check-prefixes=FNATTR,EITHER
 ; RUN: opt -passes=function-attrs -S < %s | FileCheck %s --check-prefixes=FNATTR,EITHER
-; RUN: opt -attributor -attributor-manifest-internal -attributor-disable=false -S < %s | FileCheck %s --check-prefixes=ATTRIBUTOR,EITHER
-; RUN: opt -passes=attributor -attributor-manifest-internal -attributor-disable=false -S < %s | FileCheck %s --check-prefixes=ATTRIBUTOR,EITHER
+; RUN: opt -attributor -attributor-manifest-internal -attributor-disable=false -S -attributor-annotate-decl-cs < %s | FileCheck %s --check-prefixes=ATTRIBUTOR,EITHER
+; RUN: opt -passes=attributor -attributor-manifest-internal -attributor-disable=false -S -attributor-annotate-decl-cs < %s | FileCheck %s --check-prefixes=ATTRIBUTOR,EITHER
 
 @g = global i32* null		; <i32**> [#uses=1]
 
@@ -306,7 +306,8 @@ define i1 @captureICmpRev(i32* %x) {
   ret i1 %1
 }
 
-; EITHER: define i1 @nocaptureInboundsGEPICmp(i32* nocapture readnone %x)
+; FNATTR: define i1 @nocaptureInboundsGEPICmp(i32* nocapture readnone %x)
+; ATTRIBUTOR: define i1 @nocaptureInboundsGEPICmp(i32* nocapture nonnull readnone %x)
 define i1 @nocaptureInboundsGEPICmp(i32* %x) {
   %1 = getelementptr inbounds i32, i32* %x, i32 5
   %2 = bitcast i32* %1 to i8*
@@ -314,7 +315,8 @@ define i1 @nocaptureInboundsGEPICmp(i32* %x) {
   ret i1 %3
 }
 
-; EITHER: define i1 @nocaptureInboundsGEPICmpRev(i32* nocapture readnone %x)
+; FNATTR: define i1 @nocaptureInboundsGEPICmpRev(i32* nocapture readnone %x)
+; ATTRIBUTOR: define i1 @nocaptureInboundsGEPICmpRev(i32* nocapture nonnull readnone %x)
 define i1 @nocaptureInboundsGEPICmpRev(i32* %x) {
   %1 = getelementptr inbounds i32, i32* %x, i32 5
   %2 = bitcast i32* %1 to i8*

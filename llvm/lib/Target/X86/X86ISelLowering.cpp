@@ -6712,6 +6712,93 @@ static bool getTargetShuffleMask(SDNode *N, MVT VT, bool AllowSentinelZero,
   return true;
 }
 
+/// Compute whether each element of a shuffle is zeroable.
+///
+/// A "zeroable" vector shuffle element is one which can be lowered to zero.
+/// Either it is an undef element in the shuffle mask, the element of the input
+/// referenced is undef, or the element of the input referenced is known to be
+/// zero. Many x86 shuffles can zero lanes cheaply and we often want to handle
+/// as many lanes with this technique as possible to simplify the remaining
+/// shuffle.
+static void computeZeroableShuffleElements(ArrayRef<int> Mask,
+                                           SDValue V1, SDValue V2,
+                                           APInt &KnownUndef, APInt &KnownZero) {
+  int Size = Mask.size();
+  KnownUndef = KnownZero = APInt::getNullValue(Size);
+
+  V1 = peekThroughBitcasts(V1);
+  V2 = peekThroughBitcasts(V2);
+
+  bool V1IsZero = ISD::isBuildVectorAllZeros(V1.getNode());
+  bool V2IsZero = ISD::isBuildVectorAllZeros(V2.getNode());
+
+  int VectorSizeInBits = V1.getValueSizeInBits();
+  int ScalarSizeInBits = VectorSizeInBits / Size;
+  assert(!(VectorSizeInBits % ScalarSizeInBits) && "Illegal shuffle mask size");
+
+  for (int i = 0; i < Size; ++i) {
+    int M = Mask[i];
+    // Handle the easy cases.
+    if (M < 0) {
+      KnownUndef.setBit(i);
+      continue;
+    }
+    if ((M >= 0 && M < Size && V1IsZero) || (M >= Size && V2IsZero)) {
+      KnownZero.setBit(i);
+      continue;
+    }
+
+    // Determine shuffle input and normalize the mask.
+    SDValue V = M < Size ? V1 : V2;
+    M %= Size;
+
+    // Currently we can only search BUILD_VECTOR for UNDEF/ZERO elements.
+    if (V.getOpcode() != ISD::BUILD_VECTOR)
+      continue;
+
+    // If the BUILD_VECTOR has fewer elements then the bitcasted portion of
+    // the (larger) source element must be UNDEF/ZERO.
+    if ((Size % V.getNumOperands()) == 0) {
+      int Scale = Size / V->getNumOperands();
+      SDValue Op = V.getOperand(M / Scale);
+      if (Op.isUndef())
+        KnownUndef.setBit(i);
+      if (X86::isZeroNode(Op))
+        KnownZero.setBit(i);
+      else if (ConstantSDNode *Cst = dyn_cast<ConstantSDNode>(Op)) {
+        APInt Val = Cst->getAPIntValue();
+        Val = Val.extractBits(ScalarSizeInBits, (M % Scale) * ScalarSizeInBits);
+        if (Val == 0)
+          KnownZero.setBit(i);
+      } else if (ConstantFPSDNode *Cst = dyn_cast<ConstantFPSDNode>(Op)) {
+        APInt Val = Cst->getValueAPF().bitcastToAPInt();
+        Val = Val.extractBits(ScalarSizeInBits, (M % Scale) * ScalarSizeInBits);
+        if (Val == 0)
+          KnownZero.setBit(i);
+      }
+      continue;
+    }
+
+    // If the BUILD_VECTOR has more elements then all the (smaller) source
+    // elements must be UNDEF or ZERO.
+    if ((V.getNumOperands() % Size) == 0) {
+      int Scale = V->getNumOperands() / Size;
+      bool AllUndef = true;
+      bool AllZero = true;
+      for (int j = 0; j < Scale; ++j) {
+        SDValue Op = V.getOperand((M * Scale) + j);
+        AllUndef &= Op.isUndef();
+        AllZero &= X86::isZeroNode(Op);
+      }
+      if (AllUndef)
+        KnownUndef.setBit(i);
+      if (AllZero)
+        KnownZero.setBit(i);
+      continue;
+    }
+  }
+}
+
 /// Decode a target shuffle mask and inputs and see if any values are
 /// known to be undef or zero from their inputs.
 /// Returns true if the target shuffle mask was decoded.
@@ -6804,7 +6891,8 @@ static bool getTargetShuffleAndZeroables(SDValue N, SmallVectorImpl<int> &Mask,
 // Replace target shuffle mask elements with known undef/zero sentinels.
 static void resolveTargetShuffleFromZeroables(SmallVectorImpl<int> &Mask,
                                               const APInt &KnownUndef,
-                                              const APInt &KnownZero) {
+                                              const APInt &KnownZero,
+                                              bool ResolveKnownZeros= true) {
   unsigned NumElts = Mask.size();
   assert(KnownUndef.getBitWidth() == NumElts &&
          KnownZero.getBitWidth() == NumElts && "Shuffle mask size mismatch");
@@ -6812,7 +6900,7 @@ static void resolveTargetShuffleFromZeroables(SmallVectorImpl<int> &Mask,
   for (unsigned i = 0; i != NumElts; ++i) {
     if (KnownUndef[i])
       Mask[i] = SM_SentinelUndef;
-    else if (KnownZero[i])
+    else if (ResolveKnownZeros && KnownZero[i])
       Mask[i] = SM_SentinelZero;
   }
 }
@@ -10416,93 +10504,6 @@ static unsigned getV4X86ShuffleImm(ArrayRef<int> Mask) {
 static SDValue getV4X86ShuffleImm8ForMask(ArrayRef<int> Mask, const SDLoc &DL,
                                           SelectionDAG &DAG) {
   return DAG.getTargetConstant(getV4X86ShuffleImm(Mask), DL, MVT::i8);
-}
-
-/// Compute whether each element of a shuffle is zeroable.
-///
-/// A "zeroable" vector shuffle element is one which can be lowered to zero.
-/// Either it is an undef element in the shuffle mask, the element of the input
-/// referenced is undef, or the element of the input referenced is known to be
-/// zero. Many x86 shuffles can zero lanes cheaply and we often want to handle
-/// as many lanes with this technique as possible to simplify the remaining
-/// shuffle.
-static void computeZeroableShuffleElements(ArrayRef<int> Mask,
-                                           SDValue V1, SDValue V2,
-                                           APInt &KnownUndef, APInt &KnownZero) {
-  int Size = Mask.size();
-  KnownUndef = KnownZero = APInt::getNullValue(Size);
-
-  V1 = peekThroughBitcasts(V1);
-  V2 = peekThroughBitcasts(V2);
-
-  bool V1IsZero = ISD::isBuildVectorAllZeros(V1.getNode());
-  bool V2IsZero = ISD::isBuildVectorAllZeros(V2.getNode());
-
-  int VectorSizeInBits = V1.getValueSizeInBits();
-  int ScalarSizeInBits = VectorSizeInBits / Size;
-  assert(!(VectorSizeInBits % ScalarSizeInBits) && "Illegal shuffle mask size");
-
-  for (int i = 0; i < Size; ++i) {
-    int M = Mask[i];
-    // Handle the easy cases.
-    if (M < 0) {
-      KnownUndef.setBit(i);
-      continue;
-    }
-    if ((M >= 0 && M < Size && V1IsZero) || (M >= Size && V2IsZero)) {
-      KnownZero.setBit(i);
-      continue;
-    }
-
-    // Determine shuffle input and normalize the mask.
-    SDValue V = M < Size ? V1 : V2;
-    M %= Size;
-
-    // Currently we can only search BUILD_VECTOR for UNDEF/ZERO elements.
-    if (V.getOpcode() != ISD::BUILD_VECTOR)
-      continue;
-
-    // If the BUILD_VECTOR has fewer elements then the bitcasted portion of
-    // the (larger) source element must be UNDEF/ZERO.
-    if ((Size % V.getNumOperands()) == 0) {
-      int Scale = Size / V->getNumOperands();
-      SDValue Op = V.getOperand(M / Scale);
-      if (Op.isUndef())
-        KnownUndef.setBit(i);
-      if (X86::isZeroNode(Op))
-        KnownZero.setBit(i);
-      else if (ConstantSDNode *Cst = dyn_cast<ConstantSDNode>(Op)) {
-        APInt Val = Cst->getAPIntValue();
-        Val = Val.extractBits(ScalarSizeInBits, (M % Scale) * ScalarSizeInBits);
-        if (Val == 0)
-          KnownZero.setBit(i);
-      } else if (ConstantFPSDNode *Cst = dyn_cast<ConstantFPSDNode>(Op)) {
-        APInt Val = Cst->getValueAPF().bitcastToAPInt();
-        Val = Val.extractBits(ScalarSizeInBits, (M % Scale) * ScalarSizeInBits);
-        if (Val == 0)
-          KnownZero.setBit(i);
-      }
-      continue;
-    }
-
-    // If the BUILD_VECTOR has more elements then all the (smaller) source
-    // elements must be UNDEF or ZERO.
-    if ((V.getNumOperands() % Size) == 0) {
-      int Scale = V->getNumOperands() / Size;
-      bool AllUndef = true;
-      bool AllZero = true;
-      for (int j = 0; j < Scale; ++j) {
-        SDValue Op = V.getOperand((M * Scale) + j);
-        AllUndef &= Op.isUndef();
-        AllZero &= X86::isZeroNode(Op);
-      }
-      if (AllUndef)
-        KnownUndef.setBit(i);
-      if (AllZero)
-        KnownZero.setBit(i);
-      continue;
-    }
-  }
 }
 
 // The Shuffle result is as follow:
@@ -33037,7 +33038,8 @@ static SDValue combineX86ShufflesRecursively(
     ArrayRef<int> RootMask, ArrayRef<const SDNode *> SrcNodes, unsigned Depth,
     bool HasVariableMask, bool AllowVariableMask, SelectionDAG &DAG,
     const X86Subtarget &Subtarget) {
-  assert(RootMask.size() > 0 && (RootMask.size() > 1 || RootMask[0] == 0) &&
+  assert(RootMask.size() > 0 &&
+         (RootMask.size() > 1 || (RootMask[0] == 0 && SrcOpIndex == 0)) &&
          "Illegal shuffle root mask");
 
   // Bound the depth of our recursive combine because this is ultimately
@@ -33070,106 +33072,137 @@ static SDValue combineX86ShufflesRecursively(
                               OpZero, DAG, Depth, false))
     return SDValue();
 
-  resolveTargetShuffleFromZeroables(OpMask, OpUndef, OpZero);
+  SmallVector<int, 64> Mask;
+  SmallVector<SDValue, 16> Ops;
 
-  // Add the inputs to the Ops list, avoiding duplicates.
-  SmallVector<SDValue, 16> Ops(SrcOps.begin(), SrcOps.end());
-
-  auto AddOp = [&Ops](SDValue Input, int InsertionPoint) -> int {
-    // Attempt to find an existing match.
-    SDValue InputBC = peekThroughBitcasts(Input);
-    for (int i = 0, e = Ops.size(); i < e; ++i)
-      if (InputBC == peekThroughBitcasts(Ops[i]))
-        return i;
-    // Match failed - should we replace an existing Op?
-    if (InsertionPoint >= 0) {
-      Ops[InsertionPoint] = Input;
-      return InsertionPoint;
+  // We don't need to merge masks if the root is empty.
+  bool EmptyRoot = (Depth == 0) && (RootMask.size() == 1);
+  if (EmptyRoot) {
+    // Only resolve zeros if it will remove an input, otherwise we might end
+    // up in an infinite loop.
+    bool ResolveKnownZeros = true;
+    if (!OpZero.isNullValue()) {
+      APInt UsedInputs = APInt::getNullValue(OpInputs.size());
+      for (int i = 0, e = OpMask.size(); i != e; ++i) {
+        int M = OpMask[i];
+        if (OpUndef[i] || OpZero[i] || isUndefOrZero(M))
+          continue;
+        UsedInputs.setBit(M / OpMask.size());
+        if (UsedInputs.isAllOnesValue()) {
+          ResolveKnownZeros = false;
+          break;
+        }
+      }
     }
-    // Add to the end of the Ops list.
-    Ops.push_back(Input);
-    return Ops.size() - 1;
-  };
+    resolveTargetShuffleFromZeroables(OpMask, OpUndef, OpZero,
+                                      ResolveKnownZeros);
 
-  SmallVector<int, 2> OpInputIdx;
-  for (SDValue OpInput : OpInputs)
-    OpInputIdx.push_back(AddOp(OpInput, OpInputIdx.empty() ? SrcOpIndex : -1));
+    Mask = OpMask;
+    Ops.append(OpInputs.begin(), OpInputs.end());
+  } else {
+    resolveTargetShuffleFromZeroables(OpMask, OpUndef, OpZero);
 
-  assert(((RootMask.size() > OpMask.size() &&
-           RootMask.size() % OpMask.size() == 0) ||
-          (OpMask.size() > RootMask.size() &&
-           OpMask.size() % RootMask.size() == 0) ||
-          OpMask.size() == RootMask.size()) &&
-         "The smaller number of elements must divide the larger.");
+    // Add the inputs to the Ops list, avoiding duplicates.
+    Ops.append(SrcOps.begin(), SrcOps.end());
 
-  // This function can be performance-critical, so we rely on the power-of-2
-  // knowledge that we have about the mask sizes to replace div/rem ops with
-  // bit-masks and shifts.
-  assert(isPowerOf2_32(RootMask.size()) && "Non-power-of-2 shuffle mask sizes");
-  assert(isPowerOf2_32(OpMask.size()) && "Non-power-of-2 shuffle mask sizes");
-  unsigned RootMaskSizeLog2 = countTrailingZeros(RootMask.size());
-  unsigned OpMaskSizeLog2 = countTrailingZeros(OpMask.size());
+    auto AddOp = [&Ops](SDValue Input, int InsertionPoint) -> int {
+      // Attempt to find an existing match.
+      SDValue InputBC = peekThroughBitcasts(Input);
+      for (int i = 0, e = Ops.size(); i < e; ++i)
+        if (InputBC == peekThroughBitcasts(Ops[i]))
+          return i;
+      // Match failed - should we replace an existing Op?
+      if (InsertionPoint >= 0) {
+        Ops[InsertionPoint] = Input;
+        return InsertionPoint;
+      }
+      // Add to the end of the Ops list.
+      Ops.push_back(Input);
+      return Ops.size() - 1;
+    };
 
-  unsigned MaskWidth = std::max<unsigned>(OpMask.size(), RootMask.size());
-  unsigned RootRatio = std::max<unsigned>(1, OpMask.size() >> RootMaskSizeLog2);
-  unsigned OpRatio = std::max<unsigned>(1, RootMask.size() >> OpMaskSizeLog2);
-  assert((RootRatio == 1 || OpRatio == 1) &&
-         "Must not have a ratio for both incoming and op masks!");
+    SmallVector<int, 2> OpInputIdx;
+    for (SDValue OpInput : OpInputs)
+      OpInputIdx.push_back(
+          AddOp(OpInput, OpInputIdx.empty() ? SrcOpIndex : -1));
 
-  assert(isPowerOf2_32(MaskWidth) && "Non-power-of-2 shuffle mask sizes");
-  assert(isPowerOf2_32(RootRatio) && "Non-power-of-2 shuffle mask sizes");
-  assert(isPowerOf2_32(OpRatio) && "Non-power-of-2 shuffle mask sizes");
-  unsigned RootRatioLog2 = countTrailingZeros(RootRatio);
-  unsigned OpRatioLog2 = countTrailingZeros(OpRatio);
+    assert(((RootMask.size() > OpMask.size() &&
+             RootMask.size() % OpMask.size() == 0) ||
+            (OpMask.size() > RootMask.size() &&
+             OpMask.size() % RootMask.size() == 0) ||
+            OpMask.size() == RootMask.size()) &&
+           "The smaller number of elements must divide the larger.");
 
-  SmallVector<int, 64> Mask(MaskWidth, SM_SentinelUndef);
+    // This function can be performance-critical, so we rely on the power-of-2
+    // knowledge that we have about the mask sizes to replace div/rem ops with
+    // bit-masks and shifts.
+    assert(isPowerOf2_32(RootMask.size()) &&
+           "Non-power-of-2 shuffle mask sizes");
+    assert(isPowerOf2_32(OpMask.size()) && "Non-power-of-2 shuffle mask sizes");
+    unsigned RootMaskSizeLog2 = countTrailingZeros(RootMask.size());
+    unsigned OpMaskSizeLog2 = countTrailingZeros(OpMask.size());
 
-  // Merge this shuffle operation's mask into our accumulated mask. Note that
-  // this shuffle's mask will be the first applied to the input, followed by the
-  // root mask to get us all the way to the root value arrangement. The reason
-  // for this order is that we are recursing up the operation chain.
-  for (unsigned i = 0; i < MaskWidth; ++i) {
-    unsigned RootIdx = i >> RootRatioLog2;
-    if (RootMask[RootIdx] < 0) {
-      // This is a zero or undef lane, we're done.
-      Mask[i] = RootMask[RootIdx];
-      continue;
+    unsigned MaskWidth = std::max<unsigned>(OpMask.size(), RootMask.size());
+    unsigned RootRatio =
+        std::max<unsigned>(1, OpMask.size() >> RootMaskSizeLog2);
+    unsigned OpRatio = std::max<unsigned>(1, RootMask.size() >> OpMaskSizeLog2);
+    assert((RootRatio == 1 || OpRatio == 1) &&
+           "Must not have a ratio for both incoming and op masks!");
+
+    assert(isPowerOf2_32(MaskWidth) && "Non-power-of-2 shuffle mask sizes");
+    assert(isPowerOf2_32(RootRatio) && "Non-power-of-2 shuffle mask sizes");
+    assert(isPowerOf2_32(OpRatio) && "Non-power-of-2 shuffle mask sizes");
+    unsigned RootRatioLog2 = countTrailingZeros(RootRatio);
+    unsigned OpRatioLog2 = countTrailingZeros(OpRatio);
+
+    Mask.resize(MaskWidth, SM_SentinelUndef);
+
+    // Merge this shuffle operation's mask into our accumulated mask. Note that
+    // this shuffle's mask will be the first applied to the input, followed by
+    // the root mask to get us all the way to the root value arrangement. The
+    // reason for this order is that we are recursing up the operation chain.
+    for (unsigned i = 0; i < MaskWidth; ++i) {
+      unsigned RootIdx = i >> RootRatioLog2;
+      if (RootMask[RootIdx] < 0) {
+        // This is a zero or undef lane, we're done.
+        Mask[i] = RootMask[RootIdx];
+        continue;
+      }
+
+      unsigned RootMaskedIdx =
+          RootRatio == 1
+              ? RootMask[RootIdx]
+              : (RootMask[RootIdx] << RootRatioLog2) + (i & (RootRatio - 1));
+
+      // Just insert the scaled root mask value if it references an input other
+      // than the SrcOp we're currently inserting.
+      if ((RootMaskedIdx < (SrcOpIndex * MaskWidth)) ||
+          (((SrcOpIndex + 1) * MaskWidth) <= RootMaskedIdx)) {
+        Mask[i] = RootMaskedIdx;
+        continue;
+      }
+
+      RootMaskedIdx = RootMaskedIdx & (MaskWidth - 1);
+      unsigned OpIdx = RootMaskedIdx >> OpRatioLog2;
+      if (OpMask[OpIdx] < 0) {
+        // The incoming lanes are zero or undef, it doesn't matter which ones we
+        // are using.
+        Mask[i] = OpMask[OpIdx];
+        continue;
+      }
+
+      // Ok, we have non-zero lanes, map them through to one of the Op's inputs.
+      unsigned OpMaskedIdx = OpRatio == 1 ? OpMask[OpIdx]
+                                          : (OpMask[OpIdx] << OpRatioLog2) +
+                                                (RootMaskedIdx & (OpRatio - 1));
+
+      OpMaskedIdx = OpMaskedIdx & (MaskWidth - 1);
+      int InputIdx = OpMask[OpIdx] / (int)OpMask.size();
+      assert(0 <= OpInputIdx[InputIdx] && "Unknown target shuffle input");
+      OpMaskedIdx += OpInputIdx[InputIdx] * MaskWidth;
+
+      Mask[i] = OpMaskedIdx;
     }
-
-    unsigned RootMaskedIdx =
-        RootRatio == 1
-            ? RootMask[RootIdx]
-            : (RootMask[RootIdx] << RootRatioLog2) + (i & (RootRatio - 1));
-
-    // Just insert the scaled root mask value if it references an input other
-    // than the SrcOp we're currently inserting.
-    if ((RootMaskedIdx < (SrcOpIndex * MaskWidth)) ||
-        (((SrcOpIndex + 1) * MaskWidth) <= RootMaskedIdx)) {
-      Mask[i] = RootMaskedIdx;
-      continue;
-    }
-
-    RootMaskedIdx = RootMaskedIdx & (MaskWidth - 1);
-    unsigned OpIdx = RootMaskedIdx >> OpRatioLog2;
-    if (OpMask[OpIdx] < 0) {
-      // The incoming lanes are zero or undef, it doesn't matter which ones we
-      // are using.
-      Mask[i] = OpMask[OpIdx];
-      continue;
-    }
-
-    // Ok, we have non-zero lanes, map them through to one of the Op's inputs.
-    unsigned OpMaskedIdx =
-        OpRatio == 1
-            ? OpMask[OpIdx]
-            : (OpMask[OpIdx] << OpRatioLog2) + (RootMaskedIdx & (OpRatio - 1));
-
-    OpMaskedIdx = OpMaskedIdx & (MaskWidth - 1);
-    int InputIdx = OpMask[OpIdx] / (int)OpMask.size();
-    assert(0 <= OpInputIdx[InputIdx] && "Unknown target shuffle input");
-    OpMaskedIdx += OpInputIdx[InputIdx] * MaskWidth;
-
-    Mask[i] = OpMaskedIdx;
   }
 
   // Remove unused/repeated shuffle source ops.
@@ -33203,13 +33236,18 @@ static SDValue combineX86ShufflesRecursively(
   // the remaining recursion depth.
   if (Ops.size() < (MaxRecursionDepth - Depth)) {
     for (int i = 0, e = Ops.size(); i < e; ++i) {
+      // For empty roots, we need to resolve zeroable elements before combining
+      // them with other shuffles.
+      SmallVector<int, 64> ResolvedMask = Mask;
+      if (EmptyRoot)
+        resolveTargetShuffleFromZeroables(ResolvedMask, OpUndef, OpZero);
       bool AllowVar = false;
       if (Ops[i].getNode()->hasOneUse() ||
           SDNode::areOnlyUsersOf(CombinedNodes, Ops[i].getNode()))
         AllowVar = AllowVariableMask;
       if (SDValue Res = combineX86ShufflesRecursively(
-              Ops, i, Root, Mask, CombinedNodes, Depth + 1, HasVariableMask,
-              AllowVar, DAG, Subtarget))
+              Ops, i, Root, ResolvedMask, CombinedNodes, Depth + 1,
+              HasVariableMask, AllowVar, DAG, Subtarget))
         return Res;
     }
   }
@@ -34710,6 +34748,23 @@ bool X86TargetLowering::SimplifyDemandedVectorEltsForTargetNode(
     if (SimplifyDemandedVectorElts(OpInputs[Src], SrcElts, SrcUndef, SrcZero,
                                    TLO, Depth + 1))
       return true;
+  }
+
+  // If we don't demand all elements, then attempt to combine to a simpler
+  // shuffle.
+  // TODO: Handle other depths, but first we need to handle the fact that
+  // it might combine to the same shuffle.
+  if (!DemandedElts.isAllOnesValue() && Depth == 0) {
+    SmallVector<int, 64> DemandedMask(NumElts, SM_SentinelUndef);
+    for (int i = 0; i != NumElts; ++i)
+      if (DemandedElts[i])
+        DemandedMask[i] = i;
+
+    SDValue NewShuffle = combineX86ShufflesRecursively(
+        {Op}, 0, Op, DemandedMask, {}, Depth, /*HasVarMask*/ false,
+        /*AllowVarMask*/ true, TLO.DAG, Subtarget);
+    if (NewShuffle)
+      return TLO.CombineTo(Op, NewShuffle);
   }
 
   return false;
@@ -37806,7 +37861,7 @@ static SDValue combineCMov(SDNode *N, SelectionDAG &DAG,
 }
 
 /// Different mul shrinking modes.
-enum ShrinkMode { MULS8, MULU8, MULS16, MULU16 };
+enum class ShrinkMode { MULS8, MULU8, MULS16, MULU16 };
 
 static bool canReduceVMulWidth(SDNode *N, SelectionDAG &DAG, ShrinkMode &Mode) {
   EVT VT = N->getOperand(0).getValueType();
@@ -37827,16 +37882,16 @@ static bool canReduceVMulWidth(SDNode *N, SelectionDAG &DAG, ShrinkMode &Mode) {
   unsigned MinSignBits = std::min(SignBits[0], SignBits[1]);
   // When ranges are from -128 ~ 127, use MULS8 mode.
   if (MinSignBits >= 25)
-    Mode = MULS8;
+    Mode = ShrinkMode::MULS8;
   // When ranges are from 0 ~ 255, use MULU8 mode.
   else if (AllPositive && MinSignBits >= 24)
-    Mode = MULU8;
+    Mode = ShrinkMode::MULU8;
   // When ranges are from -32768 ~ 32767, use MULS16 mode.
   else if (MinSignBits >= 17)
-    Mode = MULS16;
+    Mode = ShrinkMode::MULS16;
   // When ranges are from 0 ~ 65535, use MULU16 mode.
   else if (AllPositive && MinSignBits >= 16)
-    Mode = MULU16;
+    Mode = ShrinkMode::MULU16;
   else
     return false;
   return true;
@@ -37906,15 +37961,17 @@ static SDValue reduceVMULWidth(SDNode *N, SelectionDAG &DAG,
   // Generate the lower part of mul: pmullw. For MULU8/MULS8, only the
   // lower part is needed.
   SDValue MulLo = DAG.getNode(ISD::MUL, DL, ReducedVT, NewN0, NewN1);
-  if (Mode == MULU8 || Mode == MULS8)
-    return DAG.getNode((Mode == MULU8) ? ISD::ZERO_EXTEND : ISD::SIGN_EXTEND,
+  if (Mode == ShrinkMode::MULU8 || Mode == ShrinkMode::MULS8)
+    return DAG.getNode((Mode == ShrinkMode::MULU8) ? ISD::ZERO_EXTEND
+                                                   : ISD::SIGN_EXTEND,
                        DL, VT, MulLo);
 
   MVT ResVT = MVT::getVectorVT(MVT::i32, NumElts / 2);
   // Generate the higher part of mul: pmulhw/pmulhuw. For MULU16/MULS16,
   // the higher part is also needed.
-  SDValue MulHi = DAG.getNode(Mode == MULS16 ? ISD::MULHS : ISD::MULHU, DL,
-                              ReducedVT, NewN0, NewN1);
+  SDValue MulHi =
+      DAG.getNode(Mode == ShrinkMode::MULS16 ? ISD::MULHS : ISD::MULHU, DL,
+                  ReducedVT, NewN0, NewN1);
 
   // Repack the lower part and higher part result of mul into a wider
   // result.
@@ -40059,7 +40116,7 @@ static SDValue combineTruncateWithSat(SDValue In, EVT VT, const SDLoc &DL,
   const TargetLowering &TLI = DAG.getTargetLoweringInfo();
   if (TLI.isTypeLegal(InVT) && InVT.isVector() && SVT != MVT::i1 &&
       Subtarget.hasAVX512() && (InSVT != MVT::i16 || Subtarget.hasBWI())) {
-    unsigned TruncOpc;
+    unsigned TruncOpc = 0;
     SDValue SatVal;
     if (auto SSatVal = detectSSatPattern(In, VT)) {
       SatVal = SSatVal;
@@ -43763,7 +43820,8 @@ static SDValue combineLoopMAddPattern(SDNode *N, SelectionDAG &DAG,
   auto UsePMADDWD = [&](SDValue Op) {
     ShrinkMode Mode;
     return Op.getOpcode() == ISD::MUL &&
-           canReduceVMulWidth(Op.getNode(), DAG, Mode) && Mode != MULU16 &&
+           canReduceVMulWidth(Op.getNode(), DAG, Mode) &&
+           Mode != ShrinkMode::MULU16 &&
            (!Subtarget.hasSSE41() ||
             (Op->isOnlyUserOf(Op.getOperand(0).getNode()) &&
              Op->isOnlyUserOf(Op.getOperand(1).getNode())));
@@ -43968,7 +44026,8 @@ static SDValue matchPMADDWD(SelectionDAG &DAG, SDValue Op0, SDValue Op1,
 
   // Check if the Mul source can be safely shrunk.
   ShrinkMode Mode;
-  if (!canReduceVMulWidth(Mul.getNode(), DAG, Mode) || Mode == MULU16)
+  if (!canReduceVMulWidth(Mul.getNode(), DAG, Mode) ||
+      Mode == ShrinkMode::MULU16)
     return SDValue();
 
   auto PMADDBuilder = [](SelectionDAG &DAG, const SDLoc &DL,

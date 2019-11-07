@@ -180,10 +180,18 @@ class GenericType<string _Ty, TypeList _TypeList, IntList _VectorList> :
   let VecWidth = 0;
 }
 
+// Builtin function attributes.
+def Attr {
+  list<bit> None = [0, 0, 0];
+  list<bit> Pure = [1, 0, 0];
+  list<bit> Const = [0, 1, 0];
+  list<bit> Convergent = [0, 0, 1];
+}
+
 //===----------------------------------------------------------------------===//
 //                      OpenCL C class for builtin functions
 //===----------------------------------------------------------------------===//
-class Builtin<string _Name, list<Type> _Signature> {
+class Builtin<string _Name, list<Type> _Signature, list<bit> _Attributes = Attr.None> {
   // Name of the builtin function
   string Name = _Name;
   // List of types used by the function. The first one is the return type and
@@ -192,6 +200,12 @@ class Builtin<string _Name, list<Type> _Signature> {
   list<Type> Signature = _Signature;
   // OpenCL Extension to which the function belongs (cl_khr_subgroups, ...)
   string Extension = "";
+  // Function attribute __attribute__((pure))
+  bit IsPure = _Attributes[0];
+  // Function attribute __attribute__((const))
+  bit IsConst = _Attributes[1];
+  // Function attribute __attribute__((convergent))
+  bit IsConv = _Attributes[2];
   // Version of OpenCL from which the function is available (e.g.: CL10).
   // MinVersion is inclusive.
   Version MinVersion = CL10;
@@ -307,11 +321,12 @@ foreach RType = [Float, Double, Half, Char, UChar, Short,
                    UShort, Int, UInt, Long, ULong] in {
     foreach sat = ["", "_sat"] in {
       foreach rnd = ["", "_rte", "_rtn", "_rtp", "_rtz"] in {
-        def : Builtin<"convert_" # RType.Name # sat # rnd, [RType, IType]>;
+        def : Builtin<"convert_" # RType.Name # sat # rnd, [RType, IType],
+                      Attr.Const>;
         foreach v = [2, 3, 4, 8, 16] in {
           def : Builtin<"convert_" # RType.Name # v # sat # rnd,
-                        [VectorType<RType, v>,
-                         VectorType<IType, v>]>;
+                        [VectorType<RType, v>, VectorType<IType, v>],
+                        Attr.Const>;
         }
       }
     }
@@ -321,11 +336,11 @@ foreach RType = [Float, Double, Half, Char, UChar, Short,
 //--------------------------------------------------------------------
 // OpenCL v1.1 s6.11.1, v1.2 s6.12.1, v2.0 s6.13.1 - Work-item Functions
 // --- Table 7 ---
-def : Builtin<"get_work_dim", [UInt]>;
+def : Builtin<"get_work_dim", [UInt], Attr.Const>;
 foreach name = ["get_global_size", "get_global_id", "get_local_size",
                 "get_local_id", "get_num_groups", "get_group_id",
                 "get_global_offset"] in {
-  def : Builtin<name, [Size, UInt]>;
+  def : Builtin<name, [Size, UInt], Attr.Const>;
 }
 
 let MinVersion = CL20 in {
@@ -335,7 +350,160 @@ let MinVersion = CL20 in {
   }
 }
 
+
 //--------------------------------------------------------------------
+// OpenCL v1.1 s6.11.2, v1.2 s6.12.2, v2.0 s6.13.2 - Math functions
+// OpenCL Extension v2.0 s5.1.2 and s6.1.2 - Math Functions
+// --- Table 8 ---
+// --- 1 argument ---
+foreach name = ["acos", "acosh", "acospi",
+                "asin", "asinh", "asinpi",
+                "atan", "atanh", "atanpi",
+                "cbrt", "ceil",
+                "cos", "cosh", "cospi",
+                "erfc", "erf",
+                "exp", "exp2", "exp10", "expm1",
+                "fabs", "floor",
+                "log", "log2", "log10", "log1p", "logb",
+                "rint", "round", "rsqrt",
+                "sin", "sinh", "sinpi",
+                "sqrt",
+                "tan", "tanh", "tanpi",
+                "tgamma", "trunc",
+                "lgamma"] in {
+    def : Builtin<name, [FGenTypeN, FGenTypeN], Attr.Const>;
+}
+foreach name = ["nan"] in {
+  def : Builtin<name, [GenTypeFloatVecAndScalar, GenTypeUIntVecAndScalar], Attr.Const>;
+  def : Builtin<name, [GenTypeDoubleVecAndScalar, GenTypeULongVecAndScalar], Attr.Const>;
+  def : Builtin<name, [GenTypeHalfVecAndScalar, GenTypeUShortVecAndScalar], Attr.Const>;
+}
+
+// --- 2 arguments ---
+foreach name = ["atan2", "atan2pi", "copysign", "fdim", "fmod", "hypot",
+                "maxmag", "minmag", "nextafter", "pow", "powr",
+                "remainder"] in {
+  def : Builtin<name, [FGenTypeN, FGenTypeN, FGenTypeN], Attr.Const>;
+}
+foreach name = ["fmax", "fmin"] in {
+  def : Builtin<name, [FGenTypeN, FGenTypeN, FGenTypeN], Attr.Const>;
+  def : Builtin<name, [GenTypeFloatVecNoScalar, GenTypeFloatVecNoScalar, Float], Attr.Const>;
+  def : Builtin<name, [GenTypeDoubleVecNoScalar, GenTypeDoubleVecNoScalar, Double], Attr.Const>;
+  def : Builtin<name, [GenTypeHalfVecNoScalar, GenTypeHalfVecNoScalar, Half], Attr.Const>;
+}
+foreach name = ["ilogb"] in {
+  def : Builtin<name, [GenTypeIntVecAndScalar, GenTypeFloatVecAndScalar], Attr.Const>;
+  def : Builtin<name, [GenTypeIntVecAndScalar, GenTypeDoubleVecAndScalar], Attr.Const>;
+  def : Builtin<name, [GenTypeIntVecAndScalar, GenTypeHalfVecAndScalar], Attr.Const>;
+}
+foreach name = ["ldexp"] in {
+  def : Builtin<name, [GenTypeFloatVecAndScalar, GenTypeFloatVecAndScalar, GenTypeIntVecAndScalar], Attr.Const>;
+  def : Builtin<name, [GenTypeFloatVecNoScalar, GenTypeFloatVecNoScalar, Int], Attr.Const>;
+  def : Builtin<name, [GenTypeDoubleVecAndScalar, GenTypeDoubleVecAndScalar, GenTypeIntVecAndScalar], Attr.Const>;
+  def : Builtin<name, [GenTypeDoubleVecNoScalar, GenTypeDoubleVecNoScalar, Int], Attr.Const>;
+  def : Builtin<name, [GenTypeHalfVecAndScalar, GenTypeHalfVecAndScalar, GenTypeIntVecAndScalar], Attr.Const>;
+  def : Builtin<name, [GenTypeHalfVecNoScalar, GenTypeHalfVecNoScalar, Int], Attr.Const>;
+}
+foreach name = ["pown", "rootn"] in {
+  def : Builtin<name, [GenTypeFloatVecAndScalar, GenTypeFloatVecAndScalar, GenTypeIntVecAndScalar], Attr.Const>;
+  def : Builtin<name, [GenTypeDoubleVecAndScalar, GenTypeDoubleVecAndScalar, GenTypeIntVecAndScalar], Attr.Const>;
+  def : Builtin<name, [GenTypeHalfVecAndScalar, GenTypeHalfVecAndScalar, GenTypeIntVecAndScalar], Attr.Const>;
+}
+
+// --- 3 arguments ---
+foreach name = ["fma", "mad"] in {
+  def : Builtin<name, [FGenTypeN, FGenTypeN, FGenTypeN, FGenTypeN], Attr.Const>;
+}
+
+// --- Version dependent ---
+let MaxVersion = CL20 in {
+  foreach AS = [GlobalAS, LocalAS, PrivateAS] in {
+    foreach name = ["fract", "modf", "sincos"] in {
+      def : Builtin<name, [FGenTypeN, FGenTypeN, PointerType<FGenTypeN, AS>]>;
+    }
+    foreach name = ["frexp", "lgamma_r"] in {
+      foreach Type = [GenTypeFloatVecAndScalar, GenTypeDoubleVecAndScalar, GenTypeHalfVecAndScalar] in {
+        def : Builtin<name, [Type, Type, PointerType<GenTypeIntVecAndScalar, AS>]>;
+      }
+    }
+    foreach name = ["remquo"] in {
+      foreach Type = [GenTypeFloatVecAndScalar, GenTypeDoubleVecAndScalar, GenTypeHalfVecAndScalar] in {
+        def : Builtin<name, [Type, Type, Type, PointerType<GenTypeIntVecAndScalar, AS>]>;
+      }
+    }
+  }
+}
+let MinVersion = CL20 in {
+  foreach name = ["fract", "modf", "sincos"] in {
+    def : Builtin<name, [FGenTypeN, FGenTypeN, PointerType<FGenTypeN, GenericAS>]>;
+  }
+  foreach name = ["frexp", "lgamma_r"] in {
+    foreach Type = [GenTypeFloatVecAndScalar, GenTypeDoubleVecAndScalar, GenTypeHalfVecAndScalar] in {
+      def : Builtin<name, [Type, Type, PointerType<GenTypeIntVecAndScalar, GenericAS>]>;
+    }  }
+  foreach name = ["remquo"] in {
+    foreach Type = [GenTypeFloatVecAndScalar, GenTypeDoubleVecAndScalar, GenTypeHalfVecAndScalar] in {
+      def : Builtin<name, [Type, Type, Type, PointerType<GenTypeIntVecAndScalar, GenericAS>]>;
+    }
+  }
+}
+
+// --- Table 9 ---
+foreach name = ["half_cos",
+                "half_exp", "half_exp2", "half_exp10",
+                "half_log", "half_log2", "half_log10",
+                "half_recip", "half_rsqrt",
+                "half_sin", "half_sqrt", "half_tan",
+                "native_cos",
+                "native_exp", "native_exp2", "native_exp10",
+                "native_log", "native_log2", "native_log10",
+                "native_recip", "native_rsqrt",
+                "native_sin", "native_sqrt", "native_tan"] in {
+  def : Builtin<name, [GenTypeFloatVecAndScalar, GenTypeFloatVecAndScalar], Attr.Const>;
+}
+foreach name = ["half_divide", "half_powr",
+                "native_divide", "native_powr"] in {
+  def : Builtin<name, [GenTypeFloatVecAndScalar, GenTypeFloatVecAndScalar, GenTypeFloatVecAndScalar], Attr.Const>;
+}
+
+//--------------------------------------------------------------------
+// OpenCL v1.1 s6.11.4, v1.2 s6.12.4, v2.0 s6.13.4 - Common Functions
+// OpenCL Extension v2.0 s5.1.3 and s6.1.3 - Common Functions
+// --- Table 12 ---
+// --- 1 argument ---
+foreach name = ["degrees", "radians", "sign"] in {
+  def : Builtin<name, [FGenTypeN, FGenTypeN], Attr.Const>;
+}
+
+// --- 2 arguments ---
+foreach name = ["max", "min"] in {
+  def : Builtin<name, [FGenTypeN, FGenTypeN, FGenTypeN], Attr.Const>;
+  def : Builtin<name, [GenTypeFloatVecNoScalar, GenTypeFloatVecNoScalar, Float], Attr.Const>;
+  def : Builtin<name, [GenTypeDoubleVecNoScalar, GenTypeDoubleVecNoScalar, Double], Attr.Const>;
+  def : Builtin<name, [GenTypeHalfVecNoScalar, GenTypeHalfVecNoScalar, Half], Attr.Const>;
+}
+foreach name = ["step"] in {
+  def : Builtin<name, [FGenTypeN, FGenTypeN, FGenTypeN], Attr.Const>;
+  def : Builtin<name, [GenTypeFloatVecNoScalar, Float, GenTypeFloatVecNoScalar], Attr.Const>;
+  def : Builtin<name, [GenTypeDoubleVecNoScalar, Double, GenTypeDoubleVecNoScalar], Attr.Const>;
+  def : Builtin<name, [GenTypeHalfVecNoScalar, Half, GenTypeHalfVecNoScalar], Attr.Const>;
+}
+
+// --- 3 arguments ---
+foreach name = ["clamp", "mix"] in {
+  def : Builtin<name, [FGenTypeN, FGenTypeN, FGenTypeN, FGenTypeN], Attr.Const>;
+  def : Builtin<name, [GenTypeFloatVecNoScalar, GenTypeFloatVecNoScalar, Float, Float], Attr.Const>;
+  def : Builtin<name, [GenTypeDoubleVecNoScalar, GenTypeDoubleVecNoScalar, Double, Double], Attr.Const>;
+  def : Builtin<name, [GenTypeHalfVecNoScalar, GenTypeHalfVecNoScalar, Half, Half], Attr.Const>;
+}
+foreach name = ["smoothstep"] in {
+  def : Builtin<name, [FGenTypeN, FGenTypeN, FGenTypeN, FGenTypeN], Attr.Const>;
+  def : Builtin<name, [GenTypeFloatVecNoScalar, Float, Float, GenTypeFloatVecNoScalar], Attr.Const>;
+  def : Builtin<name, [GenTypeDoubleVecNoScalar, Double, Double, GenTypeDoubleVecNoScalar], Attr.Const>;
+  def : Builtin<name, [GenTypeHalfVecNoScalar, Half, Half, GenTypeHalfVecNoScalar], Attr.Const>;
+}
+
+
 // OpenCL v1.1 s6.11.7, v1.2 s6.12.7, v2.0 s6.13.7 - Vector Data Load and Store Functions
 // OpenCL Extension v1.1 s9.3.6 and s9.6.6, v1.2 s9.5.6, v2.0 s9.4.6, v2.0 s5.1.6 and 6.1.6 - Vector Data Load and Store Functions
 // --- Table 15 ---
@@ -487,28 +655,10 @@ foreach Type = [Int, UInt] in {
   }
 }
 
-// OpenCL v1.2 s6.12.2: Math Functions
-foreach name = ["acos", "acosh", "acospi",
-                "asin", "asinh", "asinpi",
-                "atan", "atanh", "atanpi"] in {
-  def : Builtin<name, [FGenTypeN, FGenTypeN]>;
-}
-
-foreach name = ["atan2", "atan2pi"] in {
-  def : Builtin<name, [FGenTypeN, FGenTypeN, FGenTypeN]>;
-}
-
-foreach name = ["fmax", "fmin"] in {
-  def : Builtin<name, [FGenTypeN, FGenTypeN, FGenTypeN]>;
-  def : Builtin<name, [GenTypeFloatVecNoScalar, GenTypeFloatVecNoScalar, Float]>;
-  def : Builtin<name, [GenTypeDoubleVecNoScalar, GenTypeDoubleVecNoScalar, Double]>;
-  def : Builtin<name, [GenTypeHalfVecNoScalar, GenTypeHalfVecNoScalar, Half]>;
-}
-
 // OpenCL v1.1 s6.11.3, v1.2 s6.12.3, v2.0 s6.13.3 - Integer Functions
 foreach name = ["max", "min"] in {
-  def : Builtin<name, [AIGenTypeN, AIGenTypeN, AIGenTypeN]>;
-  def : Builtin<name, [AIGenTypeNNoScalar, AIGenTypeNNoScalar, AIGenType1]>;
+  def : Builtin<name, [AIGenTypeN, AIGenTypeN, AIGenTypeN], Attr.Const>;
+  def : Builtin<name, [AIGenTypeNNoScalar, AIGenTypeNNoScalar, AIGenType1], Attr.Const>;
 }
 
 //--------------------------------------------------------------------
@@ -517,49 +667,49 @@ foreach name = ["max", "min"] in {
 // --- Table 22: Image Read Functions with Samplers ---
 foreach imgTy = [Image1d] in {
   foreach coordTy = [Int, Float] in {
-    def : Builtin<"read_imagef", [VectorType<Float, 4>, ImageType<imgTy, "RO">, Sampler, coordTy]>;
-    def : Builtin<"read_imagei", [VectorType<Int, 4>, ImageType<imgTy, "RO">, Sampler, coordTy]>;
-    def : Builtin<"read_imageui", [VectorType<UInt, 4>, ImageType<imgTy, "RO">, Sampler, coordTy]>;
+    def : Builtin<"read_imagef", [VectorType<Float, 4>, ImageType<imgTy, "RO">, Sampler, coordTy], Attr.Pure>;
+    def : Builtin<"read_imagei", [VectorType<Int, 4>, ImageType<imgTy, "RO">, Sampler, coordTy], Attr.Pure>;
+    def : Builtin<"read_imageui", [VectorType<UInt, 4>, ImageType<imgTy, "RO">, Sampler, coordTy], Attr.Pure>;
   }
 }
 foreach imgTy = [Image2d, Image1dArray] in {
   foreach coordTy = [Int, Float] in {
-    def : Builtin<"read_imagef", [VectorType<Float, 4>, ImageType<imgTy, "RO">, Sampler, VectorType<coordTy, 2>]>;
-    def : Builtin<"read_imagei", [VectorType<Int, 4>, ImageType<imgTy, "RO">, Sampler, VectorType<coordTy, 2>]>;
-    def : Builtin<"read_imageui", [VectorType<UInt, 4>, ImageType<imgTy, "RO">, Sampler, VectorType<coordTy, 2>]>;
+    def : Builtin<"read_imagef", [VectorType<Float, 4>, ImageType<imgTy, "RO">, Sampler, VectorType<coordTy, 2>], Attr.Pure>;
+    def : Builtin<"read_imagei", [VectorType<Int, 4>, ImageType<imgTy, "RO">, Sampler, VectorType<coordTy, 2>], Attr.Pure>;
+    def : Builtin<"read_imageui", [VectorType<UInt, 4>, ImageType<imgTy, "RO">, Sampler, VectorType<coordTy, 2>], Attr.Pure>;
   }
 }
 foreach imgTy = [Image3d, Image2dArray] in {
   foreach coordTy = [Int, Float] in {
-    def : Builtin<"read_imagef", [VectorType<Float, 4>, ImageType<imgTy, "RO">, Sampler, VectorType<coordTy, 4>]>;
-    def : Builtin<"read_imagei", [VectorType<Int, 4>, ImageType<imgTy, "RO">, Sampler, VectorType<coordTy, 4>]>;
-    def : Builtin<"read_imageui", [VectorType<UInt, 4>, ImageType<imgTy, "RO">, Sampler, VectorType<coordTy, 4>]>;
+    def : Builtin<"read_imagef", [VectorType<Float, 4>, ImageType<imgTy, "RO">, Sampler, VectorType<coordTy, 4>], Attr.Pure>;
+    def : Builtin<"read_imagei", [VectorType<Int, 4>, ImageType<imgTy, "RO">, Sampler, VectorType<coordTy, 4>], Attr.Pure>;
+    def : Builtin<"read_imageui", [VectorType<UInt, 4>, ImageType<imgTy, "RO">, Sampler, VectorType<coordTy, 4>], Attr.Pure>;
   }
 }
 foreach coordTy = [Int, Float] in {
-  def : Builtin<"read_imagef", [Float, ImageType<Image2dDepth, "RO">, Sampler, VectorType<coordTy, 2>]>;
-  def : Builtin<"read_imagef", [Float, ImageType<Image2dArrayDepth, "RO">, Sampler, VectorType<coordTy, 4>]>;
+  def : Builtin<"read_imagef", [Float, ImageType<Image2dDepth, "RO">, Sampler, VectorType<coordTy, 2>], Attr.Pure>;
+  def : Builtin<"read_imagef", [Float, ImageType<Image2dArrayDepth, "RO">, Sampler, VectorType<coordTy, 4>], Attr.Pure>;
 }
 
 // --- Table 23: Sampler-less Read Functions ---
 foreach aQual = ["RO", "RW"] in {
   foreach imgTy = [Image2d, Image1dArray] in {
-    def : Builtin<"read_imagef", [VectorType<Float, 4>, ImageType<imgTy, aQual>, VectorType<Int, 2>]>;
-    def : Builtin<"read_imagei", [VectorType<Int, 4>, ImageType<imgTy, aQual>, VectorType<Int, 2>]>;
-    def : Builtin<"read_imageui", [VectorType<UInt, 4>, ImageType<imgTy, aQual>, VectorType<Int, 2>]>;
+    def : Builtin<"read_imagef", [VectorType<Float, 4>, ImageType<imgTy, aQual>, VectorType<Int, 2>], Attr.Pure>;
+    def : Builtin<"read_imagei", [VectorType<Int, 4>, ImageType<imgTy, aQual>, VectorType<Int, 2>], Attr.Pure>;
+    def : Builtin<"read_imageui", [VectorType<UInt, 4>, ImageType<imgTy, aQual>, VectorType<Int, 2>], Attr.Pure>;
   }
   foreach imgTy = [Image3d, Image2dArray] in {
-    def : Builtin<"read_imagef", [VectorType<Float, 4>, ImageType<imgTy, aQual>, VectorType<Int, 4>]>;
-    def : Builtin<"read_imagei", [VectorType<Int, 4>, ImageType<imgTy, aQual>, VectorType<Int, 4>]>;
-    def : Builtin<"read_imageui", [VectorType<UInt, 4>, ImageType<imgTy, aQual>, VectorType<Int, 4>]>;
+    def : Builtin<"read_imagef", [VectorType<Float, 4>, ImageType<imgTy, aQual>, VectorType<Int, 4>], Attr.Pure>;
+    def : Builtin<"read_imagei", [VectorType<Int, 4>, ImageType<imgTy, aQual>, VectorType<Int, 4>], Attr.Pure>;
+    def : Builtin<"read_imageui", [VectorType<UInt, 4>, ImageType<imgTy, aQual>, VectorType<Int, 4>], Attr.Pure>;
   }
   foreach imgTy = [Image1d, Image1dBuffer] in {
-    def : Builtin<"read_imagef", [VectorType<Float, 4>, ImageType<imgTy, aQual>, Int]>;
-    def : Builtin<"read_imagei", [VectorType<Int, 4>, ImageType<imgTy, aQual>, Int]>;
-    def : Builtin<"read_imageui", [VectorType<UInt, 4>, ImageType<imgTy, aQual>, Int]>;
+    def : Builtin<"read_imagef", [VectorType<Float, 4>, ImageType<imgTy, aQual>, Int], Attr.Pure>;
+    def : Builtin<"read_imagei", [VectorType<Int, 4>, ImageType<imgTy, aQual>, Int], Attr.Pure>;
+    def : Builtin<"read_imageui", [VectorType<UInt, 4>, ImageType<imgTy, aQual>, Int], Attr.Pure>;
   }
-  def : Builtin<"read_imagef", [Float, ImageType<Image2dDepth, aQual>, VectorType<Int, 2>]>;
-  def : Builtin<"read_imagef", [Float, ImageType<Image2dArrayDepth, aQual>, VectorType<Int, 4>]>;
+  def : Builtin<"read_imagef", [Float, ImageType<Image2dDepth, aQual>, VectorType<Int, 2>], Attr.Pure>;
+  def : Builtin<"read_imagef", [Float, ImageType<Image2dArrayDepth, aQual>, VectorType<Int, 4>], Attr.Pure>;
 }
 
 // --- Table 24: Image Write Functions ---
@@ -624,13 +774,13 @@ foreach aQual = ["RO"] in {
   foreach name = ["read_imageh"] in {
     foreach coordTy = [Int, Float] in {
       foreach imgTy = [Image2d, Image1dArray] in {
-        def : Builtin<name, [VectorType<Half, 4>, ImageType<imgTy, aQual>, Sampler, VectorType<coordTy, 2>]>;
+        def : Builtin<name, [VectorType<Half, 4>, ImageType<imgTy, aQual>, Sampler, VectorType<coordTy, 2>], Attr.Pure>;
       }
       foreach imgTy = [Image3d, Image2dArray] in {
-        def : Builtin<name, [VectorType<Half, 4>, ImageType<imgTy, aQual>, Sampler, VectorType<coordTy, 4>]>;
+        def : Builtin<name, [VectorType<Half, 4>, ImageType<imgTy, aQual>, Sampler, VectorType<coordTy, 4>], Attr.Pure>;
       }
       foreach imgTy = [Image1d] in {
-        def : Builtin<name, [VectorType<Half, 4>, ImageType<imgTy, aQual>, Sampler, coordTy]>;
+        def : Builtin<name, [VectorType<Half, 4>, ImageType<imgTy, aQual>, Sampler, coordTy], Attr.Pure>;
       }
     }
   }
@@ -640,13 +790,13 @@ foreach aQual = ["RO"] in {
 foreach aQual = ["RO", "RW"] in {
   foreach name = ["read_imageh"] in {
     foreach imgTy = [Image2d, Image1dArray] in {
-      def : Builtin<name, [VectorType<Half, 4>, ImageType<imgTy, aQual>, VectorType<Int, 2>]>;
+      def : Builtin<name, [VectorType<Half, 4>, ImageType<imgTy, aQual>, VectorType<Int, 2>], Attr.Pure>;
     }
     foreach imgTy = [Image3d, Image2dArray] in {
-      def : Builtin<name, [VectorType<Half, 4>, ImageType<imgTy, aQual>, VectorType<Int, 4>]>;
+      def : Builtin<name, [VectorType<Half, 4>, ImageType<imgTy, aQual>, VectorType<Int, 4>], Attr.Pure>;
     }
     foreach imgTy = [Image1d, Image1dBuffer] in {
-      def : Builtin<name, [VectorType<Half, 4>, ImageType<imgTy, aQual>, Int]>;
+      def : Builtin<name, [VectorType<Half, 4>, ImageType<imgTy, aQual>, Int], Attr.Pure>;
     }
   }
 }

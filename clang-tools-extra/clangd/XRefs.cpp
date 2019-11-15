@@ -417,6 +417,7 @@ static std::string getLocalScope(const Decl *D) {
   auto GetName = [](const Decl *D) {
     const NamedDecl *ND = dyn_cast<NamedDecl>(D);
     std::string Name = ND->getNameAsString();
+    // FIXME(sammccall): include template params/specialization args?.
     if (!Name.empty())
       return Name;
     if (auto RD = dyn_cast<RecordDecl>(D))
@@ -657,6 +658,10 @@ static HoverInfo getHoverContents(const Decl *D, const SymbolIndex *Index) {
                                Init->getType());
       }
     }
+  } else if (const auto *ECD = dyn_cast<EnumConstantDecl>(D)) {
+    // Dependent enums (e.g. nested in template classes) don't have values yet.
+    if (!ECD->getType()->isDependentType())
+      HI.Value = ECD->getInitVal().toString(10);
   }
 
   HI.Definition = printDefinition(D);

@@ -342,6 +342,7 @@ static void getTargetFeatures(const ToolChain &TC, const llvm::Triple &Triple,
     systemz::getSystemZTargetFeatures(Args, Features);
     break;
   case llvm::Triple::aarch64:
+  case llvm::Triple::aarch64_32:
   case llvm::Triple::aarch64_be:
     aarch64::getAArch64TargetFeatures(D, Triple, Args, Features);
     break;
@@ -1351,6 +1352,7 @@ static bool isSignedCharDefault(const llvm::Triple &Triple) {
     return true;
 
   case llvm::Triple::aarch64:
+  case llvm::Triple::aarch64_32:
   case llvm::Triple::aarch64_be:
   case llvm::Triple::arm:
   case llvm::Triple::armeb:
@@ -1473,6 +1475,7 @@ void Clang::RenderTargetOptions(const llvm::Triple &EffectiveTriple,
     break;
 
   case llvm::Triple::aarch64:
+  case llvm::Triple::aarch64_32:
   case llvm::Triple::aarch64_be:
     AddAArch64TargetArgs(Args, CmdArgs);
     CmdArgs.push_back("-fallow-half-arguments-and-returns");
@@ -1524,56 +1527,6 @@ void Clang::RenderTargetOptions(const llvm::Triple &EffectiveTriple,
     AddWebAssemblyTargetArgs(Args, CmdArgs);
     break;
   }
-}
-
-// Parse -mbranch-protection=<protection>[+<protection>]* where
-//   <protection> ::= standard | none | [bti,pac-ret[+b-key,+leaf]*]
-// Returns a triple of (return address signing Scope, signing key, require
-// landing pads)
-static std::tuple<StringRef, StringRef, bool>
-ParseAArch64BranchProtection(const Driver &D, const ArgList &Args,
-                             const Arg *A) {
-  StringRef Scope = "none";
-  StringRef Key = "a_key";
-  bool IndirectBranches = false;
-
-  StringRef Value = A->getValue();
-  // This maps onto -mbranch-protection=<scope>+<key>
-
-  if (Value.equals("standard")) {
-    Scope = "non-leaf";
-    Key = "a_key";
-    IndirectBranches = true;
-
-  } else if (!Value.equals("none")) {
-    SmallVector<StringRef, 4> BranchProtection;
-    StringRef(A->getValue()).split(BranchProtection, '+');
-
-    auto Protection = BranchProtection.begin();
-    while (Protection != BranchProtection.end()) {
-      if (Protection->equals("bti"))
-        IndirectBranches = true;
-      else if (Protection->equals("pac-ret")) {
-        Scope = "non-leaf";
-        while (++Protection != BranchProtection.end()) {
-          // Inner loop as "leaf" and "b-key" options must only appear attached
-          // to pac-ret.
-          if (Protection->equals("leaf"))
-            Scope = "all";
-          else if (Protection->equals("b-key"))
-            Key = "b_key";
-          else
-            break;
-        }
-        Protection--;
-      } else
-        D.Diag(diag::err_invalid_branch_protection)
-            << *Protection << A->getAsString(Args);
-      Protection++;
-    }
-  }
-
-  return std::make_tuple(Scope, Key, IndirectBranches);
 }
 
 namespace {
@@ -1647,9 +1600,16 @@ void Clang::AddAArch64TargetArgs(const ArgList &Args,
             << Scope << A->getAsString(Args);
       Key = "a_key";
       IndirectBranches = false;
-    } else
-      std::tie(Scope, Key, IndirectBranches) =
-          ParseAArch64BranchProtection(D, Args, A);
+    } else {
+      StringRef Err;
+      llvm::AArch64::ParsedBranchProtection PBP;
+      if (!llvm::AArch64::parseBranchProtection(A->getValue(), PBP, Err))
+        D.Diag(diag::err_invalid_branch_protection)
+            << Err << A->getAsString(Args);
+      Scope = PBP.Scope;
+      Key = PBP.Key;
+      IndirectBranches = PBP.BranchTargetEnforcement;
+    }
 
     CmdArgs.push_back(
         Args.MakeArgString(Twine("-msign-return-address=") + Scope));
@@ -4032,6 +3992,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       RenderARMABI(Triple, Args, CmdArgs);
       break;
     case llvm::Triple::aarch64:
+    case llvm::Triple::aarch64_32:
     case llvm::Triple::aarch64_be:
       RenderAArch64ABI(Triple, Args, CmdArgs);
       break;
@@ -5789,11 +5750,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       // We only support -moutline in AArch64 right now. If we're not compiling
       // for AArch64, emit a warning and ignore the flag. Otherwise, add the
       // proper mllvm flags.
-      if (Triple.getArch() != llvm::Triple::aarch64) {
+      if (Triple.getArch() != llvm::Triple::aarch64 &&
+          Triple.getArch() != llvm::Triple::aarch64_32) {
         D.Diag(diag::warn_drv_moutline_unsupported_opt) << Triple.getArchName();
       } else {
-          CmdArgs.push_back("-mllvm");
-          CmdArgs.push_back("-enable-machine-outliner");
+        CmdArgs.push_back("-mllvm");
+        CmdArgs.push_back("-enable-machine-outliner");
       }
     } else {
       // Disable all outlining behaviour.

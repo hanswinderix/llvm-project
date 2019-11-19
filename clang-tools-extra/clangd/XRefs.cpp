@@ -414,12 +414,12 @@ static PrintingPolicy printingPolicyForDecls(PrintingPolicy Base) {
 static std::string getLocalScope(const Decl *D) {
   std::vector<std::string> Scopes;
   const DeclContext *DC = D->getDeclContext();
-  auto GetName = [](const Decl *D) {
-    const NamedDecl *ND = dyn_cast<NamedDecl>(D);
-    std::string Name = ND->getNameAsString();
-    // FIXME(sammccall): include template params/specialization args?.
-    if (!Name.empty())
-      return Name;
+  auto GetName = [](const TypeDecl *D) {
+    if (!D->getDeclName().isEmpty()) {
+      PrintingPolicy Policy = D->getASTContext().getPrintingPolicy();
+      Policy.SuppressScope = true;
+      return declaredType(D).getAsString(Policy);
+    }
     if (auto RD = dyn_cast<RecordDecl>(D))
       return ("(anonymous " + RD->getKindName() + ")").str();
     return std::string("");
@@ -566,6 +566,51 @@ static void enhanceFromIndex(HoverInfo &Hover, const Decl *D,
       Req, [&](const Symbol &S) { Hover.Documentation = S.Documentation; });
 }
 
+// Populates Type, ReturnType, and Parameters for function-like decls.
+static void fillFunctionTypeAndParams(HoverInfo &HI, const Decl *D,
+                                      const FunctionDecl *FD,
+                                      const PrintingPolicy &Policy) {
+  HI.Parameters.emplace();
+  for (const ParmVarDecl *PVD : FD->parameters()) {
+    HI.Parameters->emplace_back();
+    auto &P = HI.Parameters->back();
+    if (!PVD->getType().isNull()) {
+      P.Type.emplace();
+      llvm::raw_string_ostream OS(*P.Type);
+      PVD->getType().print(OS, Policy);
+    } else {
+      std::string Param;
+      llvm::raw_string_ostream OS(Param);
+      PVD->dump(OS);
+      OS.flush();
+      elog("Got param with null type: {0}", Param);
+    }
+    if (!PVD->getName().empty())
+      P.Name = PVD->getNameAsString();
+    if (PVD->hasDefaultArg()) {
+      P.Default.emplace();
+      llvm::raw_string_ostream Out(*P.Default);
+      PVD->getDefaultArg()->printPretty(Out, nullptr, Policy);
+    }
+  }
+
+  if (const auto* CCD = llvm::dyn_cast<CXXConstructorDecl>(FD)) {
+    // Constructor's "return type" is the class type.
+    HI.ReturnType = declaredType(CCD->getParent()).getAsString(Policy);
+    // Don't provide any type for the constructor itself.
+  } else if (const auto* CDD = llvm::dyn_cast<CXXDestructorDecl>(FD)){
+    HI.ReturnType = "void";
+  } else {
+    HI.ReturnType = FD->getReturnType().getAsString(Policy);
+
+    QualType FunctionType = FD->getType();
+    if (const VarDecl *VD = llvm::dyn_cast<VarDecl>(D)) // Lambdas
+      FunctionType = VD->getType().getDesugaredType(D->getASTContext());
+    HI.Type = FunctionType.getAsString(Policy);
+  }
+  // FIXME: handle variadics.
+}
+
 /// Generate a \p Hover object given the declaration \p D.
 static HoverInfo getHoverContents(const Decl *D, const SymbolIndex *Index) {
   HoverInfo HI;
@@ -601,45 +646,7 @@ static HoverInfo getHoverContents(const Decl *D, const SymbolIndex *Index) {
 
   // Fill in types and params.
   if (const FunctionDecl *FD = getUnderlyingFunction(D)) {
-    HI.ReturnType.emplace();
-    {
-      llvm::raw_string_ostream OS(*HI.ReturnType);
-      FD->getReturnType().print(OS, Policy);
-    }
-
-    HI.Parameters.emplace();
-    for (const ParmVarDecl *PVD : FD->parameters()) {
-      HI.Parameters->emplace_back();
-      auto &P = HI.Parameters->back();
-      if (!PVD->getType().isNull()) {
-        P.Type.emplace();
-        llvm::raw_string_ostream OS(*P.Type);
-        PVD->getType().print(OS, Policy);
-      } else {
-        std::string Param;
-        llvm::raw_string_ostream OS(Param);
-        PVD->dump(OS);
-        OS.flush();
-        elog("Got param with null type: {0}", Param);
-      }
-      if (!PVD->getName().empty())
-        P.Name = PVD->getNameAsString();
-      if (PVD->hasDefaultArg()) {
-        P.Default.emplace();
-        llvm::raw_string_ostream Out(*P.Default);
-        PVD->getDefaultArg()->printPretty(Out, nullptr, Policy);
-      }
-    }
-
-    HI.Type.emplace();
-    llvm::raw_string_ostream TypeOS(*HI.Type);
-    // Lambdas
-    if (const VarDecl *VD = llvm::dyn_cast<VarDecl>(D))
-      VD->getType().getDesugaredType(D->getASTContext()).print(TypeOS, Policy);
-    // Functions
-    else
-      FD->getType().print(TypeOS, Policy);
-    // FIXME: handle variadics.
+    fillFunctionTypeAndParams(HI, D, FD, Policy);
   } else if (const auto *VD = dyn_cast<ValueDecl>(D)) {
     HI.Type.emplace();
     llvm::raw_string_ostream OS(*HI.Type);
@@ -883,11 +890,11 @@ llvm::Optional<HoverInfo> getHover(ParsedAST &AST, Position Pos,
   return HI;
 }
 
-std::vector<Location> findReferences(ParsedAST &AST, Position Pos,
-                                     uint32_t Limit, const SymbolIndex *Index) {
+ReferencesResult findReferences(ParsedAST &AST, Position Pos, uint32_t Limit,
+                                const SymbolIndex *Index) {
   if (!Limit)
     Limit = std::numeric_limits<uint32_t>::max();
-  std::vector<Location> Results;
+  ReferencesResult Results;
   const SourceManager &SM = AST.getSourceManager();
   auto MainFilePath =
       getCanonicalPath(SM.getFileEntryForID(SM.getMainFileID()), SM);
@@ -917,17 +924,15 @@ std::vector<Location> findReferences(ParsedAST &AST, Position Pos,
                      MainFileRefs.end());
   for (const auto &Ref : MainFileRefs) {
     if (auto Range =
-            getTokenRange(AST.getASTContext().getSourceManager(),
-                          AST.getASTContext().getLangOpts(), Ref.Loc)) {
+            getTokenRange(SM, AST.getASTContext().getLangOpts(), Ref.Loc)) {
       Location Result;
       Result.range = *Range;
       Result.uri = URIForFile::canonicalize(*MainFilePath, *MainFilePath);
-      Results.push_back(std::move(Result));
+      Results.References.push_back(std::move(Result));
     }
   }
-
   // Now query the index for references from other files.
-  if (Index && Results.size() < Limit) {
+  if (Index && Results.References.size() <= Limit) {
     RefsRequest Req;
     Req.Limit = Limit;
 
@@ -942,15 +947,22 @@ std::vector<Location> findReferences(ParsedAST &AST, Position Pos,
     }
     if (Req.IDs.empty())
       return Results;
-    Index->refs(Req, [&](const Ref &R) {
+    Results.HasMore |= Index->refs(Req, [&](const Ref &R) {
+      // no need to continue process if we reach the limit.
+      if (Results.References.size() > Limit)
+        return;
       auto LSPLoc = toLSPLocation(R.Location, *MainFilePath);
       // Avoid indexed results for the main file - the AST is authoritative.
-      if (LSPLoc && LSPLoc->uri.file() != *MainFilePath)
-        Results.push_back(std::move(*LSPLoc));
+      if (!LSPLoc || LSPLoc->uri.file() == *MainFilePath)
+        return;
+
+      Results.References.push_back(std::move(*LSPLoc));
     });
   }
-  if (Results.size() > Limit)
-    Results.resize(Limit);
+  if (Results.References.size() > Limit) {
+    Results.HasMore = true;
+    Results.References.resize(Limit);
+  }
   return Results;
 }
 

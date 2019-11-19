@@ -567,7 +567,7 @@ public:
 
   /// Construct a vectorizable tree that starts at \p Roots, ignoring users for
   /// the purpose of scheduling and extraction in the \p UserIgnoreLst taking
-  /// into account (anf updating it, if required) list of externally used
+  /// into account (and updating it, if required) list of externally used
   /// values stored in \p ExternallyUsedValues.
   void buildTree(ArrayRef<Value *> Roots,
                  ExtraValueToDebugLocsMap &ExternallyUsedValues,
@@ -6778,21 +6778,8 @@ public:
           VectorizedTree = VectReductionData.createOp(Builder, "op.extra", I);
         }
       }
-
-      // Update users. For a min/max reduction that ends with a compare and
-      // select, we also have to RAUW for the compare instruction feeding the
-      // reduction root. That's because the original compare may have extra uses
-      // besides the final select of the reduction.
-      if (ReductionData.isMinMax() && isa<SelectInst>(VectorizedTree)) {
-        assert(isa<SelectInst>(ReductionRoot) &&
-               "Expected min/max reduction to have select root instruction");
-
-        Value *ScalarCond = cast<SelectInst>(ReductionRoot)->getCondition();
-        Value *VectorCond = cast<SelectInst>(VectorizedTree)->getCondition();
-        ScalarCond->replaceAllUsesWith(VectorCond);
-      }
+      // Update users.
       ReductionRoot->replaceAllUsesWith(VectorizedTree);
-
       // Mark all scalar reduction ops for deletion, they are replaced by the
       // vector reductions.
       V.eraseInstructions(IgnoreList);

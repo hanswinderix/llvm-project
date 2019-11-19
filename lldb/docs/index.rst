@@ -143,7 +143,9 @@ interesting areas to contribute to lldb.
    resources/build
    resources/test
    resources/bots
+   resources/reproducers
    resources/sbapi
+   resources/caveats
 
 .. toctree::
    :hidden:

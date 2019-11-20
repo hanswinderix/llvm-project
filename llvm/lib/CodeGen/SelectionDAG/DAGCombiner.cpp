@@ -11337,7 +11337,7 @@ SDValue DAGCombiner::visitFADDForFMACombine(SDNode *N) {
 
   // Floating-point multiply-add without intermediate rounding.
   bool HasFMA =
-      TLI.isFMAFasterThanFMulAndFAdd(VT) &&
+      TLI.isFMAFasterThanFMulAndFAdd(DAG.getMachineFunction(), VT) &&
       (!LegalOperations || TLI.isOperationLegalOrCustom(ISD::FMA, VT));
 
   // No valid opcode, do not combine.
@@ -11554,7 +11554,7 @@ SDValue DAGCombiner::visitFSUBForFMACombine(SDNode *N) {
 
   // Floating-point multiply-add without intermediate rounding.
   bool HasFMA =
-      TLI.isFMAFasterThanFMulAndFAdd(VT) &&
+      TLI.isFMAFasterThanFMulAndFAdd(DAG.getMachineFunction(), VT) &&
       (!LegalOperations || TLI.isOperationLegalOrCustom(ISD::FMA, VT));
 
   // No valid opcode, do not combine.
@@ -11860,7 +11860,7 @@ SDValue DAGCombiner::visitFMULForFMADistributiveCombine(SDNode *N) {
   // Floating-point multiply-add without intermediate rounding.
   bool HasFMA =
       (Options.AllowFPOpFusion == FPOpFusion::Fast || Options.UnsafeFPMath) &&
-      TLI.isFMAFasterThanFMulAndFAdd(VT) &&
+      TLI.isFMAFasterThanFMulAndFAdd(DAG.getMachineFunction(), VT) &&
       (!LegalOperations || TLI.isOperationLegalOrCustom(ISD::FMA, VT));
 
   // Floating-point multiply-add with intermediate rounding. This can result
@@ -20464,9 +20464,8 @@ SDValue DAGCombiner::buildSqrtEstimateImpl(SDValue Op, SDNodeFlags Flags,
         SDLoc DL(Op);
         EVT CCVT = getSetCCResultType(VT);
         ISD::NodeType SelOpcode = VT.isVector() ? ISD::VSELECT : ISD::SELECT;
-        const Function &F = DAG.getMachineFunction().getFunction();
-        Attribute Denorms = F.getFnAttribute("denormal-fp-math");
-        if (Denorms.getValueAsString().equals("ieee")) {
+        DenormalMode DenormMode = DAG.getDenormalMode(VT);
+        if (DenormMode == DenormalMode::IEEE) {
           // fabs(X) < SmallestNormal ? 0.0 : Est
           const fltSemantics &FltSem = DAG.EVTToAPFloatSemantics(VT);
           APFloat SmallestNorm = APFloat::getSmallestNormalized(FltSem);

@@ -771,18 +771,312 @@ void ClangExpressionDeclMap::FindExternalVisibleDecls(
   ClangASTSource::FindExternalVisibleDecls(context);
 }
 
+void ClangExpressionDeclMap::MaybeRegisterFunctionBody(
+    FunctionDecl *copied_function_decl) {
+  if (copied_function_decl->getBody() && m_parser_vars->m_code_gen) {
+    clang::DeclGroupRef decl_group_ref(copied_function_decl);
+    m_parser_vars->m_code_gen->HandleTopLevelDecl(decl_group_ref);
+  }
+}
+
+void ClangExpressionDeclMap::SearchPersistenDecls(NameSearchContext &context,
+                                                  const ConstString name,
+                                                  unsigned int current_id) {
+  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+  Target *target = m_parser_vars->m_exe_ctx.GetTargetPtr();
+  if (!target)
+    return;
+
+  ClangASTContext *scratch_clang_ast_context =
+      target->GetScratchClangASTContext();
+
+  if (!scratch_clang_ast_context)
+    return;
+
+  ASTContext *scratch_ast_context = scratch_clang_ast_context->getASTContext();
+
+  if (!scratch_ast_context)
+    return;
+
+  NamedDecl *persistent_decl =
+      m_parser_vars->m_persistent_vars->GetPersistentDecl(name);
+
+  if (!persistent_decl)
+    return;
+
+  Decl *parser_persistent_decl = CopyDecl(persistent_decl);
+
+  if (!parser_persistent_decl)
+    return;
+
+  NamedDecl *parser_named_decl = dyn_cast<NamedDecl>(parser_persistent_decl);
+
+  if (!parser_named_decl)
+    return;
+
+  if (clang::FunctionDecl *parser_function_decl =
+          llvm::dyn_cast<clang::FunctionDecl>(parser_named_decl)) {
+    MaybeRegisterFunctionBody(parser_function_decl);
+  }
+
+  LLDB_LOGF(log, "  CEDM::FEVD[%u] Found persistent decl %s", current_id,
+            name.GetCString());
+
+  context.AddNamedDecl(parser_named_decl);
+}
+
+void ClangExpressionDeclMap::LookUpLldbClass(NameSearchContext &context,
+                                             unsigned int current_id) {
+  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+
+  StackFrame *frame = m_parser_vars->m_exe_ctx.GetFramePtr();
+  SymbolContext sym_ctx;
+  if (frame != nullptr)
+    sym_ctx = frame->GetSymbolContext(lldb::eSymbolContextFunction |
+                                      lldb::eSymbolContextBlock);
+
+  if (m_ctx_obj) {
+    Status status;
+    lldb::ValueObjectSP ctx_obj_ptr = m_ctx_obj->AddressOf(status);
+    if (!ctx_obj_ptr || status.Fail())
+      return;
+
+    AddThisType(context, TypeFromUser(m_ctx_obj->GetCompilerType()),
+                current_id);
+
+    m_struct_vars->m_object_pointer_type =
+        TypeFromUser(ctx_obj_ptr->GetCompilerType());
+
+    return;
+  }
+
+  // Clang is looking for the type of "this"
+
+  if (frame == nullptr)
+    return;
+
+  // Find the block that defines the function represented by "sym_ctx"
+  Block *function_block = sym_ctx.GetFunctionBlock();
+
+  if (!function_block)
+    return;
+
+  CompilerDeclContext function_decl_ctx = function_block->GetDeclContext();
+
+  if (!function_decl_ctx)
+    return;
+
+  clang::CXXMethodDecl *method_decl =
+      ClangASTContext::DeclContextGetAsCXXMethodDecl(function_decl_ctx);
+
+  if (method_decl) {
+    clang::CXXRecordDecl *class_decl = method_decl->getParent();
+
+    QualType class_qual_type(class_decl->getTypeForDecl(), 0);
+
+    TypeFromUser class_user_type(
+        class_qual_type.getAsOpaquePtr(),
+        ClangASTContext::GetASTContext(&class_decl->getASTContext()));
+
+    if (log) {
+      ASTDumper ast_dumper(class_qual_type);
+      LLDB_LOGF(log, "  CEDM::FEVD[%u] Adding type for $__lldb_class: %s",
+                current_id, ast_dumper.GetCString());
+    }
+
+    AddThisType(context, class_user_type, current_id);
+
+    if (method_decl->isInstance()) {
+      // self is a pointer to the object
+
+      QualType class_pointer_type =
+          method_decl->getASTContext().getPointerType(class_qual_type);
+
+      TypeFromUser self_user_type(
+          class_pointer_type.getAsOpaquePtr(),
+          ClangASTContext::GetASTContext(&method_decl->getASTContext()));
+
+      m_struct_vars->m_object_pointer_type = self_user_type;
+    }
+    return;
+  }
+
+  // This branch will get hit if we are executing code in the context of
+  // a function that claims to have an object pointer (through
+  // DW_AT_object_pointer?) but is not formally a method of the class.
+  // In that case, just look up the "this" variable in the current scope
+  // and use its type.
+  // FIXME: This code is formally correct, but clang doesn't currently
+  // emit DW_AT_object_pointer
+  // for C++ so it hasn't actually been tested.
+
+  VariableList *vars = frame->GetVariableList(false);
+
+  lldb::VariableSP this_var = vars->FindVariable(ConstString("this"));
+
+  if (this_var && this_var->IsInScope(frame) &&
+      this_var->LocationIsValidForFrame(frame)) {
+    Type *this_type = this_var->GetType();
+
+    if (!this_type)
+      return;
+
+    TypeFromUser pointee_type =
+        this_type->GetForwardCompilerType().GetPointeeType();
+
+    if (pointee_type.IsValid()) {
+      if (log) {
+        ASTDumper ast_dumper(pointee_type);
+        LLDB_LOGF(log, "  FEVD[%u] Adding type for $__lldb_class: %s",
+                  current_id, ast_dumper.GetCString());
+      }
+
+      AddThisType(context, pointee_type, current_id);
+      TypeFromUser this_user_type(this_type->GetFullCompilerType());
+      m_struct_vars->m_object_pointer_type = this_user_type;
+    }
+  }
+}
+
+void ClangExpressionDeclMap::LookUpLldbObjCClass(NameSearchContext &context,
+                                                 unsigned int current_id) {
+  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+
+  StackFrame *frame = m_parser_vars->m_exe_ctx.GetFramePtr();
+
+  if (m_ctx_obj) {
+    Status status;
+    lldb::ValueObjectSP ctx_obj_ptr = m_ctx_obj->AddressOf(status);
+    if (!ctx_obj_ptr || status.Fail())
+      return;
+
+    AddOneType(context, TypeFromUser(m_ctx_obj->GetCompilerType()), current_id);
+
+    m_struct_vars->m_object_pointer_type =
+        TypeFromUser(ctx_obj_ptr->GetCompilerType());
+
+    return;
+  }
+
+  // Clang is looking for the type of "*self"
+
+  if (!frame)
+    return;
+
+  SymbolContext sym_ctx = frame->GetSymbolContext(lldb::eSymbolContextFunction |
+                                                  lldb::eSymbolContextBlock);
+
+  // Find the block that defines the function represented by "sym_ctx"
+  Block *function_block = sym_ctx.GetFunctionBlock();
+
+  if (!function_block)
+    return;
+
+  CompilerDeclContext function_decl_ctx = function_block->GetDeclContext();
+
+  if (!function_decl_ctx)
+    return;
+
+  clang::ObjCMethodDecl *method_decl =
+      ClangASTContext::DeclContextGetAsObjCMethodDecl(function_decl_ctx);
+
+  if (method_decl) {
+    ObjCInterfaceDecl *self_interface = method_decl->getClassInterface();
+
+    if (!self_interface)
+      return;
+
+    const clang::Type *interface_type = self_interface->getTypeForDecl();
+
+    if (!interface_type)
+      return; // This is unlikely, but we have seen crashes where this
+              // occurred
+
+    TypeFromUser class_user_type(
+        QualType(interface_type, 0).getAsOpaquePtr(),
+        ClangASTContext::GetASTContext(&method_decl->getASTContext()));
+
+    if (log) {
+      ASTDumper ast_dumper(interface_type);
+      LLDB_LOGF(log, "  FEVD[%u] Adding type for $__lldb_objc_class: %s",
+                current_id, ast_dumper.GetCString());
+    }
+
+    AddOneType(context, class_user_type, current_id);
+
+    if (method_decl->isInstanceMethod()) {
+      // self is a pointer to the object
+
+      QualType class_pointer_type =
+          method_decl->getASTContext().getObjCObjectPointerType(
+              QualType(interface_type, 0));
+
+      TypeFromUser self_user_type(
+          class_pointer_type.getAsOpaquePtr(),
+          ClangASTContext::GetASTContext(&method_decl->getASTContext()));
+
+      m_struct_vars->m_object_pointer_type = self_user_type;
+    } else {
+      // self is a Class pointer
+      QualType class_type = method_decl->getASTContext().getObjCClassType();
+
+      TypeFromUser self_user_type(
+          class_type.getAsOpaquePtr(),
+          ClangASTContext::GetASTContext(&method_decl->getASTContext()));
+
+      m_struct_vars->m_object_pointer_type = self_user_type;
+    }
+
+    return;
+  }
+  // This branch will get hit if we are executing code in the context of
+  // a function that claims to have an object pointer (through
+  // DW_AT_object_pointer?) but is not formally a method of the class.
+  // In that case, just look up the "self" variable in the current scope
+  // and use its type.
+
+  VariableList *vars = frame->GetVariableList(false);
+
+  lldb::VariableSP self_var = vars->FindVariable(ConstString("self"));
+
+  if (self_var && self_var->IsInScope(frame) &&
+      self_var->LocationIsValidForFrame(frame)) {
+    Type *self_type = self_var->GetType();
+
+    if (!self_type)
+      return;
+
+    CompilerType self_clang_type = self_type->GetFullCompilerType();
+
+    if (ClangASTContext::IsObjCClassType(self_clang_type)) {
+      return;
+    } else if (ClangASTContext::IsObjCObjectPointerType(self_clang_type)) {
+      self_clang_type = self_clang_type.GetPointeeType();
+
+      if (!self_clang_type)
+        return;
+
+      if (log) {
+        ASTDumper ast_dumper(self_type->GetFullCompilerType());
+        LLDB_LOGF(log, "  FEVD[%u] Adding type for $__lldb_objc_class: %s",
+                  current_id, ast_dumper.GetCString());
+      }
+
+      TypeFromUser class_user_type(self_clang_type);
+
+      AddOneType(context, class_user_type, current_id);
+
+      TypeFromUser self_user_type(self_type->GetFullCompilerType());
+
+      m_struct_vars->m_object_pointer_type = self_user_type;
+    }
+  }
+}
+
 void ClangExpressionDeclMap::FindExternalVisibleDecls(
     NameSearchContext &context, lldb::ModuleSP module_sp,
     CompilerDeclContext &namespace_decl, unsigned int current_id) {
   assert(m_ast_context);
-
-  std::function<void(clang::FunctionDecl *)> MaybeRegisterFunctionBody =
-      [this](clang::FunctionDecl *copied_function_decl) {
-        if (copied_function_decl->getBody() && m_parser_vars->m_code_gen) {
-          DeclGroupRef decl_group_ref(copied_function_decl);
-          m_parser_vars->m_code_gen->HandleTopLevelDecl(decl_group_ref);
-        }
-      };
 
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
 
@@ -802,312 +1096,37 @@ void ClangExpressionDeclMap::FindExternalVisibleDecls(
                                       lldb::eSymbolContextBlock);
 
   // Try the persistent decls, which take precedence over all else.
-  if (!namespace_decl) {
-    do {
-      if (!target)
-        break;
-
-      ClangASTContext *scratch_clang_ast_context =
-          target->GetScratchClangASTContext();
-
-      if (!scratch_clang_ast_context)
-        break;
-
-      ASTContext *scratch_ast_context =
-          scratch_clang_ast_context->getASTContext();
-
-      if (!scratch_ast_context)
-        break;
-
-      NamedDecl *persistent_decl =
-          m_parser_vars->m_persistent_vars->GetPersistentDecl(name);
-
-      if (!persistent_decl)
-        break;
-
-      Decl *parser_persistent_decl = CopyDecl(persistent_decl);
-
-      if (!parser_persistent_decl)
-        break;
-
-      NamedDecl *parser_named_decl =
-          dyn_cast<NamedDecl>(parser_persistent_decl);
-
-      if (!parser_named_decl)
-        break;
-
-      if (clang::FunctionDecl *parser_function_decl =
-              llvm::dyn_cast<clang::FunctionDecl>(parser_named_decl)) {
-        MaybeRegisterFunctionBody(parser_function_decl);
-      }
-
-      LLDB_LOGF(log, "  CEDM::FEVD[%u] Found persistent decl %s", current_id,
-                name.GetCString());
-
-      context.AddNamedDecl(parser_named_decl);
-    } while (false);
-  }
+  if (!namespace_decl)
+    SearchPersistenDecls(context, name, current_id);
 
   if (name.GetCString()[0] == '$' && !namespace_decl) {
     static ConstString g_lldb_class_name("$__lldb_class");
 
     if (name == g_lldb_class_name) {
-      if (m_ctx_obj) {
-        Status status;
-        lldb::ValueObjectSP ctx_obj_ptr = m_ctx_obj->AddressOf(status);
-        if (!ctx_obj_ptr || status.Fail())
-          return;
-
-        AddThisType(context, TypeFromUser(m_ctx_obj->GetCompilerType()),
-                    current_id);
-
-        m_struct_vars->m_object_pointer_type =
-            TypeFromUser(ctx_obj_ptr->GetCompilerType());
-
-        return;
-      }
-
-      // Clang is looking for the type of "this"
-
-      if (frame == nullptr)
-        return;
-
-      // Find the block that defines the function represented by "sym_ctx"
-      Block *function_block = sym_ctx.GetFunctionBlock();
-
-      if (!function_block)
-        return;
-
-      CompilerDeclContext function_decl_ctx = function_block->GetDeclContext();
-
-      if (!function_decl_ctx)
-        return;
-
-      clang::CXXMethodDecl *method_decl =
-          ClangASTContext::DeclContextGetAsCXXMethodDecl(function_decl_ctx);
-
-      if (method_decl) {
-        clang::CXXRecordDecl *class_decl = method_decl->getParent();
-
-        QualType class_qual_type(class_decl->getTypeForDecl(), 0);
-
-        TypeFromUser class_user_type(
-            class_qual_type.getAsOpaquePtr(),
-            ClangASTContext::GetASTContext(&class_decl->getASTContext()));
-
-        if (log) {
-          ASTDumper ast_dumper(class_qual_type);
-          LLDB_LOGF(log, "  CEDM::FEVD[%u] Adding type for $__lldb_class: %s",
-                    current_id, ast_dumper.GetCString());
-        }
-
-        AddThisType(context, class_user_type, current_id);
-
-        if (method_decl->isInstance()) {
-          // self is a pointer to the object
-
-          QualType class_pointer_type =
-              method_decl->getASTContext().getPointerType(class_qual_type);
-
-          TypeFromUser self_user_type(
-              class_pointer_type.getAsOpaquePtr(),
-              ClangASTContext::GetASTContext(&method_decl->getASTContext()));
-
-          m_struct_vars->m_object_pointer_type = self_user_type;
-        }
-      } else {
-        // This branch will get hit if we are executing code in the context of
-        // a function that claims to have an object pointer (through
-        // DW_AT_object_pointer?) but is not formally a method of the class.
-        // In that case, just look up the "this" variable in the current scope
-        // and use its type.
-        // FIXME: This code is formally correct, but clang doesn't currently
-        // emit DW_AT_object_pointer
-        // for C++ so it hasn't actually been tested.
-
-        VariableList *vars = frame->GetVariableList(false);
-
-        lldb::VariableSP this_var = vars->FindVariable(ConstString("this"));
-
-        if (this_var && this_var->IsInScope(frame) &&
-            this_var->LocationIsValidForFrame(frame)) {
-          Type *this_type = this_var->GetType();
-
-          if (!this_type)
-            return;
-
-          TypeFromUser pointee_type =
-              this_type->GetForwardCompilerType().GetPointeeType();
-
-          if (pointee_type.IsValid()) {
-            if (log) {
-              ASTDumper ast_dumper(pointee_type);
-              LLDB_LOGF(log, "  FEVD[%u] Adding type for $__lldb_class: %s",
-                        current_id, ast_dumper.GetCString());
-            }
-
-            AddThisType(context, pointee_type, current_id);
-            TypeFromUser this_user_type(this_type->GetFullCompilerType());
-            m_struct_vars->m_object_pointer_type = this_user_type;
-            return;
-          }
-        }
-      }
-
+      LookUpLldbClass(context, current_id);
       return;
     }
 
     static ConstString g_lldb_objc_class_name("$__lldb_objc_class");
     if (name == g_lldb_objc_class_name) {
-      if (m_ctx_obj) {
-        Status status;
-        lldb::ValueObjectSP ctx_obj_ptr = m_ctx_obj->AddressOf(status);
-        if (!ctx_obj_ptr || status.Fail())
-          return;
-
-        AddOneType(context, TypeFromUser(m_ctx_obj->GetCompilerType()),
-                   current_id);
-
-        m_struct_vars->m_object_pointer_type =
-            TypeFromUser(ctx_obj_ptr->GetCompilerType());
-
-        return;
-      }
-
-      // Clang is looking for the type of "*self"
-
-      if (!frame)
-        return;
-
-      SymbolContext sym_ctx = frame->GetSymbolContext(
-          lldb::eSymbolContextFunction | lldb::eSymbolContextBlock);
-
-      // Find the block that defines the function represented by "sym_ctx"
-      Block *function_block = sym_ctx.GetFunctionBlock();
-
-      if (!function_block)
-        return;
-
-      CompilerDeclContext function_decl_ctx = function_block->GetDeclContext();
-
-      if (!function_decl_ctx)
-        return;
-
-      clang::ObjCMethodDecl *method_decl =
-          ClangASTContext::DeclContextGetAsObjCMethodDecl(function_decl_ctx);
-
-      if (method_decl) {
-        ObjCInterfaceDecl *self_interface = method_decl->getClassInterface();
-
-        if (!self_interface)
-          return;
-
-        const clang::Type *interface_type = self_interface->getTypeForDecl();
-
-        if (!interface_type)
-          return; // This is unlikely, but we have seen crashes where this
-                  // occurred
-
-        TypeFromUser class_user_type(
-            QualType(interface_type, 0).getAsOpaquePtr(),
-            ClangASTContext::GetASTContext(&method_decl->getASTContext()));
-
-        if (log) {
-          ASTDumper ast_dumper(interface_type);
-          LLDB_LOGF(log, "  FEVD[%u] Adding type for $__lldb_objc_class: %s",
-                    current_id, ast_dumper.GetCString());
-        }
-
-        AddOneType(context, class_user_type, current_id);
-
-        if (method_decl->isInstanceMethod()) {
-          // self is a pointer to the object
-
-          QualType class_pointer_type =
-              method_decl->getASTContext().getObjCObjectPointerType(
-                  QualType(interface_type, 0));
-
-          TypeFromUser self_user_type(
-              class_pointer_type.getAsOpaquePtr(),
-              ClangASTContext::GetASTContext(&method_decl->getASTContext()));
-
-          m_struct_vars->m_object_pointer_type = self_user_type;
-        } else {
-          // self is a Class pointer
-          QualType class_type = method_decl->getASTContext().getObjCClassType();
-
-          TypeFromUser self_user_type(
-              class_type.getAsOpaquePtr(),
-              ClangASTContext::GetASTContext(&method_decl->getASTContext()));
-
-          m_struct_vars->m_object_pointer_type = self_user_type;
-        }
-
-        return;
-      } else {
-        // This branch will get hit if we are executing code in the context of
-        // a function that claims to have an object pointer (through
-        // DW_AT_object_pointer?) but is not formally a method of the class.
-        // In that case, just look up the "self" variable in the current scope
-        // and use its type.
-
-        VariableList *vars = frame->GetVariableList(false);
-
-        lldb::VariableSP self_var = vars->FindVariable(ConstString("self"));
-
-        if (self_var && self_var->IsInScope(frame) &&
-            self_var->LocationIsValidForFrame(frame)) {
-          Type *self_type = self_var->GetType();
-
-          if (!self_type)
-            return;
-
-          CompilerType self_clang_type = self_type->GetFullCompilerType();
-
-          if (ClangASTContext::IsObjCClassType(self_clang_type)) {
-            return;
-          } else if (ClangASTContext::IsObjCObjectPointerType(
-                         self_clang_type)) {
-            self_clang_type = self_clang_type.GetPointeeType();
-
-            if (!self_clang_type)
-              return;
-
-            if (log) {
-              ASTDumper ast_dumper(self_type->GetFullCompilerType());
-              LLDB_LOGF(log,
-                        "  FEVD[%u] Adding type for $__lldb_objc_class: %s",
-                        current_id, ast_dumper.GetCString());
-            }
-
-            TypeFromUser class_user_type(self_clang_type);
-
-            AddOneType(context, class_user_type, current_id);
-
-            TypeFromUser self_user_type(self_type->GetFullCompilerType());
-
-            m_struct_vars->m_object_pointer_type = self_user_type;
-            return;
-          }
-        }
-      }
-
+      LookUpLldbObjCClass(context, current_id);
       return;
     }
-
     if (name == ConstString(g_lldb_local_vars_namespace_cstr)) {
       CompilerDeclContext frame_decl_context =
           sym_ctx.block != nullptr ? sym_ctx.block->GetDeclContext()
                                    : CompilerDeclContext();
 
       if (frame_decl_context) {
-        ClangASTContext *ast = llvm::dyn_cast_or_null<ClangASTContext>(
+        ClangASTContext *frame_ast = llvm::dyn_cast_or_null<ClangASTContext>(
             frame_decl_context.GetTypeSystem());
 
-        if (ast) {
+        ClangASTContext *map_ast =
+            ClangASTContext::GetASTContext(m_ast_context);
+        if (frame_ast && map_ast) {
           clang::NamespaceDecl *namespace_decl =
-              ClangASTContext::GetUniqueNamespaceDeclaration(
-                  m_ast_context, name.GetCString(), nullptr);
+              map_ast->GetUniqueNamespaceDeclaration(name.GetCString(),
+                                                     nullptr);
           if (namespace_decl) {
             context.AddNamedDecl(namespace_decl);
             clang::DeclContext *clang_decl_ctx =
@@ -1722,17 +1741,15 @@ void ClangExpressionDeclMap::AddOneGenericVariable(NameSearchContext &context,
   if (target == nullptr)
     return;
 
-  ASTContext *scratch_ast_context =
-      target->GetScratchClangASTContext()->getASTContext();
+  ClangASTContext *scratch_ast_context = target->GetScratchClangASTContext();
 
-  TypeFromUser user_type(
-      ClangASTContext::GetBasicType(scratch_ast_context, eBasicTypeVoid)
-          .GetPointerType()
-          .GetLValueReferenceType());
-  TypeFromParser parser_type(
-      ClangASTContext::GetBasicType(m_ast_context, eBasicTypeVoid)
-          .GetPointerType()
-          .GetLValueReferenceType());
+  TypeFromUser user_type(scratch_ast_context->GetBasicType(eBasicTypeVoid)
+                             .GetPointerType()
+                             .GetLValueReferenceType());
+  ClangASTContext *own_context = ClangASTContext::GetASTContext(m_ast_context);
+  TypeFromParser parser_type(own_context->GetBasicType(eBasicTypeVoid)
+                                 .GetPointerType()
+                                 .GetLValueReferenceType());
   NamedDecl *var_decl = context.AddVarDecl(parser_type);
 
   std::string decl_name(context.m_decl_name.getAsString());
@@ -2022,8 +2039,9 @@ void ClangExpressionDeclMap::AddThisType(NameSearchContext &context,
 
   if (copied_clang_type.IsAggregateType() &&
       copied_clang_type.GetCompleteType()) {
-    CompilerType void_clang_type =
-        ClangASTContext::GetBasicType(m_ast_context, eBasicTypeVoid);
+    ClangASTContext *own_context =
+        ClangASTContext::GetASTContext(m_ast_context);
+    CompilerType void_clang_type = own_context->GetBasicType(eBasicTypeVoid);
     CompilerType void_ptr_clang_type = void_clang_type.GetPointerType();
 
     CompilerType method_type = ClangASTContext::CreateFunctionType(

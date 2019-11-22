@@ -143,6 +143,11 @@ Improvements to clang-tidy
   Finds Objective-C implementations that implement ``-isEqual:`` without also
   appropriately implementing ``-hash``.
 
+- New :doc:`performance-no-automatic-move
+  <clang-tidy/checks/performance-no-automatic-move>` check.
+
+  Finds local variables that cannot be automatically moved due to constness.
+
 - New :doc:`performance-trivially-destructible
   <clang-tidy/checks/performance-trivially-destructible>` check.
 
@@ -157,6 +162,10 @@ Improvements to clang-tidy
 
 - The 'objc-avoid-spinlock' check was renamed to :doc:`darwin-avoid-spinlock
   <clang-tidy/checks/darwin-avoid-spinlock>`
+
+- The :doc:`modernize-use-equals-default
+  <clang-tidy/checks/modernize-use-equals-default>` fix no longer adds
+  semicolons where they would be redundant.
 
 - New :doc:`readability-redundant-access-specifiers
   <clang-tidy/checks/readability-redundant-access-specifiers>` check.

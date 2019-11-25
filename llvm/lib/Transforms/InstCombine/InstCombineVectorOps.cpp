@@ -1397,20 +1397,6 @@ static Value *evaluateInDifferentElementOrder(Value *V, ArrayRef<int> Mask) {
   llvm_unreachable("failed to reorder elements of vector instruction!");
 }
 
-static void recognizeIdentityMask(const SmallVectorImpl<int> &Mask,
-                                  bool &isLHSID, bool &isRHSID) {
-  isLHSID = isRHSID = true;
-
-  for (unsigned i = 0, e = Mask.size(); i != e; ++i) {
-    if (Mask[i] < 0) continue;  // Ignore undef values.
-    // Is this an identity shuffle of the LHS value?
-    isLHSID &= (Mask[i] == (int)i);
-
-    // Is this an identity shuffle of the RHS value?
-    isRHSID &= (Mask[i]-e == i);
-  }
-}
-
 // Returns true if the shuffle is extracting a contiguous range of values from
 // LHS, for example:
 //                 +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
@@ -1905,20 +1891,20 @@ Instruction *InstCombiner::visitShuffleVectorInst(ShuffleVectorInst &SVI) {
   SmallVector<int, 16> Mask = SVI.getShuffleMask();
   Type *Int32Ty = Type::getInt32Ty(SVI.getContext());
   if (LHS == RHS || isa<UndefValue>(LHS)) {
+    assert(!isa<UndefValue>(RHS) && "Shuffle with 2 undef ops not simplified?");
     // Remap any references to RHS to use LHS.
     SmallVector<Constant*, 16> Elts;
-    for (unsigned i = 0, e = LHSWidth; i != VWidth; ++i) {
+    for (unsigned i = 0; i != VWidth; ++i) {
       if (Mask[i] < 0) {
         Elts.push_back(UndefValue::get(Int32Ty));
         continue;
       }
 
-      if ((Mask[i] >= (int)e && isa<UndefValue>(RHS)) ||
-          (Mask[i] <  (int)e && isa<UndefValue>(LHS))) {
+      if (Mask[i] < (int)LHSWidth && isa<UndefValue>(LHS)) {
         Mask[i] = -1;     // Turn into undef.
         Elts.push_back(UndefValue::get(Int32Ty));
       } else {
-        Mask[i] = Mask[i] % e;  // Force to LHS.
+        Mask[i] = Mask[i] % LHSWidth;  // Force to LHS.
         Elts.push_back(ConstantInt::get(Int32Ty, Mask[i]));
       }
     }
@@ -1954,16 +1940,6 @@ Instruction *InstCombiner::visitShuffleVectorInst(ShuffleVectorInst &SVI) {
     return I;
   if (Instruction *I = foldIdentityPaddedShuffles(SVI))
     return I;
-
-  if (VWidth == LHSWidth) {
-    // Analyze the shuffle, are the LHS or RHS and identity shuffles?
-    bool isLHSID, isRHSID;
-    recognizeIdentityMask(Mask, isLHSID, isRHSID);
-
-    // Eliminate identity shuffles.
-    if (isLHSID) return replaceInstUsesWith(SVI, LHS);
-    if (isRHSID) return replaceInstUsesWith(SVI, RHS);
-  }
 
   if (isa<UndefValue>(RHS) && canEvaluateShuffled(LHS, Mask)) {
     Value *V = evaluateInDifferentElementOrder(LHS, Mask);

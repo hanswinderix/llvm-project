@@ -2854,8 +2854,6 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
       getLastArgIntValue(Args, OPT_fconstexpr_steps, 1048576, Diags);
   Opts.EnableNewConstInterp =
       Args.hasArg(OPT_fexperimental_new_constant_interpreter);
-  Opts.ForceNewConstInterp =
-      Args.hasArg(OPT_fforce_experimental_new_constant_interpreter);
   Opts.BracketDepth = getLastArgIntValue(Args, OPT_fbracket_depth, 256, Diags);
   Opts.DelayedTemplateParsing = Args.hasArg(OPT_fdelayed_template_parsing);
   Opts.NumLargeByValueCopy =
@@ -3314,6 +3312,9 @@ static void ParsePreprocessorArgs(PreprocessorOptions &Opts, ArgList &Args,
   Opts.DumpDeserializedPCHDecls = Args.hasArg(OPT_dump_deserialized_pch_decls);
   for (const auto *A : Args.filtered(OPT_error_on_deserialized_pch_decl))
     Opts.DeserializedPCHDeclsToErrorOn.insert(A->getValue());
+
+  for (const auto &A : Args.getAllArgValues(OPT_fmacro_prefix_map_EQ))
+    Opts.MacroPrefixMap.insert(StringRef(A).split('='));
 
   if (const Arg *A = Args.getLastArg(OPT_preamble_bytes_EQ)) {
     StringRef Value(A->getValue());

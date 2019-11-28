@@ -587,6 +587,15 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
       setOperationAction(ISD::FSIN   , VT, Expand);
       setOperationAction(ISD::FCOS   , VT, Expand);
       setOperationAction(ISD::FSINCOS, VT, Expand);
+
+      // Handle constrained floating-point operations of scalar.
+      setOperationAction(ISD::STRICT_FMUL     , VT, Legal);
+      setOperationAction(ISD::STRICT_FDIV     , VT, Legal);
+      setOperationAction(ISD::STRICT_FSQRT    , VT, Legal);
+      setOperationAction(ISD::STRICT_FP_EXTEND, VT, Legal);
+      // FIXME: When the target is 64-bit, STRICT_FP_ROUND will be overwritten
+      // as Custom.
+      setOperationAction(ISD::STRICT_FP_ROUND, VT, Legal);
     }
   }
 
@@ -657,6 +666,17 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
     setOperationAction(ISD::LLROUND, MVT::f80, Expand);
     setOperationAction(ISD::LRINT, MVT::f80, Expand);
     setOperationAction(ISD::LLRINT, MVT::f80, Expand);
+
+    // Handle constrained floating-point operations of scalar.
+    setOperationAction(ISD::STRICT_FADD     , MVT::f80, Legal);
+    setOperationAction(ISD::STRICT_FSUB     , MVT::f80, Legal);
+    setOperationAction(ISD::STRICT_FMUL     , MVT::f80, Legal);
+    setOperationAction(ISD::STRICT_FDIV     , MVT::f80, Legal);
+    setOperationAction(ISD::STRICT_FSQRT    , MVT::f80, Legal);
+    setOperationAction(ISD::STRICT_FP_EXTEND, MVT::f80, Legal);
+    // FIXME: When the target is 64-bit, STRICT_FP_ROUND will be overwritten
+    // as Custom.
+    setOperationAction(ISD::STRICT_FP_ROUND, MVT::f80, Legal);
   }
 
   // f128 uses xmm registers, but most operations require libcalls.
@@ -19692,15 +19712,20 @@ SDValue X86TargetLowering::LowerFP_TO_INT(SDValue Op, SelectionDAG &DAG) const {
   // fp128 needs to use a libcall.
   if (SrcVT == MVT::f128) {
     RTLIB::Libcall LC;
-    if (Op.getOpcode() == ISD::FP_TO_SINT)
+    if (IsSigned)
       LC = RTLIB::getFPTOSINT(SrcVT, VT);
     else
       LC = RTLIB::getFPTOUINT(SrcVT, VT);
 
-    // FIXME: Strict fp!
-    assert(!IsStrict && "Unhandled strict operation!");
+    SDValue Chain = IsStrict ? Op.getOperand(0) : SDValue();
     MakeLibCallOptions CallOptions;
-    return makeLibCall(DAG, LC, VT, Src, CallOptions, SDLoc(Op)).first;
+    std::pair<SDValue, SDValue> Tmp = makeLibCall(DAG, LC, VT, Src, CallOptions,
+                                                  SDLoc(Op), Chain);
+
+    if (IsStrict)
+      return DAG.getMergeValues({ Tmp.first, Tmp.second }, dl);
+
+    return Tmp.first;
   }
 
   // Fall back to X87.
@@ -24280,9 +24305,11 @@ static SDValue LowerINTRINSIC_W_CHAIN(SDValue Op, const X86Subtarget &Subtarget,
 
       MVT MaskVT = MVT::getVectorVT(MVT::i1, MemVT.getVectorNumElements());
       SDValue VMask = getMaskNode(Mask, MaskVT, Subtarget, DAG, dl);
+      SDValue Offset = DAG.getUNDEF(VMask.getValueType());
 
-      return DAG.getMaskedStore(Chain, dl, DataToTruncate, Addr, VMask, MemVT,
-                                MemIntr->getMemOperand(), true /* truncating */);
+      return DAG.getMaskedStore(Chain, dl, DataToTruncate, Addr, Offset, VMask,
+                                MemVT, MemIntr->getMemOperand(), ISD::UNINDEXED,
+                                true /* truncating */);
     }
     case X86ISD::VTRUNCUS:
     case X86ISD::VTRUNCS: {
@@ -27593,12 +27620,11 @@ static SDValue LowerMLOAD(SDValue Op, const X86Subtarget &Subtarget,
     if (PassThru.isUndef() || ISD::isBuildVectorAllZeros(PassThru.getNode()))
       return Op;
 
-    SDValue NewLoad = DAG.getMaskedLoad(VT, dl, N->getChain(),
-                                        N->getBasePtr(), Mask,
-                                        getZeroVector(VT, Subtarget, DAG, dl),
-                                        N->getMemoryVT(), N->getMemOperand(),
-                                        N->getExtensionType(),
-                                        N->isExpandingLoad());
+    SDValue NewLoad = DAG.getMaskedLoad(
+        VT, dl, N->getChain(), N->getBasePtr(), N->getOffset(), Mask,
+        getZeroVector(VT, Subtarget, DAG, dl), N->getMemoryVT(),
+        N->getMemOperand(), N->getAddressingMode(), N->getExtensionType(),
+        N->isExpandingLoad());
     // Emit a blend.
     SDValue Select = DAG.getNode(ISD::VSELECT, dl, MaskVT, Mask, NewLoad,
                                  PassThru);
@@ -27632,11 +27658,10 @@ static SDValue LowerMLOAD(SDValue Op, const X86Subtarget &Subtarget,
   MVT WideMaskVT = MVT::getVectorVT(MVT::i1, NumEltsInWideVec);
 
   Mask = ExtendToType(Mask, WideMaskVT, DAG, true);
-  SDValue NewLoad = DAG.getMaskedLoad(WideDataVT, dl, N->getChain(),
-                                      N->getBasePtr(), Mask, PassThru,
-                                      N->getMemoryVT(), N->getMemOperand(),
-                                      N->getExtensionType(),
-                                      N->isExpandingLoad());
+  SDValue NewLoad = DAG.getMaskedLoad(
+      WideDataVT, dl, N->getChain(), N->getBasePtr(), N->getOffset(), Mask,
+      PassThru, N->getMemoryVT(), N->getMemOperand(), N->getAddressingMode(),
+      N->getExtensionType(), N->isExpandingLoad());
 
   SDValue Exract = DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl, VT,
                                NewLoad.getValue(0),
@@ -27682,7 +27707,8 @@ static SDValue LowerMSTORE(SDValue Op, const X86Subtarget &Subtarget,
   DataToStore = ExtendToType(DataToStore, WideDataVT, DAG);
   Mask = ExtendToType(Mask, WideMaskVT, DAG, true);
   return DAG.getMaskedStore(N->getChain(), dl, DataToStore, N->getBasePtr(),
-                            Mask, N->getMemoryVT(), N->getMemOperand(),
+                            N->getOffset(), Mask, N->getMemoryVT(),
+                            N->getMemOperand(), N->getAddressingMode(),
                             N->isTruncatingStore(), N->isCompressingStore());
 }
 
@@ -40453,6 +40479,7 @@ static bool getParamsForOneTrueMaskedElt(MaskedLoadStoreSDNode *MaskedOp,
 static SDValue
 reduceMaskedLoadToScalarLoad(MaskedLoadSDNode *ML, SelectionDAG &DAG,
                              TargetLowering::DAGCombinerInfo &DCI) {
+  assert(ML->isUnindexed() && "Unexpected indexed masked load!");
   // TODO: This is not x86-specific, so it could be lifted to DAGCombiner.
   // However, some target hooks may need to be added to know when the transform
   // is profitable. Endianness would also have to be considered.
@@ -40480,6 +40507,7 @@ reduceMaskedLoadToScalarLoad(MaskedLoadSDNode *ML, SelectionDAG &DAG,
 static SDValue
 combineMaskedLoadConstantMask(MaskedLoadSDNode *ML, SelectionDAG &DAG,
                               TargetLowering::DAGCombinerInfo &DCI) {
+  assert(ML->isUnindexed() && "Unexpected indexed masked load!");
   if (!ISD::isBuildVectorOfConstantSDNodes(ML->getMask().getNode()))
     return SDValue();
 
@@ -40515,10 +40543,10 @@ combineMaskedLoadConstantMask(MaskedLoadSDNode *ML, SelectionDAG &DAG,
 
   // The new masked load has an undef pass-through operand. The select uses the
   // original pass-through operand.
-  SDValue NewML = DAG.getMaskedLoad(VT, DL, ML->getChain(), ML->getBasePtr(),
-                                    ML->getMask(), DAG.getUNDEF(VT),
-                                    ML->getMemoryVT(), ML->getMemOperand(),
-                                    ML->getExtensionType());
+  SDValue NewML = DAG.getMaskedLoad(
+      VT, DL, ML->getChain(), ML->getBasePtr(), ML->getOffset(), ML->getMask(),
+      DAG.getUNDEF(VT), ML->getMemoryVT(), ML->getMemOperand(),
+      ML->getAddressingMode(), ML->getExtensionType());
   SDValue Blend = DAG.getSelect(DL, VT, ML->getMask(), NewML,
                                 ML->getPassThru());
 
@@ -40604,8 +40632,9 @@ static SDValue combineMaskedStore(SDNode *N, SelectionDAG &DAG,
       TLI.isTruncStoreLegal(Value.getOperand(0).getValueType(),
                             Mst->getMemoryVT())) {
     return DAG.getMaskedStore(Mst->getChain(), SDLoc(N), Value.getOperand(0),
-                              Mst->getBasePtr(), Mask,
-                              Mst->getMemoryVT(), Mst->getMemOperand(), true);
+                              Mst->getBasePtr(), Mst->getOffset(), Mask,
+                              Mst->getMemoryVT(), Mst->getMemOperand(),
+                              Mst->getAddressingMode(), true);
   }
 
   return SDValue();

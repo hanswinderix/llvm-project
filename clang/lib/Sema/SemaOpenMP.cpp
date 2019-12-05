@@ -4648,6 +4648,8 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
     Res = ActOnOpenMPTaskLoopSimdDirective(ClausesWithImplicit, AStmt, StartLoc,
                                            EndLoc, VarsWithInheritedDSA);
     AllowedNameModifiers.push_back(OMPD_taskloop);
+    if (LangOpts.OpenMP >= 50)
+      AllowedNameModifiers.push_back(OMPD_simd);
     break;
   case OMPD_master_taskloop:
     Res = ActOnOpenMPMasterTaskLoopDirective(
@@ -4658,6 +4660,8 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
     Res = ActOnOpenMPMasterTaskLoopSimdDirective(
         ClausesWithImplicit, AStmt, StartLoc, EndLoc, VarsWithInheritedDSA);
     AllowedNameModifiers.push_back(OMPD_taskloop);
+    if (LangOpts.OpenMP >= 50)
+      AllowedNameModifiers.push_back(OMPD_simd);
     break;
   case OMPD_parallel_master_taskloop:
     Res = ActOnOpenMPParallelMasterTaskLoopDirective(
@@ -4670,6 +4674,8 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
         ClausesWithImplicit, AStmt, StartLoc, EndLoc, VarsWithInheritedDSA);
     AllowedNameModifiers.push_back(OMPD_taskloop);
     AllowedNameModifiers.push_back(OMPD_parallel);
+    if (LangOpts.OpenMP >= 50)
+      AllowedNameModifiers.push_back(OMPD_simd);
     break;
   case OMPD_distribute:
     Res = ActOnOpenMPDistributeDirective(ClausesWithImplicit, AStmt, StartLoc,
@@ -4689,6 +4695,8 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
     Res = ActOnOpenMPDistributeParallelForSimdDirective(
         ClausesWithImplicit, AStmt, StartLoc, EndLoc, VarsWithInheritedDSA);
     AllowedNameModifiers.push_back(OMPD_parallel);
+    if (LangOpts.OpenMP >= 50)
+      AllowedNameModifiers.push_back(OMPD_simd);
     break;
   case OMPD_distribute_simd:
     Res = ActOnOpenMPDistributeSimdDirective(
@@ -10644,7 +10652,7 @@ OMPClause *Sema::ActOnOpenMPSingleExprClause(OpenMPClauseKind Kind, Expr *Expr,
 // A return value of OMPD_unknown signifies that the expression should not
 // be captured.
 static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
-    OpenMPDirectiveKind DKind, OpenMPClauseKind CKind,
+    OpenMPDirectiveKind DKind, OpenMPClauseKind CKind, unsigned OpenMPVersion,
     OpenMPDirectiveKind NameModifier = OMPD_unknown) {
   OpenMPDirectiveKind CaptureRegion = OMPD_unknown;
   switch (CKind) {
@@ -10675,11 +10683,36 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
       CaptureRegion = OMPD_task;
       break;
     case OMPD_parallel_master_taskloop:
-    case OMPD_parallel_master_taskloop_simd:
       if (NameModifier == OMPD_unknown || NameModifier == OMPD_taskloop)
         CaptureRegion = OMPD_parallel;
       break;
+    case OMPD_parallel_master_taskloop_simd:
+      if ((OpenMPVersion <= 45 && NameModifier == OMPD_unknown) ||
+          NameModifier == OMPD_taskloop) {
+        CaptureRegion = OMPD_parallel;
+        break;
+      }
+      if (OpenMPVersion <= 45)
+        break;
+      if (NameModifier == OMPD_unknown || NameModifier == OMPD_simd)
+        CaptureRegion = OMPD_taskloop;
+      break;
     case OMPD_parallel_for_simd:
+      if (OpenMPVersion <= 45)
+        break;
+      if (NameModifier == OMPD_unknown || NameModifier == OMPD_simd)
+        CaptureRegion = OMPD_parallel;
+      break;
+    case OMPD_taskloop_simd:
+    case OMPD_master_taskloop_simd:
+      if (OpenMPVersion <= 45)
+        break;
+      if (NameModifier == OMPD_unknown || NameModifier == OMPD_simd)
+        CaptureRegion = OMPD_taskloop;
+      break;
+    case OMPD_distribute_parallel_for_simd:
+      if (OpenMPVersion <= 45)
+        break;
       if (NameModifier == OMPD_unknown || NameModifier == OMPD_simd)
         CaptureRegion = OMPD_parallel;
       break;
@@ -10693,12 +10726,9 @@ static OpenMPDirectiveKind getOpenMPCaptureRegionForClause(
     case OMPD_target_teams_distribute:
     case OMPD_target_teams_distribute_simd:
     case OMPD_distribute_parallel_for:
-    case OMPD_distribute_parallel_for_simd:
     case OMPD_task:
     case OMPD_taskloop:
-    case OMPD_taskloop_simd:
     case OMPD_master_taskloop:
-    case OMPD_master_taskloop_simd:
     case OMPD_target_data:
     case OMPD_simd:
     case OMPD_for_simd:
@@ -11311,8 +11341,8 @@ OMPClause *Sema::ActOnOpenMPIfClause(OpenMPDirectiveKind NameModifier,
     ValExpr = Val.get();
 
     OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
-    CaptureRegion =
-        getOpenMPCaptureRegionForClause(DKind, OMPC_if, NameModifier);
+    CaptureRegion = getOpenMPCaptureRegionForClause(
+        DKind, OMPC_if, LangOpts.OpenMP, NameModifier);
     if (CaptureRegion != OMPD_unknown && !CurContext->isDependentContext()) {
       ValExpr = MakeFullExpr(ValExpr).get();
       llvm::MapVector<const Expr *, DeclRefExpr *> Captures;
@@ -11343,7 +11373,8 @@ OMPClause *Sema::ActOnOpenMPFinalClause(Expr *Condition,
     ValExpr = MakeFullExpr(Val.get()).get();
 
     OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
-    CaptureRegion = getOpenMPCaptureRegionForClause(DKind, OMPC_final);
+    CaptureRegion =
+        getOpenMPCaptureRegionForClause(DKind, OMPC_final, LangOpts.OpenMP);
     if (CaptureRegion != OMPD_unknown && !CurContext->isDependentContext()) {
       ValExpr = MakeFullExpr(ValExpr).get();
       llvm::MapVector<const Expr *, DeclRefExpr *> Captures;
@@ -11428,7 +11459,8 @@ isNonNegativeIntegerValue(Expr *&ValExpr, Sema &SemaRef, OpenMPClauseKind CKind,
     }
     if (!BuildCapture)
       return true;
-    *CaptureRegion = getOpenMPCaptureRegionForClause(DKind, CKind);
+    *CaptureRegion =
+        getOpenMPCaptureRegionForClause(DKind, CKind, SemaRef.LangOpts.OpenMP);
     if (*CaptureRegion != OMPD_unknown &&
         !SemaRef.CurContext->isDependentContext()) {
       ValExpr = SemaRef.MakeFullExpr(ValExpr).get();
@@ -11455,7 +11487,7 @@ OMPClause *Sema::ActOnOpenMPNumThreadsClause(Expr *NumThreads,
 
   OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
   OpenMPDirectiveKind CaptureRegion =
-      getOpenMPCaptureRegionForClause(DKind, OMPC_num_threads);
+      getOpenMPCaptureRegionForClause(DKind, OMPC_num_threads, LangOpts.OpenMP);
   if (CaptureRegion != OMPD_unknown && !CurContext->isDependentContext()) {
     ValExpr = MakeFullExpr(ValExpr).get();
     llvm::MapVector<const Expr *, DeclRefExpr *> Captures;
@@ -11986,8 +12018,8 @@ OMPClause *Sema::ActOnOpenMPScheduleClause(
           return nullptr;
         }
       } else if (getOpenMPCaptureRegionForClause(
-                     DSAStack->getCurrentDirective(), OMPC_schedule) !=
-                     OMPD_unknown &&
+                     DSAStack->getCurrentDirective(), OMPC_schedule,
+                     LangOpts.OpenMP) != OMPD_unknown &&
                  !CurContext->isDependentContext()) {
         ValExpr = MakeFullExpr(ValExpr).get();
         llvm::MapVector<const Expr *, DeclRefExpr *> Captures;
@@ -14823,7 +14855,7 @@ OMPClause *Sema::ActOnOpenMPDeviceClause(Expr *Device, SourceLocation StartLoc,
 
   OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
   OpenMPDirectiveKind CaptureRegion =
-      getOpenMPCaptureRegionForClause(DKind, OMPC_device);
+      getOpenMPCaptureRegionForClause(DKind, OMPC_device, LangOpts.OpenMP);
   if (CaptureRegion != OMPD_unknown && !CurContext->isDependentContext()) {
     ValExpr = MakeFullExpr(ValExpr).get();
     llvm::MapVector<const Expr *, DeclRefExpr *> Captures;
@@ -16275,7 +16307,7 @@ OMPClause *Sema::ActOnOpenMPNumTeamsClause(Expr *NumTeams,
 
   OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
   OpenMPDirectiveKind CaptureRegion =
-      getOpenMPCaptureRegionForClause(DKind, OMPC_num_teams);
+      getOpenMPCaptureRegionForClause(DKind, OMPC_num_teams, LangOpts.OpenMP);
   if (CaptureRegion != OMPD_unknown && !CurContext->isDependentContext()) {
     ValExpr = MakeFullExpr(ValExpr).get();
     llvm::MapVector<const Expr *, DeclRefExpr *> Captures;
@@ -16301,8 +16333,8 @@ OMPClause *Sema::ActOnOpenMPThreadLimitClause(Expr *ThreadLimit,
     return nullptr;
 
   OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
-  OpenMPDirectiveKind CaptureRegion =
-      getOpenMPCaptureRegionForClause(DKind, OMPC_thread_limit);
+  OpenMPDirectiveKind CaptureRegion = getOpenMPCaptureRegionForClause(
+      DKind, OMPC_thread_limit, LangOpts.OpenMP);
   if (CaptureRegion != OMPD_unknown && !CurContext->isDependentContext()) {
     ValExpr = MakeFullExpr(ValExpr).get();
     llvm::MapVector<const Expr *, DeclRefExpr *> Captures;
@@ -16427,8 +16459,8 @@ OMPClause *Sema::ActOnOpenMPDistScheduleClause(
           return nullptr;
         }
       } else if (getOpenMPCaptureRegionForClause(
-                     DSAStack->getCurrentDirective(), OMPC_dist_schedule) !=
-                     OMPD_unknown &&
+                     DSAStack->getCurrentDirective(), OMPC_dist_schedule,
+                     LangOpts.OpenMP) != OMPD_unknown &&
                  !CurContext->isDependentContext()) {
         ValExpr = MakeFullExpr(ValExpr).get();
         llvm::MapVector<const Expr *, DeclRefExpr *> Captures;

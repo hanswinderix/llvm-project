@@ -98,21 +98,16 @@ static void DiagnoseUnusedOfDecl(Sema &S, NamedDecl *D, SourceLocation Loc) {
 
 /// Emit a note explaining that this function is deleted.
 void Sema::NoteDeletedFunction(FunctionDecl *Decl) {
-  assert(Decl->isDeleted());
+  assert(Decl && Decl->isDeleted());
 
-  CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(Decl);
-
-  if (Method && Method->isDeleted() && Method->isDefaulted()) {
+  if (Decl->isDefaulted()) {
     // If the method was explicitly defaulted, point at that declaration.
-    if (!Method->isImplicit())
+    if (!Decl->isImplicit())
       Diag(Decl->getLocation(), diag::note_implicitly_deleted);
 
     // Try to diagnose why this special member function was implicitly
     // deleted. This might fail, if that reason no longer applies.
-    CXXSpecialMember CSM = getSpecialMember(Method);
-    if (CSM != CXXInvalid)
-      ShouldDeleteSpecialMember(Method, CSM, nullptr, /*Diagnose=*/true);
-
+    DiagnoseDeletedDefaultedFunction(Decl);
     return;
   }
 
@@ -5445,15 +5440,15 @@ static FunctionDecl *rewriteBuiltinFunctionDecl(Sema *Sema, ASTContext &Context,
     Expr *Arg = ArgRes.get();
     QualType ArgType = Arg->getType();
     if (!ParamType->isPointerType() ||
-        ParamType.getQualifiers().hasAddressSpace() ||
+        ParamType.hasAddressSpace() ||
         !ArgType->isPointerType() ||
-        !ArgType->getPointeeType().getQualifiers().hasAddressSpace()) {
+        !ArgType->getPointeeType().hasAddressSpace()) {
       OverloadParams.push_back(ParamType);
       continue;
     }
 
     QualType PointeeType = ParamType->getPointeeType();
-    if (PointeeType.getQualifiers().hasAddressSpace())
+    if (PointeeType.hasAddressSpace())
       continue;
 
     NeedsNewDecl = true;

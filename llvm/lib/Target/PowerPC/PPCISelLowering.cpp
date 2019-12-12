@@ -67,6 +67,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IntrinsicsPowerPC.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Use.h"
@@ -11066,9 +11067,7 @@ PPCTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     DebugLoc dl = MI.getDebugLoc();
     TII->insertSelect(*BB, MI, dl, MI.getOperand(0).getReg(), Cond,
                       MI.getOperand(2).getReg(), MI.getOperand(3).getReg());
-  } else if (MI.getOpcode() == PPC::SELECT_CC_I4 ||
-             MI.getOpcode() == PPC::SELECT_CC_I8 ||
-             MI.getOpcode() == PPC::SELECT_CC_F4 ||
+  } else if (MI.getOpcode() == PPC::SELECT_CC_F4 ||
              MI.getOpcode() == PPC::SELECT_CC_F8 ||
              MI.getOpcode() == PPC::SELECT_CC_F16 ||
              MI.getOpcode() == PPC::SELECT_CC_QFRC ||
@@ -11080,8 +11079,6 @@ PPCTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
              MI.getOpcode() == PPC::SELECT_CC_VSRC ||
              MI.getOpcode() == PPC::SELECT_CC_SPE4 ||
              MI.getOpcode() == PPC::SELECT_CC_SPE ||
-             MI.getOpcode() == PPC::SELECT_I4 ||
-             MI.getOpcode() == PPC::SELECT_I8 ||
              MI.getOpcode() == PPC::SELECT_F4 ||
              MI.getOpcode() == PPC::SELECT_F8 ||
              MI.getOpcode() == PPC::SELECT_F16 ||

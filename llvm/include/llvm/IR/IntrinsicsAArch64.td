@@ -959,15 +959,6 @@ let TargetPrefix = "aarch64" in {  // All intrinsics start with "llvm.aarch64.".
                  llvm_i32_ty],
                 [IntrNoMem]>;
 
-class AdvSIMD_GatherLoad_64bitOffset_Intrinsic
-    : Intrinsic<[llvm_anyvector_ty],
-                [
-                  LLVMScalarOrSameVectorWidth<0, llvm_i1_ty>,
-                  LLVMPointerToElt<0>,
-                  LLVMScalarOrSameVectorWidth<0, llvm_i64_ty>
-                ],
-                [IntrReadMem, IntrArgMemOnly]>;
-
   class SVE2_3VectorArg_Long_Intrinsic
     : Intrinsic<[llvm_anyvector_ty],
                 [LLVMMatchType<0>,
@@ -983,17 +974,20 @@ class AdvSIMD_GatherLoad_64bitOffset_Intrinsic
                  llvm_i32_ty],
                 [IntrNoMem]>;
 
+  class SVE2_1VectorArg_Narrowing_Intrinsic
+    : Intrinsic<[LLVMSubdivide2VectorType<0>],
+                [llvm_anyvector_ty],
+                [IntrNoMem]>;
+
+  class SVE2_Merged1VectorArg_Narrowing_Intrinsic
+    : Intrinsic<[LLVMSubdivide2VectorType<0>],
+                [LLVMSubdivide2VectorType<0>,
+                 llvm_anyvector_ty],
+                [IntrNoMem]>;
+
   // NOTE: There is no relationship between these intrinsics beyond an attempt
   // to reuse currently identical class definitions.
   class AdvSIMD_SVE_LOGB_Intrinsic  : AdvSIMD_SVE_CNT_Intrinsic;
-
-class AdvSIMD_GatherLoad_32bitOffset_Intrinsic
-    : Intrinsic<[ llvm_anyvector_ty ],
-                [
-                  LLVMScalarOrSameVectorWidth<0, llvm_i1_ty>,
-                  LLVMPointerToElt<0>, llvm_anyvector_ty
-                ],
-                [ IntrReadMem, IntrArgMemOnly ]>;
 
   // This class of intrinsics are not intended to be useful within LLVM IR but
   // are instead here to support some of the more regid parts of the ACLE.
@@ -1023,6 +1017,23 @@ class AdvSIMD_SVE_WHILE_Intrinsic
     : Intrinsic<[llvm_anyvector_ty],
                 [llvm_anyint_ty, LLVMMatchType<1>],
                 [IntrNoMem]>;
+
+class AdvSIMD_GatherLoad_64bitOffset_Intrinsic
+    : Intrinsic<[llvm_anyvector_ty],
+                [
+                  LLVMScalarOrSameVectorWidth<0, llvm_i1_ty>,
+                  LLVMPointerToElt<0>,
+                  LLVMScalarOrSameVectorWidth<0, llvm_i64_ty>
+                ],
+                [IntrReadMem, IntrArgMemOnly]>;
+
+class AdvSIMD_GatherLoad_32bitOffset_Intrinsic
+    : Intrinsic<[llvm_anyvector_ty],
+                [
+                  LLVMScalarOrSameVectorWidth<0, llvm_i1_ty>,
+                  LLVMPointerToElt<0>, llvm_anyvector_ty
+                ],
+                [IntrReadMem, IntrArgMemOnly]>;
 
 class AdvSIMD_GatherLoad_VecTorBase_Intrinsic
     : Intrinsic<[llvm_anyvector_ty],
@@ -1383,4 +1394,15 @@ def int_aarch64_sve_fmlslt_lane   : SVE2_3VectorArgIndexed_Long_Intrinsic;
 //
 
 def int_aarch64_sve_flogb : AdvSIMD_SVE_LOGB_Intrinsic;
+
+//
+// SVE2 - Unary narrowing operations
+//
+
+def int_aarch64_sve_sqxtnb  : SVE2_1VectorArg_Narrowing_Intrinsic;
+def int_aarch64_sve_sqxtnt  : SVE2_Merged1VectorArg_Narrowing_Intrinsic;
+def int_aarch64_sve_sqxtunb : SVE2_1VectorArg_Narrowing_Intrinsic;
+def int_aarch64_sve_sqxtunt : SVE2_Merged1VectorArg_Narrowing_Intrinsic;
+def int_aarch64_sve_uqxtnb  : SVE2_1VectorArg_Narrowing_Intrinsic;
+def int_aarch64_sve_uqxtnt  : SVE2_Merged1VectorArg_Narrowing_Intrinsic;
 }

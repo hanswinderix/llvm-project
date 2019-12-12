@@ -31,6 +31,17 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IntrinsicsAArch64.h"
+#include "llvm/IR/IntrinsicsAMDGPU.h"
+#include "llvm/IR/IntrinsicsARM.h"
+#include "llvm/IR/IntrinsicsBPF.h"
+#include "llvm/IR/IntrinsicsHexagon.h"
+#include "llvm/IR/IntrinsicsNVPTX.h"
+#include "llvm/IR/IntrinsicsPowerPC.h"
+#include "llvm/IR/IntrinsicsR600.h"
+#include "llvm/IR/IntrinsicsS390.h"
+#include "llvm/IR/IntrinsicsWebAssembly.h"
+#include "llvm/IR/IntrinsicsX86.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/ScopedPrinter.h"
@@ -6916,11 +6927,41 @@ Value *CodeGenFunction::EmitARMBuiltinExpr(unsigned BuiltinID,
   }
 }
 
+template<typename Integer>
+static Integer GetIntegerConstantValue(const Expr *E, ASTContext &Context) {
+  llvm::APSInt IntVal;
+  bool IsConst = E->isIntegerConstantExpr(IntVal, Context);
+  assert(IsConst && "Sema should have checked this was a constant");
+  (void)IsConst;
+  return IntVal.getExtValue();
+}
+
 static llvm::Value *SignOrZeroExtend(CGBuilderTy &Builder, llvm::Value *V,
                                      llvm::Type *T, bool Unsigned) {
   // Helper function called by Tablegen-constructed ARM MVE builtin codegen,
   // which finds it convenient to specify signed/unsigned as a boolean flag.
   return Unsigned ? Builder.CreateZExt(V, T) : Builder.CreateSExt(V, T);
+}
+
+static llvm::Value *MVEImmediateShr(CGBuilderTy &Builder, llvm::Value *V,
+                                    uint32_t Shift, bool Unsigned) {
+  // MVE helper function for integer shift right. This must handle signed vs
+  // unsigned, and also deal specially with the case where the shift count is
+  // equal to the lane size. In LLVM IR, an LShr with that parameter would be
+  // undefined behavior, but in MVE it's legal, so we must convert it to code
+  // that is not undefined in IR.
+  unsigned LaneBits =
+      V->getType()->getVectorElementType()->getPrimitiveSizeInBits();
+  if (Shift == LaneBits) {
+    // An unsigned shift of the full lane size always generates zero, so we can
+    // simply emit a zero vector. A signed shift of the full lane size does the
+    // same thing as shifting by one bit fewer.
+    if (Unsigned)
+      return llvm::Constant::getNullValue(V->getType());
+    else
+      --Shift;
+  }
+  return Unsigned ? Builder.CreateLShr(V, Shift) : Builder.CreateAShr(V, Shift);
 }
 
 static llvm::Value *ARMMVEVectorSplat(CGBuilderTy &Builder, llvm::Value *V) {

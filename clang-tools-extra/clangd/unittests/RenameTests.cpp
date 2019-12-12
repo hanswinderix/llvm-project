@@ -30,6 +30,18 @@ using testing::IsEmpty;
 using testing::UnorderedElementsAre;
 using testing::UnorderedElementsAreArray;
 
+// Covnert a Range to a Ref.
+Ref refWithRange(const clangd::Range &Range, const std::string &URI) {
+  Ref Result;
+  Result.Kind = RefKind::Reference;
+  Result.Location.Start.setLine(Range.start.line);
+  Result.Location.Start.setColumn(Range.start.character);
+  Result.Location.End.setLine(Range.end.line);
+  Result.Location.End.setColumn(Range.end.character);
+  Result.Location.FileURI = URI.c_str();
+  return Result;
+}
+
 // Build a RefSlab from all marked ranges in the annotation. The ranges are
 // assumed to associate with the given SymbolName.
 std::unique_ptr<RefSlab> buildRefSlab(const Annotations &Code,
@@ -40,17 +52,9 @@ std::unique_ptr<RefSlab> buildRefSlab(const Annotations &Code,
   TU.HeaderCode = Code.code();
   auto Symbols = TU.headerSymbols();
   const auto &SymbolID = findSymbol(Symbols, SymbolName).ID;
-  for (const auto &Range : Code.ranges()) {
-    Ref R;
-    R.Kind = RefKind::Reference;
-    R.Location.Start.setLine(Range.start.line);
-    R.Location.Start.setColumn(Range.start.character);
-    R.Location.End.setLine(Range.end.line);
-    R.Location.End.setColumn(Range.end.character);
-    auto U = URI::create(Path).toString();
-    R.Location.FileURI = U.c_str();
-    Builder.insert(SymbolID, R);
-  }
+  std::string PathURI = URI::create(Path).toString();
+  for (const auto &Range : Code.ranges())
+    Builder.insert(SymbolID, refWithRange(Range, PathURI));
 
   return std::make_unique<RefSlab>(std::move(Builder).build());
 }
@@ -483,11 +487,10 @@ TEST(RenameTest, Renameable) {
           "not a supported kind", HeaderFile, Index},
 
       {
-
           R"cpp(
         struct X { X operator++(int); };
         void f(X x) {x+^+;})cpp",
-          "not a supported kind", HeaderFile, Index},
+          "no symbol", HeaderFile, Index},
 
       {R"cpp(// foo is declared outside the file.
         void fo^o() {}
@@ -664,28 +667,76 @@ TEST(CrossFileRenameTests, DirtyBuffer) {
               testing::HasSubstr("too many occurrences"));
 }
 
+TEST(CrossFileRenameTests, DeduplicateRefsFromIndex) {
+  auto MainCode = Annotations("int [[^x]] = 2;");
+  auto MainFilePath = testPath("main.cc");
+  auto BarCode = Annotations("int [[x]];");
+  auto BarPath = testPath("bar.cc");
+  auto TU = TestTU::withCode(MainCode.code());
+  // Set a file "bar.cc" on disk.
+  TU.AdditionalFiles["bar.cc"] = BarCode.code();
+  auto AST = TU.build();
+  std::string BarPathURI = URI::create(BarPath).toString();
+  Ref XRefInBarCC = refWithRange(BarCode.range(), BarPathURI);
+  // The index will return duplicated refs, our code should be robost to handle
+  // it.
+  class DuplicatedXRefIndex : public SymbolIndex {
+  public:
+    DuplicatedXRefIndex(const Ref &ReturnedRef) : ReturnedRef(ReturnedRef) {}
+    bool refs(const RefsRequest &Req,
+              llvm::function_ref<void(const Ref &)> Callback) const override {
+      // Return two duplicated refs.
+      Callback(ReturnedRef);
+      Callback(ReturnedRef);
+      return false;
+    }
+
+    bool fuzzyFind(const FuzzyFindRequest &,
+                   llvm::function_ref<void(const Symbol &)>) const override {
+      return false;
+    }
+    void lookup(const LookupRequest &,
+                llvm::function_ref<void(const Symbol &)>) const override {}
+
+    void relations(const RelationsRequest &,
+                   llvm::function_ref<void(const SymbolID &, const Symbol &)>)
+        const override {}
+    size_t estimateMemoryUsage() const override { return 0; }
+    Ref ReturnedRef;
+  } DIndex(XRefInBarCC);
+  llvm::StringRef NewName = "newName";
+  auto Results = rename({MainCode.point(), NewName, AST, MainFilePath, &DIndex,
+                         /*CrossFile=*/true});
+  ASSERT_TRUE(bool(Results)) << Results.takeError();
+  EXPECT_THAT(
+      applyEdits(std::move(*Results)),
+      UnorderedElementsAre(
+          Pair(Eq(BarPath), Eq(expectedResult(BarCode, NewName))),
+          Pair(Eq(MainFilePath), Eq(expectedResult(MainCode, NewName)))));
+}
+
 TEST(CrossFileRenameTests, WithUpToDateIndex) {
   MockCompilationDatabase CDB;
   CDB.ExtraClangFlags = {"-xc++"};
   class IgnoreDiagnostics : public DiagnosticsConsumer {
-  void onDiagnosticsReady(PathRef File,
-                          std::vector<Diag> Diagnostics) override {}
+    void onDiagnosticsReady(PathRef File,
+                            std::vector<Diag> Diagnostics) override {}
   } DiagConsumer;
   // rename is runnning on the "^" point in FooH, and "[[]]" ranges are the
-  // expcted rename occurrences.
+  // expected rename occurrences.
   struct Case {
     llvm::StringRef FooH;
     llvm::StringRef FooCC;
-  } Cases [] = {
-    {
-      // classes.
-      R"cpp(
+  } Cases[] = {
+      {
+          // classes.
+          R"cpp(
         class [[Fo^o]] {
           [[Foo]]();
           ~[[Foo]]();
         };
       )cpp",
-      R"cpp(
+          R"cpp(
         #include "foo.h"
         [[Foo]]::[[Foo]]() {}
         [[Foo]]::~[[Foo]]() {}
@@ -694,15 +745,15 @@ TEST(CrossFileRenameTests, WithUpToDateIndex) {
           [[Foo]] foo;
         }
       )cpp",
-    },
-    {
-      // class methods.
-      R"cpp(
+      },
+      {
+          // class methods.
+          R"cpp(
         class Foo {
           void [[f^oo]]();
         };
       )cpp",
-      R"cpp(
+          R"cpp(
         #include "foo.h"
         void Foo::[[foo]]() {}
 
@@ -710,13 +761,49 @@ TEST(CrossFileRenameTests, WithUpToDateIndex) {
           p->[[foo]]();
         }
       )cpp",
-    },
-    {
-      // functions.
-      R"cpp(
+      },
+      {
+          // Constructor.
+          R"cpp(
+        class [[Foo]] {
+          [[^Foo]]();
+          ~[[Foo]]();
+        };
+      )cpp",
+          R"cpp(
+        #include "foo.h"
+        [[Foo]]::[[Foo]]() {}
+        [[Foo]]::~[[Foo]]() {}
+
+        void func() {
+          [[Foo]] foo;
+        }
+      )cpp",
+      },
+      {
+          // Destructor (selecting before the identifier).
+          R"cpp(
+        class [[Foo]] {
+          [[Foo]]();
+          ~[[Foo^]]();
+        };
+      )cpp",
+          R"cpp(
+        #include "foo.h"
+        [[Foo]]::[[Foo]]() {}
+        [[Foo]]::~[[Foo]]() {}
+
+        void func() {
+          [[Foo]] foo;
+        }
+      )cpp",
+      },
+      {
+          // functions.
+          R"cpp(
         void [[f^oo]]();
       )cpp",
-      R"cpp(
+          R"cpp(
         #include "foo.h"
         void [[foo]]() {}
 
@@ -724,63 +811,63 @@ TEST(CrossFileRenameTests, WithUpToDateIndex) {
           [[foo]]();
         }
       )cpp",
-    },
-    {
-      // typedefs.
-      R"cpp(
+      },
+      {
+          // typedefs.
+          R"cpp(
       typedef int [[IN^T]];
       [[INT]] foo();
       )cpp",
-      R"cpp(
+          R"cpp(
         #include "foo.h"
         [[INT]] foo() {}
       )cpp",
-    },
-    {
-      // usings.
-      R"cpp(
+      },
+      {
+          // usings.
+          R"cpp(
       using [[I^NT]] = int;
       [[INT]] foo();
       )cpp",
-      R"cpp(
+          R"cpp(
         #include "foo.h"
         [[INT]] foo() {}
       )cpp",
-    },
-    {
-      // variables.
-      R"cpp(
+      },
+      {
+          // variables.
+          R"cpp(
       static const int [[VA^R]] = 123;
       )cpp",
-      R"cpp(
+          R"cpp(
         #include "foo.h"
         int s = [[VAR]];
       )cpp",
-    },
-    {
-      // scope enums.
-      R"cpp(
+      },
+      {
+          // scope enums.
+          R"cpp(
       enum class [[K^ind]] { ABC };
       )cpp",
-      R"cpp(
+          R"cpp(
         #include "foo.h"
         [[Kind]] ff() {
           return [[Kind]]::ABC;
         }
       )cpp",
-    },
-    {
-      // enum constants.
-      R"cpp(
+      },
+      {
+          // enum constants.
+          R"cpp(
       enum class Kind { [[A^BC]] };
       )cpp",
-      R"cpp(
+          R"cpp(
         #include "foo.h"
         Kind ff() {
           return Kind::[[ABC]];
         }
       )cpp",
-    },
+      },
   };
 
   for (const auto& T : Cases) {

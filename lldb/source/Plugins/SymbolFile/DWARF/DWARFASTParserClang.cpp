@@ -22,7 +22,7 @@
 #include "lldb/Core/Value.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Symbol/ClangASTImporter.h"
-#include "lldb/Symbol/ClangExternalASTSourceCommon.h"
+#include "lldb/Symbol/ClangASTMetadata.h"
 #include "lldb/Symbol/ClangUtil.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/Function.h"
@@ -1720,7 +1720,7 @@ DWARFASTParserClang::ParseStructureLikeDIE(const SymbolContext &sc,
             ClangASTContext::GetAsRecordDecl(clang_type);
 
         if (record_decl) {
-          GetClangASTImporter().InsertRecordDecl(
+          GetClangASTImporter().SetRecordLayout(
               record_decl, ClangASTImporter::LayoutInfo());
         }
       }
@@ -2134,7 +2134,7 @@ bool DWARFASTParserClang::CompleteRecordType(const DWARFDIE &die,
     clang::CXXRecordDecl *record_decl =
         m_ast.GetAsCXXRecordDecl(clang_type.GetOpaqueQualType());
     if (record_decl)
-      GetClangASTImporter().InsertRecordDecl(record_decl, layout_info);
+      GetClangASTImporter().SetRecordLayout(record_decl, layout_info);
   }
 
   return (bool)clang_type;

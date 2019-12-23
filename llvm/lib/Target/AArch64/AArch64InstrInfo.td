@@ -263,6 +263,10 @@ def SDT_AArch64WrapperLarge : SDTypeProfile<1, 4,
                                          SDTCisSameAs<1, 2>, SDTCisSameAs<1, 3>,
                                          SDTCisSameAs<1, 4>]>;
 
+def SDT_AArch64TBL : SDTypeProfile<1, 2, [
+  SDTCisVec<0>, SDTCisSameAs<0, 1>, SDTCisInt<2>
+]>;
+
 // non-extending masked load fragment.
 def nonext_masked_load :
   PatFrag<(ops node:$ptr, node:$pred, node:$def),
@@ -540,6 +544,8 @@ def AArch64uunpklo : SDNode<"AArch64ISD::UUNPKLO", SDT_AArch64unpk>;
 
 def AArch64ldp : SDNode<"AArch64ISD::LDP", SDT_AArch64ldp, [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
 def AArch64stp : SDNode<"AArch64ISD::STP", SDT_AArch64stp, [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
+
+def AArch64tbl : SDNode<"AArch64ISD::TBL", SDT_AArch64TBL>;
 
 //===----------------------------------------------------------------------===//
 
@@ -3646,14 +3652,8 @@ def : Pat<(v4f32 (int_aarch64_neon_vcvthf2fp (extract_subvector (v8i16 V128:$Rn)
                                                               (i64 4)))),
           (FCVTLv8i16 V128:$Rn)>;
 def : Pat<(v2f64 (fpextend (v2f32 V64:$Rn))), (FCVTLv2i32 V64:$Rn)>;
-def : Pat<(v2f64 (fpextend (v2f32 (extract_subvector (v4f32 V128:$Rn),
-                                                    (i64 2))))),
-          (FCVTLv4i32 V128:$Rn)>;
 
 def : Pat<(v4f32 (fpextend (v4f16 V64:$Rn))), (FCVTLv4i16 V64:$Rn)>;
-def : Pat<(v4f32 (fpextend (v4f16 (extract_subvector (v8f16 V128:$Rn),
-                                                    (i64 4))))),
-          (FCVTLv8i16 V128:$Rn)>;
 
 defm FCVTMS : SIMDTwoVectorFPToInt<0,0,0b11011, "fcvtms",int_aarch64_neon_fcvtms>;
 defm FCVTMU : SIMDTwoVectorFPToInt<1,0,0b11011, "fcvtmu",int_aarch64_neon_fcvtmu>;

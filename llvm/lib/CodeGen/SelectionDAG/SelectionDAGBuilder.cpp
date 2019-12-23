@@ -3124,6 +3124,13 @@ void SelectionDAGBuilder::visitBinary(const User &I, unsigned Opcode) {
   if (isVectorReductionOp(&I)) {
     Flags.setVectorReduction(true);
     LLVM_DEBUG(dbgs() << "Detected a reduction operation:" << I << "\n");
+
+    // If no flags are set we will propagate the incoming flags, if any flags
+    // are set, we will intersect them with the incoming flag and so we need to
+    // copy the FMF flags here.
+    if (auto *FPOp = dyn_cast<FPMathOperator>(&I)) {
+      Flags.copyFMF(*FPOp);
+    }
   }
 
   SDValue Op1 = getValue(I.getOperand(0));
@@ -4390,8 +4397,8 @@ static bool getUniformBase(const Value *&Ptr, SDValue &Base, SDValue &Index,
     }
     auto *CI = cast<ConstantInt>(C);
     Scale = DAG.getTargetConstant(1, SDB->getCurSDLoc(), TLI.getPointerTy(DL));
-    Index = DAG.getTargetConstant(SL->getElementOffset(CI->getZExtValue()),
-                                  SDB->getCurSDLoc(), TLI.getPointerTy(DL));
+    Index = DAG.getConstant(SL->getElementOffset(CI->getZExtValue()),
+                            SDB->getCurSDLoc(), TLI.getPointerTy(DL));
   } else {
     Scale = DAG.getTargetConstant(
                 DL.getTypeAllocSize(GEP->getResultElementType()),
@@ -5571,8 +5578,26 @@ bool SelectionDAGBuilder::EmitFuncArgumentDbgValue(
       = [&](ArrayRef<std::pair<unsigned, unsigned>> SplitRegs) {
       unsigned Offset = 0;
       for (auto RegAndSize : SplitRegs) {
+        // If the expression is already a fragment, the current register
+        // offset+size might extend beyond the fragment. In this case, only
+        // the register bits that are inside the fragment are relevant.
+        int RegFragmentSizeInBits = RegAndSize.second;
+        if (auto ExprFragmentInfo = Expr->getFragmentInfo()) {
+          uint64_t ExprFragmentSizeInBits = ExprFragmentInfo->SizeInBits;
+          // The register is entirely outside the expression fragment,
+          // so is irrelevant for debug info.
+          if (Offset >= ExprFragmentSizeInBits)
+            break;
+          // The register is partially outside the expression fragment, only
+          // the low bits within the fragment are relevant for debug info.
+          if (Offset + RegFragmentSizeInBits > ExprFragmentSizeInBits) {
+            RegFragmentSizeInBits = ExprFragmentSizeInBits - Offset;
+          }
+        }
+
         auto FragmentExpr = DIExpression::createFragmentExpression(
-          Expr, Offset, RegAndSize.second);
+            Expr, Offset, RegFragmentSizeInBits);
+        Offset += RegAndSize.second;
         // If a valid fragment expression cannot be created, the variable's
         // correct value cannot be determined and so it is set as Undef.
         if (!FragmentExpr) {
@@ -5585,7 +5610,6 @@ bool SelectionDAGBuilder::EmitFuncArgumentDbgValue(
         FuncInfo.ArgDbgValues.push_back(
           BuildMI(MF, DL, TII->get(TargetOpcode::DBG_VALUE), false,
                   RegAndSize.first, Variable, *FragmentExpr));
-        Offset += RegAndSize.second;
       }
     };
 

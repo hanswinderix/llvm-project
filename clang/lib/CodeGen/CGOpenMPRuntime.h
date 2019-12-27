@@ -22,6 +22,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringSet.h"
+#include "llvm/Frontend/OpenMP/OMPConstants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/ValueHandle.h"
 
@@ -209,6 +210,16 @@ public:
   public:
     DisableAutoDeclareTargetRAII(CodeGenModule &CGM);
     ~DisableAutoDeclareTargetRAII();
+  };
+
+  /// Manages list of nontemporal decls for the specified directive.
+  class NontemporalDeclsRAII {
+    CodeGenModule &CGM;
+    const bool NeedToPush;
+
+  public:
+    NontemporalDeclsRAII(CodeGenModule &CGM, const OMPLoopDirective &S);
+    ~NontemporalDeclsRAII();
   };
 
 protected:
@@ -649,6 +660,11 @@ private:
   llvm::MapVector<CanonicalDeclPtr<const FunctionDecl>,
                   std::pair<GlobalDecl, GlobalDecl>>
       DeferredVariantFunction;
+
+  using NontemporalDeclsSet = llvm::SmallDenseSet<CanonicalDeclPtr<const Decl>>;
+  /// Stack for list of declarations in current context marked as nontemporal.
+  /// The set is the union of all current stack elements.
+  llvm::SmallVector<NontemporalDeclsSet, 4> NontemporalDeclsStack;
 
   /// Flag for keeping track of weather a requires unified_shared_memory
   /// directive is present.
@@ -1146,7 +1162,7 @@ public:
   /// Emit call to void __kmpc_push_proc_bind(ident_t *loc, kmp_int32
   /// global_tid, int proc_bind) to generate code for 'proc_bind' clause.
   virtual void emitProcBindClause(CodeGenFunction &CGF,
-                                  OpenMPProcBindClauseKind ProcBind,
+                                  llvm::omp::ProcBindKind ProcBind,
                                   SourceLocation Loc);
 
   /// Returns address of the threadprivate variable for the current
@@ -1663,6 +1679,10 @@ public:
 
   /// Emits the definition of the declare variant function.
   virtual bool emitDeclareVariant(GlobalDecl GD, bool IsForDefinition);
+
+  /// Checks if the \p VD variable is marked as nontemporal declaration in
+  /// current context.
+  bool isNontemporalDecl(const ValueDecl *VD) const;
 };
 
 /// Class supports emissionof SIMD-only code.
@@ -1891,7 +1911,7 @@ public:
   /// Emit call to void __kmpc_push_proc_bind(ident_t *loc, kmp_int32
   /// global_tid, int proc_bind) to generate code for 'proc_bind' clause.
   void emitProcBindClause(CodeGenFunction &CGF,
-                          OpenMPProcBindClauseKind ProcBind,
+                          llvm::omp::ProcBindKind ProcBind,
                           SourceLocation Loc) override;
 
   /// Returns address of the threadprivate variable for the current

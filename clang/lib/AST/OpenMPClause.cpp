@@ -15,6 +15,7 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclOpenMP.h"
 #include "clang/Basic/LLVM.h"
+#include "clang/Basic/OpenMPKinds.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -404,11 +405,12 @@ void OMPLastprivateClause::setAssignmentOps(ArrayRef<Expr *> AssignmentOps) {
 OMPLastprivateClause *OMPLastprivateClause::Create(
     const ASTContext &C, SourceLocation StartLoc, SourceLocation LParenLoc,
     SourceLocation EndLoc, ArrayRef<Expr *> VL, ArrayRef<Expr *> SrcExprs,
-    ArrayRef<Expr *> DstExprs, ArrayRef<Expr *> AssignmentOps, Stmt *PreInit,
-    Expr *PostUpdate) {
+    ArrayRef<Expr *> DstExprs, ArrayRef<Expr *> AssignmentOps,
+    OpenMPLastprivateModifier LPKind, SourceLocation LPKindLoc,
+    SourceLocation ColonLoc, Stmt *PreInit, Expr *PostUpdate) {
   void *Mem = C.Allocate(totalSizeToAlloc<Expr *>(5 * VL.size()));
-  OMPLastprivateClause *Clause =
-      new (Mem) OMPLastprivateClause(StartLoc, LParenLoc, EndLoc, VL.size());
+  OMPLastprivateClause *Clause = new (Mem) OMPLastprivateClause(
+      StartLoc, LParenLoc, EndLoc, LPKind, LPKindLoc, ColonLoc, VL.size());
   Clause->setVarRefs(VL);
   Clause->setSourceExprs(SrcExprs);
   Clause->setDestinationExprs(DstExprs);
@@ -1162,8 +1164,8 @@ OMPNontemporalClause *OMPNontemporalClause::Create(const ASTContext &C,
                                                    SourceLocation LParenLoc,
                                                    SourceLocation EndLoc,
                                                    ArrayRef<Expr *> VL) {
-  // Allocate space for nontemporal variables.
-  void *Mem = C.Allocate(totalSizeToAlloc<Expr *>(VL.size()));
+  // Allocate space for nontemporal variables + private references.
+  void *Mem = C.Allocate(totalSizeToAlloc<Expr *>(2 * VL.size()));
   auto *Clause =
       new (Mem) OMPNontemporalClause(StartLoc, LParenLoc, EndLoc, VL.size());
   Clause->setVarRefs(VL);
@@ -1172,8 +1174,14 @@ OMPNontemporalClause *OMPNontemporalClause::Create(const ASTContext &C,
 
 OMPNontemporalClause *OMPNontemporalClause::CreateEmpty(const ASTContext &C,
                                                         unsigned N) {
-  void *Mem = C.Allocate(totalSizeToAlloc<Expr *>(N));
+  void *Mem = C.Allocate(totalSizeToAlloc<Expr *>(2 * N));
   return new (Mem) OMPNontemporalClause(N);
+}
+
+void OMPNontemporalClause::setPrivateRefs(ArrayRef<Expr *> VL) {
+  assert(VL.size() == varlist_size() && "Number of private references is not "
+                                        "the same as the preallocated buffer");
+  std::copy(VL.begin(), VL.end(), varlist_end());
 }
 
 //===----------------------------------------------------------------------===//
@@ -1232,7 +1240,8 @@ void OMPClausePrinter::VisitOMPDefaultClause(OMPDefaultClause *Node) {
 
 void OMPClausePrinter::VisitOMPProcBindClause(OMPProcBindClause *Node) {
   OS << "proc_bind("
-     << getOpenMPSimpleClauseTypeName(OMPC_proc_bind, Node->getProcBindKind())
+     << getOpenMPSimpleClauseTypeName(OMPC_proc_bind,
+                                      unsigned(Node->getProcBindKind()))
      << ")";
 }
 
@@ -1422,7 +1431,13 @@ void OMPClausePrinter::VisitOMPFirstprivateClause(OMPFirstprivateClause *Node) {
 void OMPClausePrinter::VisitOMPLastprivateClause(OMPLastprivateClause *Node) {
   if (!Node->varlist_empty()) {
     OS << "lastprivate";
-    VisitOMPClauseList(Node, '(');
+    OpenMPLastprivateModifier LPKind = Node->getKind();
+    if (LPKind != OMPC_LASTPRIVATE_unknown) {
+      OS << "("
+         << getOpenMPSimpleClauseTypeName(OMPC_lastprivate, Node->getKind())
+         << ":";
+    }
+    VisitOMPClauseList(Node, LPKind == OMPC_LASTPRIVATE_unknown ? '(' : ' ');
     OS << ")";
   }
 }

@@ -6090,7 +6090,7 @@ void OMPClauseWriter::VisitOMPDefaultClause(OMPDefaultClause *C) {
 }
 
 void OMPClauseWriter::VisitOMPProcBindClause(OMPProcBindClause *C) {
-  Record.push_back(C->getProcBindKind());
+  Record.push_back(unsigned(C->getProcBindKind()));
   Record.AddSourceLocation(C->getLParenLoc());
   Record.AddSourceLocation(C->getProcBindKindKwLoc());
 }
@@ -6170,6 +6170,9 @@ void OMPClauseWriter::VisitOMPLastprivateClause(OMPLastprivateClause *C) {
   Record.push_back(C->varlist_size());
   VisitOMPClauseWithPostUpdate(C);
   Record.AddSourceLocation(C->getLParenLoc());
+  Record.writeEnum(C->getKind());
+  Record.AddSourceLocation(C->getKindLoc());
+  Record.AddSourceLocation(C->getColonLoc());
   for (auto *VE : C->varlists())
     Record.AddStmt(VE);
   for (auto *E : C->private_copies())
@@ -6544,4 +6547,6 @@ void OMPClauseWriter::VisitOMPNontemporalClause(OMPNontemporalClause *C) {
   Record.AddSourceLocation(C->getLParenLoc());
   for (auto *VE : C->varlists())
     Record.AddStmt(VE);
+  for (auto *E : C->private_refs())
+    Record.AddStmt(E);
 }

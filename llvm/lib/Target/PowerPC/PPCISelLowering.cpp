@@ -782,17 +782,22 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
       }
       setOperationAction(ISD::EXTRACT_VECTOR_ELT, MVT::v2f64, Legal);
 
+      // The nearbyint variants are not allowed to raise the inexact exception
+      // so we can only code-gen them with unsafe math.
+      if (TM.Options.UnsafeFPMath) {
+        setOperationAction(ISD::FNEARBYINT, MVT::f64, Legal);
+        setOperationAction(ISD::FNEARBYINT, MVT::f32, Legal);
+      }
+
       setOperationAction(ISD::FFLOOR, MVT::v2f64, Legal);
       setOperationAction(ISD::FCEIL, MVT::v2f64, Legal);
       setOperationAction(ISD::FTRUNC, MVT::v2f64, Legal);
       setOperationAction(ISD::FNEARBYINT, MVT::v2f64, Legal);
       setOperationAction(ISD::FROUND, MVT::v2f64, Legal);
-      setOperationAction(ISD::FNEARBYINT, MVT::f64, Legal);
       setOperationAction(ISD::FROUND, MVT::f64, Legal);
 
       setOperationAction(ISD::FNEARBYINT, MVT::v4f32, Legal);
       setOperationAction(ISD::FROUND, MVT::v4f32, Legal);
-      setOperationAction(ISD::FNEARBYINT, MVT::f32, Legal);
       setOperationAction(ISD::FROUND, MVT::f32, Legal);
 
       setOperationAction(ISD::MUL, MVT::v2f64, Legal);
@@ -6820,9 +6825,6 @@ static bool CC_AIX(unsigned ValNo, MVT ValVT, MVT LocVT,
 
   if (ArgFlags.isByVal())
     report_fatal_error("Passing structure by value is unimplemented.");
-
-  if (ArgFlags.isSRet())
-    report_fatal_error("Struct return arguments are unimplemented.");
 
   if (ArgFlags.isNest())
     report_fatal_error("Nest arguments are unimplemented.");
@@ -15638,12 +15640,6 @@ bool PPCTargetLowering::mayBeEmittedAsTailCall(const CallInst *CI) const {
   if (!CI->isTailCall())
     return false;
 
-  // If tail calls are disabled for the caller then we are done.
-  const Function *Caller = CI->getParent()->getParent();
-  auto Attr = Caller->getFnAttribute("disable-tail-calls");
-  if (Attr.getValueAsString() == "true")
-    return false;
-
   // If sibling calls have been disabled and tail-calls aren't guaranteed
   // there is no reason to duplicate.
   auto &TM = getTargetMachine();
@@ -15656,6 +15652,7 @@ bool PPCTargetLowering::mayBeEmittedAsTailCall(const CallInst *CI) const {
     return false;
 
   // Make sure the callee and caller calling conventions are eligible for tco.
+  const Function *Caller = CI->getParent()->getParent();
   if (!areCallingConvEligibleForTCO_64SVR4(Caller->getCallingConv(),
                                            CI->getCallingConv()))
       return false;

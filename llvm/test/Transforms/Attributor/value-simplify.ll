@@ -36,6 +36,9 @@ define i32 @test2_1(i1 %c) {
   br i1 %c, label %if.true, label %if.false
 if.true:
   %call = tail call i32 @return0()
+
+; FIXME: %ret0 should be replaced with i32 1.
+; CHECK: %ret0 = add i32 0, 1
   %ret0 = add i32 %call, 1
   br label %end
 if.false:
@@ -43,19 +46,23 @@ if.false:
   br label %end
 end:
 
+; FIXME: %ret should be replaced with i32 1.
 ; CHECK: %ret = phi i32 [ %ret0, %if.true ], [ 1, %if.false ]
   %ret = phi i32 [ %ret0, %if.true ], [ %ret1, %if.false ]
 
-; CHECK: ret i32 1
-  ret i32 1
+; FIXME: ret i32 1
+; CHECK: ret i32 %ret
+  ret i32 %ret
 }
 
 
 
 ; CHECK: define i32 @test2_2(i1 %c)
 define i32 @test2_2(i1 %c) {
+; FIXME: %ret should be replaced with i32 1.
   %ret = tail call i32 @test2_1(i1 %c)
-; CHECK: ret i32 1
+; FIXME: ret i32 1
+; CHECK: ret i32 %ret
   ret i32 %ret
 }
 
@@ -120,7 +127,7 @@ end:
 
 define i32 @ipccp1(i32 %a) {
 ; CHECK-LABEL: define {{[^@]+}}@ipccp1
-; CHECK-SAME: (i32 returned [[A:%.*]])
+; CHECK-SAME: (i32 returned [[A:%.*]]) #0
 ; CHECK-NEXT:    br i1 true, label [[T:%.*]], label [[F:%.*]]
 ; CHECK:       t:
 ; CHECK-NEXT:    ret i32 [[A:%.*]]
@@ -137,7 +144,7 @@ f:
 
 define internal i1 @ipccp2i(i1 %a) {
 ; CHECK-LABEL: define {{[^@]+}}@ipccp2i
-; CHECK-SAME: (i1 returned [[A:%.*]])
+; CHECK-SAME: (i1 returned [[A:%.*]]) #0
 ; CHECK-NEXT:    br label %t
 ; CHECK:       t:
 ; CHECK-NEXT:    ret i1 true
@@ -153,8 +160,8 @@ f:
 }
 
 define i1 @ipccp2() {
-; CHECK-LABEL: define {{[^@]+}}@ipccp2()
-; CHECK-NEXT:    [[R:%.*]] = call i1 @ipccp2i(i1 true)
+; CHECK-LABEL: define {{[^@]+}}@ipccp2() #1
+; CHECK-NEXT:    [[R:%.*]] = call i1 @ipccp2i(i1 true) #0
 ; CHECK-NEXT:    ret i1 [[R]]
 ;
   %r = call i1 @ipccp2i(i1 true)
@@ -163,12 +170,14 @@ define i1 @ipccp2() {
 
 define internal i32 @ipccp3i(i32 %a) {
 ; CHECK-LABEL: define {{[^@]+}}@ipccp3i
-; CHECK-SAME: (i32 returned [[A:%.*]])
-; CHECK-NEXT:    br label [[T:%.*]]
+; CHECK-SAME: (i32 [[A:%.*]]) #1
+; CHECK-NEXT:    [[C:%.*]] = icmp eq i32 [[A:%.*]], 7
+; CHECK-NEXT:    br i1 [[C]], label [[T:%.*]], label [[F:%.*]]
 ; CHECK:       t:
-; CHECK-NEXT:    ret i32 7
+; CHECK-NEXT:    ret i32 [[A]]
 ; CHECK:       f:
-; CHECK-NEXT:    unreachable
+; CHECK-NEXT:    [[R:%.*]] = call i32 @ipccp3i(i32 5) #1
+; CHECK-NEXT:    ret i32 [[R]]
 ;
   %c = icmp eq i32 %a, 7
   br i1 %c, label %t, label %f
@@ -180,10 +189,10 @@ f:
 }
 
 define i32 @ipccp3() {
-; CHECK-LABEL: define {{[^@]+}}@ipccp3()
-; CHECK-NEXT:    [[R:%.*]] = call i32 @ipccp3i(i32 7)
+; CHECK-LABEL: define {{[^@]+}}@ipccp3() #1
+; CHECK-NEXT:    [[R:%.*]] = call i32 @ipccp3i(i32 7) #1
 ; CHECK-NEXT:    ret i32 [[R]]
-; FIXME: R should be replaced with 7
+;
   %r = call i32 @ipccp3i(i32 7)
   ret i32 %r
 }
@@ -261,6 +270,55 @@ define void @complicated_args_byval() {
 ; CHECK-NEXT:    ret void
 ;
   call void @test_byval(%struct.X* @S)
+  ret void
+}
+
+define void @fixpoint_changed(i32* %p) {
+; CHECK-LABEL: define {{[^@]+}}@fixpoint_changed
+; CHECK-SAME: (i32* nocapture nofree writeonly [[P:%.*]])
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    br label [[FOR_COND:%.*]]
+; CHECK:       for.cond:
+; CHECK-NEXT:    [[J_0:%.*]] = phi i32 [ 0, [[ENTRY:%.*]] ], [ [[INC:%.*]], [[SW_EPILOG:%.*]] ]
+; CHECK-NEXT:    [[CMP:%.*]] = icmp slt i32 [[J_0]], 30
+; CHECK-NEXT:    br i1 [[CMP]], label [[FOR_BODY:%.*]], label [[FOR_END:%.*]]
+; CHECK:       for.body:
+; CHECK-NEXT:    switch i32 [[J_0]], label [[SW_EPILOG]] [
+; CHECK-NEXT:    i32 1, label [[SW_BB:%.*]]
+; CHECK-NEXT:    ]
+; CHECK:       sw.bb:
+; CHECK-NEXT:    br label [[SW_EPILOG]]
+; CHECK:       sw.epilog:
+; CHECK-NEXT:    [[X_0:%.*]] = phi i32 [ 255, [[FOR_BODY]] ], [ 253, [[SW_BB]] ]
+; CHECK-NEXT:    store i32 [[X_0]], i32* [[P]]
+; CHECK-NEXT:    [[INC]] = add nsw i32 [[J_0]], 1
+; CHECK-NEXT:    br label [[FOR_COND]]
+; CHECK:       for.end:
+; CHECK-NEXT:    ret void
+;
+entry:
+  br label %for.cond
+
+for.cond:
+  %j.0 = phi i32 [ 0, %entry ], [ %inc, %sw.epilog ]
+  %cmp = icmp slt i32 %j.0, 30
+  br i1 %cmp, label %for.body, label %for.end
+
+for.body:
+  switch i32 %j.0, label %sw.epilog [
+  i32 1, label %sw.bb
+  ]
+
+sw.bb:
+  br label %sw.epilog
+
+sw.epilog:
+  %x.0 = phi i32 [ 255, %for.body ], [ 253, %sw.bb ]
+  store i32 %x.0, i32* %p
+  %inc = add nsw i32 %j.0, 1
+  br label %for.cond
+
+for.end:
   ret void
 }
 

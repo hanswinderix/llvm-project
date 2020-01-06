@@ -23,10 +23,8 @@
 #include "llvm/Analysis/CaptureTracking.h"
 #include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/Analysis/GlobalsModRef.h"
-#include "llvm/Analysis/LazyValueInfo.h"
 #include "llvm/Analysis/Loads.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
-#include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Attributes.h"
@@ -128,7 +126,6 @@ PIPE_OPERATOR(AANoFree)
 PIPE_OPERATOR(AAHeapToStack)
 PIPE_OPERATOR(AAReachability)
 PIPE_OPERATOR(AAMemoryBehavior)
-PIPE_OPERATOR(AAValueConstantRange)
 
 #undef PIPE_OPERATOR
 } // namespace llvm
@@ -157,7 +154,7 @@ static cl::opt<bool> DisableAttributor(
 
 static cl::opt<bool> AnnotateDeclarationCallSites(
     "attributor-annotate-decl-cs", cl::Hidden,
-    cl::desc("Annoate call sites of function declarations."), cl::init(false));
+    cl::desc("Annotate call sites of function declarations."), cl::init(false));
 
 static cl::opt<bool> ManifestInternal(
     "attributor-manifest-internal", cl::Hidden,
@@ -1795,20 +1792,6 @@ static int64_t getKnownNonNullAndDerefBytesForUse(
       return std::max(int64_t(0), DerefBytes);
     }
   }
-  if (const Value *Base =
-          GetPointerBaseWithConstantOffset(UseV, Offset, DL,
-                                           /*AllowNonInbounds*/ false)) {
-    if (Base == &AssociatedValue) {
-      // As long as we only use known information there is no need to track
-      // dependences here.
-      auto &DerefAA = A.getAAFor<AADereferenceable>(
-          QueryingAA, IRPosition::value(*Base), /* TrackDependence */ false);
-      IsNonNull |= (!NullPointerIsDefined && DerefAA.isKnownNonNull());
-      IsNonNull |= (!NullPointerIsDefined && (Offset != 0));
-      int64_t DerefBytes = DerefAA.getKnownDereferenceableBytes();
-      return std::max(int64_t(0), DerefBytes - std::max(int64_t(0), Offset));
-    }
-  }
 
   return 0;
 }
@@ -3378,8 +3361,6 @@ struct AADereferenceableFloating
         T.GlobalState &= DS.GlobalState;
       }
 
-      // TODO: Use `AAConstantRange` to infer dereferenceable bytes.
-
       // For now we do not try to "increase" dereferenceability due to negative
       // indices as we first have to come up with code to deal with loops and
       // for overflows of the dereferenceable bytes.
@@ -3485,7 +3466,8 @@ static unsigned int getKnownAlignForUse(Attributor &A,
   // We need to follow common pointer manipulation uses to the accesses they
   // feed into.
   if (isa<CastInst>(I)) {
-    TrackUse = true;
+    // Follow all but ptr2int casts.
+    TrackUse = !isa<PtrToIntInst>(I);
     return 0;
   }
   if (auto *GEP = dyn_cast<GetElementPtrInst>(I)) {
@@ -3562,7 +3544,7 @@ struct AAAlignImpl : AAAlign {
         if (SI->getPointerOperand() == &AnchorVal)
           if (SI->getAlignment() < getAssumedAlign()) {
             STATS_DECLTRACK(AAAlign, Store,
-                            "Number of times alignemnt added to a store");
+                            "Number of times alignment added to a store");
             SI->setAlignment(Align(getAssumedAlign()));
             Changed = ChangeStatus::CHANGED;
           }
@@ -3571,7 +3553,7 @@ struct AAAlignImpl : AAAlign {
           if (LI->getAlignment() < getAssumedAlign()) {
             LI->setAlignment(Align(getAssumedAlign()));
             STATS_DECLTRACK(AAAlign, Load,
-                            "Number of times alignemnt added to a load");
+                            "Number of times alignment added to a load");
             Changed = ChangeStatus::CHANGED;
           }
       }
@@ -4253,28 +4235,6 @@ struct AAValueSimplifyImpl : AAValueSimplify {
     return true;
   }
 
-  bool askSimplifiedValueForAAValueConstantRange(Attributor &A) {
-    if (!getAssociatedValue().getType()->isIntegerTy())
-      return false;
-
-    const auto &ValueConstantRangeAA =
-        A.getAAFor<AAValueConstantRange>(*this, getIRPosition());
-
-    Optional<ConstantInt *> COpt =
-        ValueConstantRangeAA.getAssumedConstantInt(A);
-    if (COpt.hasValue()) {
-      if (auto *C = COpt.getValue())
-        SimplifiedAssociatedValue = C;
-      else
-        return false;
-    } else {
-      // FIXME: It should be llvm::None but if you set llvm::None,
-      //        values are mistakenly infered as `undef` now.
-      SimplifiedAssociatedValue = &getAssociatedValue();
-    }
-    return true;
-  }
-
   /// See AbstractAttribute::manifest(...).
   ChangeStatus manifest(Attributor &A) override {
     ChangeStatus Changed = ChangeStatus::UNCHANGED;
@@ -4302,7 +4262,8 @@ struct AAValueSimplifyImpl : AAValueSimplify {
     // NOTE: Associated value will be returned in a pessimistic fixpoint and is
     // regarded as known. That's why`indicateOptimisticFixpoint` is called.
     SimplifiedAssociatedValue = &getAssociatedValue();
-    return indicateOptimisticFixpoint();
+    indicateOptimisticFixpoint();
+    return ChangeStatus::CHANGED;
   }
 
 protected:
@@ -4357,8 +4318,7 @@ struct AAValueSimplifyArgument final : AAValueSimplifyImpl {
     };
 
     if (!A.checkForAllCallSites(PredForCallSite, *this, true))
-      if (!askSimplifiedValueForAAValueConstantRange(A))
-        return indicatePessimisticFixpoint();
+      return indicatePessimisticFixpoint();
 
     // If a candicate was found in this update, return CHANGED.
     return HasValueBefore == SimplifiedAssociatedValue.hasValue()
@@ -4384,8 +4344,7 @@ struct AAValueSimplifyReturned : AAValueSimplifyImpl {
     };
 
     if (!A.checkForAllReturnedValues(PredForReturned, *this))
-      if (!askSimplifiedValueForAAValueConstantRange(A))
-        return indicatePessimisticFixpoint();
+      return indicatePessimisticFixpoint();
 
     // If a candicate was found in this update, return CHANGED.
     return HasValueBefore == SimplifiedAssociatedValue.hasValue()
@@ -4418,10 +4377,10 @@ struct AAValueSimplifyFloating : AAValueSimplifyImpl {
       auto &AA = A.getAAFor<AAValueSimplify>(*this, IRPosition::value(V));
       if (!Stripped && this == &AA) {
         // TODO: Look the instruction and check recursively.
-
         LLVM_DEBUG(
             dbgs() << "[Attributor][ValueSimplify] Can't be stripped more : "
                    << V << "\n");
+        indicatePessimisticFixpoint();
         return false;
       }
       return checkAndUpdate(A, *this, V, SimplifiedAssociatedValue);
@@ -4430,8 +4389,7 @@ struct AAValueSimplifyFloating : AAValueSimplifyImpl {
     if (!genericValueTraversal<AAValueSimplify, BooleanState>(
             A, getIRPosition(), *this, static_cast<BooleanState &>(*this),
             VisitValueCB))
-      if (!askSimplifiedValueForAAValueConstantRange(A))
-        return indicatePessimisticFixpoint();
+      return indicatePessimisticFixpoint();
 
     // If a candicate was found in this update, return CHANGED.
 
@@ -5202,451 +5160,7 @@ void AAMemoryBehaviorFloating::analyzeUseIn(Attributor &A, const Use *U,
   if (UserI->mayWriteToMemory())
     removeAssumedBits(NO_WRITES);
 }
-/// ------------------ Value Constant Range Attribute -------------------------
 
-struct AAValueConstantRangeImpl : AAValueConstantRange {
-  using StateType = IntegerRangeState;
-  AAValueConstantRangeImpl(const IRPosition &IRP) : AAValueConstantRange(IRP) {}
-
-  /// See AbstractAttribute::getAsStr().
-  const std::string getAsStr() const override {
-    std::string Str;
-    llvm::raw_string_ostream OS(Str);
-    OS << "range(" << getBitWidth() << ")<";
-    getKnown().print(OS);
-    OS << " / ";
-    getAssumed().print(OS);
-    OS << ">";
-    return OS.str();
-  }
-
-  /// Helper function to get a SCEV expr for the associated value at program
-  /// point \p I.
-  const SCEV *getSCEV(Attributor &A, const Instruction *I = nullptr) const {
-    if (!getAnchorScope())
-      return nullptr;
-
-    ScalarEvolution *SE =
-        A.getInfoCache().getAnalysisResultForFunction<ScalarEvolutionAnalysis>(
-            *getAnchorScope());
-
-    LoopInfo *LI = A.getInfoCache().getAnalysisResultForFunction<LoopAnalysis>(
-        *getAnchorScope());
-
-    if (!SE || !LI)
-      return nullptr;
-
-    const SCEV *S = SE->getSCEV(&getAssociatedValue());
-    if (!I)
-      return S;
-
-    return SE->getSCEVAtScope(S, LI->getLoopFor(I->getParent()));
-  }
-
-  /// Helper function to get a range from SCEV for the associated value at
-  /// program point \p I.
-  ConstantRange getConstantRangeFromSCEV(Attributor &A,
-                                         const Instruction *I = nullptr) const {
-    if (!getAnchorScope())
-      return getWorstState(getBitWidth());
-
-    ScalarEvolution *SE =
-        A.getInfoCache().getAnalysisResultForFunction<ScalarEvolutionAnalysis>(
-            *getAnchorScope());
-
-    const SCEV *S = getSCEV(A, I);
-    if (!SE || !S)
-      return getWorstState(getBitWidth());
-
-    return SE->getUnsignedRange(S);
-  }
-
-  /// Helper function to get a range from LVI for the associated value at
-  /// program point \p I.
-  ConstantRange
-  getConstantRangeFromLVI(Attributor &A,
-                          const Instruction *CtxI = nullptr) const {
-    if (!getAnchorScope())
-      return getWorstState(getBitWidth());
-
-    LazyValueInfo *LVI =
-        A.getInfoCache().getAnalysisResultForFunction<LazyValueAnalysis>(
-            *getAnchorScope());
-
-    if (!LVI || !CtxI)
-      return getWorstState(getBitWidth());
-    return LVI->getConstantRange(&getAssociatedValue(),
-                                 const_cast<BasicBlock *>(CtxI->getParent()),
-                                 const_cast<Instruction *>(CtxI));
-  }
-
-  /// See AAValueConstantRange::getKnownConstantRange(..).
-  ConstantRange
-  getKnownConstantRange(Attributor &A,
-                        const Instruction *CtxI = nullptr) const override {
-    if (!CtxI || CtxI == getCtxI())
-      return getKnown();
-
-    ConstantRange LVIR = getConstantRangeFromLVI(A, CtxI);
-    ConstantRange SCEVR = getConstantRangeFromSCEV(A, CtxI);
-    return getKnown().intersectWith(SCEVR).intersectWith(LVIR);
-  }
-
-  /// See AAValueConstantRange::getAssumedConstantRange(..).
-  ConstantRange
-  getAssumedConstantRange(Attributor &A,
-                          const Instruction *CtxI = nullptr) const override {
-    // TODO: Make SCEV use Attributor assumption.
-    //       We may be able to bound a variable range via assumptions in
-    //       Attributor. ex.) If x is assumed to be in [1, 3] and y is known to
-    //       evolve to x^2 + x, then we can say that y is in [2, 12].
-
-    if (!CtxI || CtxI == getCtxI())
-      return getAssumed();
-
-    ConstantRange LVIR = getConstantRangeFromLVI(A, CtxI);
-    ConstantRange SCEVR = getConstantRangeFromSCEV(A, CtxI);
-    return getAssumed().intersectWith(SCEVR).intersectWith(LVIR);
-  }
-
-  /// See AbstractAttribute::initialize(..).
-  void initialize(Attributor &A) override {
-    // Intersect a range given by SCEV.
-    intersectKnown(getConstantRangeFromSCEV(A, getCtxI()));
-
-    // Intersect a range given by LVI.
-    intersectKnown(getConstantRangeFromLVI(A, getCtxI()));
-  }
-
-  /// Helper function to create MDNode for range metadata.
-  static MDNode *
-  getMDNodeForConstantRange(Type *Ty, LLVMContext &Ctx,
-                            const ConstantRange &AssumedConstantRange) {
-    Metadata *LowAndHigh[] = {ConstantAsMetadata::get(ConstantInt::get(
-                                  Ty, AssumedConstantRange.getLower())),
-                              ConstantAsMetadata::get(ConstantInt::get(
-                                  Ty, AssumedConstantRange.getUpper()))};
-    return MDNode::get(Ctx, LowAndHigh);
-  }
-
-  /// Return true if \p Assumed is included in \p KnownRanges.
-  static bool isBetterRange(const ConstantRange &Assumed, MDNode *KnownRanges) {
-
-    if (Assumed.isFullSet())
-      return false;
-
-    if (!KnownRanges)
-      return true;
-
-    // If multiple ranges are annotated in IR, we give up to annotate assumed
-    // range for now.
-
-    // TODO:  If there exists a known range which containts assumed range, we
-    // can say assumed range is better.
-    if (KnownRanges->getNumOperands() > 2)
-      return false;
-
-    ConstantInt *Lower =
-        mdconst::extract<ConstantInt>(KnownRanges->getOperand(0));
-    ConstantInt *Upper =
-        mdconst::extract<ConstantInt>(KnownRanges->getOperand(1));
-
-    ConstantRange Known(Lower->getValue(), Upper->getValue());
-    return Known.contains(Assumed) && Known != Assumed;
-  }
-
-  /// Helper function to set range metadata.
-  static bool
-  setRangeMetadataIfisBetterRange(Instruction *I,
-                                  const ConstantRange &AssumedConstantRange) {
-    auto *OldRangeMD = I->getMetadata(LLVMContext::MD_range);
-    if (isBetterRange(AssumedConstantRange, OldRangeMD)) {
-      if (!AssumedConstantRange.isEmptySet()) {
-        I->setMetadata(LLVMContext::MD_range,
-                       getMDNodeForConstantRange(I->getType(), I->getContext(),
-                                                 AssumedConstantRange));
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /// See AbstractAttribute::manifest()
-  ChangeStatus manifest(Attributor &A) override {
-    ChangeStatus Changed = ChangeStatus::UNCHANGED;
-    ConstantRange AssumedConstantRange = getAssumedConstantRange(A);
-    assert(!AssumedConstantRange.isFullSet() && "Invalid state");
-
-    auto &V = getAssociatedValue();
-    if (!AssumedConstantRange.isEmptySet() &&
-        !AssumedConstantRange.isSingleElement()) {
-      if (Instruction *I = dyn_cast<Instruction>(&V))
-        if (isa<CallInst>(I) || isa<LoadInst>(I))
-          if (setRangeMetadataIfisBetterRange(I, AssumedConstantRange))
-            Changed = ChangeStatus::CHANGED;
-    }
-
-    return Changed;
-  }
-};
-
-struct AAValueConstantRangeArgument final : public AAValueConstantRangeImpl {
-
-  AAValueConstantRangeArgument(const IRPosition &IRP)
-      : AAValueConstantRangeImpl(IRP) {}
-
-  /// See AbstractAttribute::updateImpl(...).
-  ChangeStatus updateImpl(Attributor &A) override {
-    // TODO: Use AAArgumentFromCallSiteArguments
-
-    IntegerRangeState S(getBitWidth());
-    clampCallSiteArgumentStates<AAValueConstantRange, IntegerRangeState>(
-        A, *this, S);
-
-    // TODO: If we know we visited all incoming values, thus no are assumed
-    // dead, we can take the known information from the state T.
-    return clampStateAndIndicateChange<IntegerRangeState>(this->getState(), S);
-  }
-
-  /// See AbstractAttribute::trackStatistics()
-  void trackStatistics() const override {
-    STATS_DECLTRACK_ARG_ATTR(value_range)
-  }
-};
-
-struct AAValueConstantRangeReturned : AAValueConstantRangeImpl {
-  AAValueConstantRangeReturned(const IRPosition &IRP)
-      : AAValueConstantRangeImpl(IRP) {}
-
-  /// See AbstractAttribute::updateImpl(...).
-  ChangeStatus updateImpl(Attributor &A) override {
-    // TODO: Use AAReturnedFromReturnedValues
-
-    // TODO: If we know we visited all returned values, thus no are assumed
-    // dead, we can take the known information from the state T.
-
-    IntegerRangeState S(getBitWidth());
-
-    clampReturnedValueStates<AAValueConstantRange, IntegerRangeState>(A, *this,
-                                                                      S);
-    return clampStateAndIndicateChange<StateType>(this->getState(), S);
-  }
-
-  /// See AbstractAttribute::trackStatistics()
-  void trackStatistics() const override {
-    STATS_DECLTRACK_FNRET_ATTR(value_range)
-  }
-};
-
-struct AAValueConstantRangeFloating : AAValueConstantRangeImpl {
-  AAValueConstantRangeFloating(const IRPosition &IRP)
-      : AAValueConstantRangeImpl(IRP) {}
-
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    AAValueConstantRange::initialize(A);
-    Value &V = getAssociatedValue();
-
-    if (auto *C = dyn_cast<ConstantInt>(&V)) {
-      unionAssumed(ConstantRange(C->getValue()));
-      indicateOptimisticFixpoint();
-      return;
-    }
-
-    if (isa<UndefValue>(&V)) {
-      indicateOptimisticFixpoint();
-      return;
-    }
-
-    if (auto *I = dyn_cast<Instruction>(&V))
-      if (isa<BinaryOperator>(I) || isa<CmpInst>(I)) {
-        Value *LHS = I->getOperand(0);
-        Value *RHS = I->getOperand(1);
-
-        if (LHS->getType()->isIntegerTy() && RHS->getType()->isIntegerTy())
-          return;
-      }
-
-    // If it is a load instruction with range metadata, use it.
-    if (LoadInst *LI = dyn_cast<LoadInst>(&V))
-      if (auto *RangeMD = LI->getMetadata(LLVMContext::MD_range)) {
-        intersectKnown(getConstantRangeFromMetadata(*RangeMD));
-        return;
-      }
-
-    // Otherwise we give up.
-    indicatePessimisticFixpoint();
-
-    LLVM_DEBUG(dbgs() << "[Attributor][AAValueConstantRange] We give up: "
-                      << getAssociatedValue());
-  }
-
-  bool calculateBinaryOperator(Attributor &A, BinaryOperator *BinOp,
-                               IntegerRangeState &T, Instruction *CtxI) {
-    Value *LHS = BinOp->getOperand(0);
-    Value *RHS = BinOp->getOperand(1);
-
-    auto &LHSAA =
-        A.getAAFor<AAValueConstantRange>(*this, IRPosition::value(*LHS));
-    auto LHSAARange = LHSAA.getAssumedConstantRange(A, CtxI);
-
-    auto &RHSAA =
-        A.getAAFor<AAValueConstantRange>(*this, IRPosition::value(*RHS));
-    auto RHSAARange = RHSAA.getAssumedConstantRange(A, CtxI);
-
-    auto AssumedRange = LHSAARange.binaryOp(BinOp->getOpcode(), RHSAARange);
-
-    T.unionAssumed(AssumedRange);
-
-    // TODO: Track a known state too.
-
-    return T.isValidState();
-  }
-
-  bool calculateCmpInst(Attributor &A, CmpInst *CmpI, IntegerRangeState &T,
-                        Instruction *CtxI) {
-    Value *LHS = CmpI->getOperand(0);
-    Value *RHS = CmpI->getOperand(1);
-
-    auto &LHSAA =
-        A.getAAFor<AAValueConstantRange>(*this, IRPosition::value(*LHS));
-    auto &RHSAA =
-        A.getAAFor<AAValueConstantRange>(*this, IRPosition::value(*RHS));
-
-    auto LHSAARange = LHSAA.getAssumedConstantRange(A, CtxI);
-    auto RHSAARange = RHSAA.getAssumedConstantRange(A, CtxI);
-
-    // If one of them is empty set, we can't decide.
-    if (LHSAARange.isEmptySet() || RHSAARange.isEmptySet())
-      return true;
-
-    bool MustTrue = false, MustFalse = false;
-
-    auto AllowedRegion =
-        ConstantRange::makeAllowedICmpRegion(CmpI->getPredicate(), RHSAARange);
-
-    auto SatisfyingRegion = ConstantRange::makeSatisfyingICmpRegion(
-        CmpI->getPredicate(), RHSAARange);
-
-    if (AllowedRegion.intersectWith(LHSAARange).isEmptySet())
-      MustFalse = true;
-
-    if (SatisfyingRegion.contains(LHSAARange))
-      MustTrue = true;
-
-    assert((!MustTrue || !MustFalse) &&
-           "Either MustTrue or MustFalse should be false!");
-
-    if (MustTrue)
-      T.unionAssumed(ConstantRange(APInt(/* numBits */ 1, /* val */ 1)));
-    else if (MustFalse)
-      T.unionAssumed(ConstantRange(APInt(/* numBits */ 1, /* val */ 0)));
-    else
-      T.unionAssumed(ConstantRange(/* BitWidth */ 1, /* isFullSet */ true));
-
-    LLVM_DEBUG(dbgs() << "[AAValueConstantRange] " << *CmpI << " " << LHSAA
-                      << " " << RHSAA << "\n");
-
-    // TODO: Track a known state too.
-    return T.isValidState();
-  }
-
-  /// See AbstractAttribute::updateImpl(...).
-  ChangeStatus updateImpl(Attributor &A) override {
-    Instruction *CtxI = getCtxI();
-    auto VisitValueCB = [&](Value &V, IntegerRangeState &T,
-                            bool Stripped) -> bool {
-      Instruction *I = dyn_cast<Instruction>(&V);
-      if (!I) {
-
-        // If the value is not instruction, we query AA to Attributor.
-        const auto &AA =
-            A.getAAFor<AAValueConstantRange>(*this, IRPosition::value(V));
-
-        // Clamp operator is not used to utilize a program point CtxI.
-        T.unionAssumed(AA.getAssumedConstantRange(A, CtxI));
-
-        return T.isValidState();
-      }
-
-      if (auto *BinOp = dyn_cast<BinaryOperator>(I))
-        return calculateBinaryOperator(A, BinOp, T, CtxI);
-      else if (auto *CmpI = dyn_cast<CmpInst>(I))
-        return calculateCmpInst(A, CmpI, T, CtxI);
-      else {
-        // Give up with other instructions.
-        // TODO: Add other instructions
-
-        T.indicatePessimisticFixpoint();
-        return false;
-      }
-    };
-
-    IntegerRangeState T(getBitWidth());
-
-    if (!genericValueTraversal<AAValueConstantRange, IntegerRangeState>(
-            A, getIRPosition(), *this, T, VisitValueCB))
-      return indicatePessimisticFixpoint();
-
-    return clampStateAndIndicateChange(getState(), T);
-  }
-
-  /// See AbstractAttribute::trackStatistics()
-  void trackStatistics() const override {
-    STATS_DECLTRACK_FLOATING_ATTR(value_range)
-  }
-};
-
-struct AAValueConstantRangeFunction : AAValueConstantRangeImpl {
-  AAValueConstantRangeFunction(const IRPosition &IRP)
-      : AAValueConstantRangeImpl(IRP) {}
-
-  /// See AbstractAttribute::initialize(...).
-  ChangeStatus updateImpl(Attributor &A) override {
-    llvm_unreachable("AAValueConstantRange(Function|CallSite)::updateImpl will "
-                     "not be called");
-  }
-
-  /// See AbstractAttribute::trackStatistics()
-  void trackStatistics() const override { STATS_DECLTRACK_FN_ATTR(value_range) }
-};
-
-struct AAValueConstantRangeCallSite : AAValueConstantRangeFunction {
-  AAValueConstantRangeCallSite(const IRPosition &IRP)
-      : AAValueConstantRangeFunction(IRP) {}
-
-  /// See AbstractAttribute::trackStatistics()
-  void trackStatistics() const override { STATS_DECLTRACK_CS_ATTR(value_range) }
-};
-
-struct AAValueConstantRangeCallSiteReturned : AAValueConstantRangeReturned {
-  AAValueConstantRangeCallSiteReturned(const IRPosition &IRP)
-      : AAValueConstantRangeReturned(IRP) {}
-
-  /// See AbstractAttribute::initialize(...).
-  void initialize(Attributor &A) override {
-    // If it is a load instruction with range metadata, use the metadata.
-    if (CallInst *CI = dyn_cast<CallInst>(&getAssociatedValue()))
-      if (auto *RangeMD = CI->getMetadata(LLVMContext::MD_range))
-        intersectKnown(getConstantRangeFromMetadata(*RangeMD));
-
-    AAValueConstantRangeReturned::initialize(A);
-  }
-
-  /// See AbstractAttribute::trackStatistics()
-  void trackStatistics() const override {
-    STATS_DECLTRACK_CSRET_ATTR(value_range)
-  }
-};
-struct AAValueConstantRangeCallSiteArgument : AAValueConstantRangeFloating {
-  AAValueConstantRangeCallSiteArgument(const IRPosition &IRP)
-      : AAValueConstantRangeFloating(IRP) {}
-
-  /// See AbstractAttribute::trackStatistics()
-  void trackStatistics() const override {
-    STATS_DECLTRACK_CSARG_ATTR(value_range)
-  }
-};
 /// ----------------------------------------------------------------------------
 ///                               Attributor
 /// ----------------------------------------------------------------------------
@@ -6181,13 +5695,6 @@ ChangeStatus Attributor::run(Module &M) {
       BUILD_STAT_NAME(AAIsDead, BasicBlock) += ToBeDeletedBlocks.size();
     }
 
-    STATS_DECL(AAIsDead, Function, "Number of dead functions deleted.");
-    for (Function *Fn : ToBeDeletedFunctions) {
-      Fn->replaceAllUsesWith(UndefValue::get(Fn->getType()));
-      Fn->eraseFromParent();
-      STATS_TRACK(AAIsDead, Function);
-    }
-
     // Identify dead internal functions and delete them. This happens outside
     // the other fixpoint analysis as we might treat potentially dead functions
     // as live to lower the number of iterations. If they happen to be dead, the
@@ -6205,23 +5712,32 @@ ChangeStatus Attributor::run(Module &M) {
         if (!F)
           continue;
 
-        if (!checkForAllCallSites([](AbstractCallSite ACS) { return false; },
-                                  *F, true, nullptr))
+        if (!checkForAllCallSites(
+                [this](AbstractCallSite ACS) {
+                  return ToBeDeletedFunctions.count(
+                      ACS.getInstruction()->getFunction());
+                },
+                *F, true, nullptr))
           continue;
 
-        STATS_TRACK(AAIsDead, Function);
         ToBeDeletedFunctions.insert(F);
-        F->deleteBody();
-        F->replaceAllUsesWith(UndefValue::get(F->getType()));
-        F->eraseFromParent();
         InternalFns[u] = nullptr;
         FoundDeadFn = true;
       }
     }
   }
 
+  STATS_DECL(AAIsDead, Function, "Number of dead functions deleted.");
+  BUILD_STAT_NAME(AAIsDead, Function) += ToBeDeletedFunctions.size();
+
   // Rewrite the functions as requested during manifest.
   ManifestChange = ManifestChange | rewriteFunctionSignatures();
+
+  for (Function *Fn : ToBeDeletedFunctions) {
+    Fn->deleteBody();
+    Fn->replaceAllUsesWith(UndefValue::get(Fn->getType()));
+    Fn->eraseFromParent();
+  }
 
   if (VerifyMaxFixpointIterations &&
       IterationCounter != MaxFixpointIterations) {
@@ -6375,8 +5891,9 @@ ChangeStatus Attributor::rewriteFunctionSignatures() {
     NewFn->getBasicBlockList().splice(NewFn->begin(),
                                       OldFn->getBasicBlockList());
 
-    // Set of all "call-like" instructions that invoke the old function.
-    SmallPtrSet<Instruction *, 8> OldCallSites;
+    // Set of all "call-like" instructions that invoke the old function mapped
+    // to their new replacements.
+    SmallVector<std::pair<CallBase *, CallBase *>, 8> CallSitePairs;
 
     // Callback to create a new "call-like" instruction for a given one.
     auto CallSiteReplacementCreator = [&](AbstractCallSite ACS) {
@@ -6428,7 +5945,6 @@ ChangeStatus Attributor::rewriteFunctionSignatures() {
       }
 
       // Copy over various properties and the new attributes.
-      OldCB->replaceAllUsesWith(NewCB);
       uint64_t W;
       if (OldCB->extractProfTotalWeight(W))
         NewCB->setProfWeight(W);
@@ -6439,10 +5955,7 @@ ChangeStatus Attributor::rewriteFunctionSignatures() {
           Ctx, OldCallAttributeList.getFnAttributes(),
           OldCallAttributeList.getRetAttributes(), NewArgOperandAttributes));
 
-      bool Inserted = OldCallSites.insert(OldCB).second;
-      assert(Inserted && "Call site was old twice!");
-      (void)Inserted;
-
+      CallSitePairs.push_back({OldCB, NewCB});
       return true;
     };
 
@@ -6469,11 +5982,15 @@ ChangeStatus Attributor::rewriteFunctionSignatures() {
     }
 
     // Eliminate the instructions *after* we visited all of them.
-    for (Instruction *OldCallSite : OldCallSites)
-      OldCallSite->eraseFromParent();
+    for (auto &CallSitePair : CallSitePairs) {
+      CallBase &OldCB = *CallSitePair.first;
+      CallBase &NewCB = *CallSitePair.second;
+      OldCB.replaceAllUsesWith(&NewCB);
+      OldCB.eraseFromParent();
+    }
 
-    assert(OldFn->getNumUses() == 0 && "Unexpected leftover uses!");
-    OldFn->eraseFromParent();
+    ToBeDeletedFunctions.insert(OldFn);
+
     Changed = ChangeStatus::CHANGED;
   }
 
@@ -6654,16 +6171,10 @@ void Attributor::identifyDefaultAbstractAttributes(Function &F) {
         return true;
 
       if (!Callee->getReturnType()->isVoidTy() && !CS->use_empty()) {
-
         IRPosition CSRetPos = IRPosition::callsite_returned(CS);
 
         // Call site return values might be dead.
         getOrCreateAAFor<AAIsDead>(CSRetPos);
-
-        // Call site return integer values might be limited by a constant range.
-        if (Callee->getReturnType()->isIntegerTy()) {
-          getOrCreateAAFor<AAValueConstantRange>(CSRetPos);
-        }
       }
 
       for (int i = 0, e = CS.getNumArgOperands(); i < e; i++) {
@@ -6763,21 +6274,11 @@ raw_ostream &llvm::operator<<(raw_ostream &OS, const IRPosition &Pos) {
 }
 
 template <typename base_ty, base_ty BestState, base_ty WorstState>
-raw_ostream &
-llvm::operator<<(raw_ostream &OS,
-                 const IntegerStateBase<base_ty, BestState, WorstState> &S) {
+raw_ostream &llvm::
+operator<<(raw_ostream &OS,
+           const IntegerStateBase<base_ty, BestState, WorstState> &S) {
   return OS << "(" << S.getKnown() << "-" << S.getAssumed() << ")"
             << static_cast<const AbstractState &>(S);
-}
-
-raw_ostream &llvm::operator<<(raw_ostream &OS, const IntegerRangeState &S) {
-  OS << "range-state(" << S.getBitWidth() << ")<";
-  S.getKnown().print(OS);
-  OS << " / ";
-  S.getAssumed().print(OS);
-  OS << ">";
-
-  return OS << static_cast<const AbstractState &>(S);
 }
 
 raw_ostream &llvm::operator<<(raw_ostream &OS, const AbstractState &S) {
@@ -6894,7 +6395,6 @@ const char AANoCapture::ID = 0;
 const char AAValueSimplify::ID = 0;
 const char AAHeapToStack::ID = 0;
 const char AAMemoryBehavior::ID = 0;
-const char AAValueConstantRange::ID = 0;
 
 // Macro magic to create the static generator function for attributes that
 // follow the naming scheme.
@@ -7000,7 +6500,6 @@ CREATE_VALUE_ABSTRACT_ATTRIBUTE_FOR_POSITION(AANoAlias)
 CREATE_VALUE_ABSTRACT_ATTRIBUTE_FOR_POSITION(AADereferenceable)
 CREATE_VALUE_ABSTRACT_ATTRIBUTE_FOR_POSITION(AAAlign)
 CREATE_VALUE_ABSTRACT_ATTRIBUTE_FOR_POSITION(AANoCapture)
-CREATE_VALUE_ABSTRACT_ATTRIBUTE_FOR_POSITION(AAValueConstantRange)
 
 CREATE_ALL_ABSTRACT_ATTRIBUTE_FOR_POSITION(AAValueSimplify)
 CREATE_ALL_ABSTRACT_ATTRIBUTE_FOR_POSITION(AAIsDead)

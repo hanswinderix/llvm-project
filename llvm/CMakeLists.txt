@@ -347,7 +347,13 @@ option(LLVM_ENABLE_LIBPFM "Use libpfm for performance counters if available." ON
 
 option(LLVM_ENABLE_THREADS "Use threads if available." ON)
 
-option(LLVM_ENABLE_ZLIB "Use zlib for compression/decompression if available." ON)
+if(CMAKE_SYSTEM_NAME STREQUAL Windows)
+  set(zlib_DEFAULT "OFF")
+else()
+  set(zlib_DEFAULT "ON")
+endif()
+
+set(LLVM_ENABLE_ZLIB "${zlib_DEFAULT}" CACHE STRING "Use zlib for compression/decompression if available. Can be ON, OFF, or FORCE_ON")
 
 set(LLVM_Z3_INSTALL_DIR "" CACHE STRING "Install directory of the Z3 solver.")
 
@@ -506,6 +512,10 @@ option(LLVM_BUILD_RUNTIME
 option(LLVM_BUILD_EXAMPLES
   "Build the LLVM example programs. If OFF, just generate build targets." OFF)
 option(LLVM_INCLUDE_EXAMPLES "Generate build targets for the LLVM examples" ON)
+
+if(LLVM_BUILD_EXAMPLES)
+  add_definitions(-DBUILD_EXAMPLES)
+endif(LLVM_BUILD_EXAMPLES)
 
 option(LLVM_BUILD_TESTS
   "Build LLVM unit tests. If OFF, just generate build targets." OFF)

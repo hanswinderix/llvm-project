@@ -105,7 +105,6 @@
 #include "llvm/Analysis/MustExecute.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/IR/CallSite.h"
-#include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/PassManager.h"
 
 namespace llvm {
@@ -284,7 +283,7 @@ struct IRPosition {
   Argument *getAssociatedArgument() const;
 
   /// Return true if the position refers to a function interface, that is the
-  /// function scope, the function return, or an argumnt.
+  /// function scope, the function return, or an argument.
   bool isFnInterfaceKind() const {
     switch (getPositionKind()) {
     case IRPosition::IRP_FUNCTION:
@@ -511,7 +510,7 @@ template <> struct DenseMapInfo<IRPosition> {
 ///   - the argument of the callee (IRP_ARGUMENT), if known
 ///   - the callee (IRP_FUNCTION), if known
 ///   - the position the call site argument is associated with if it is not
-///     anchored to the call site, e.g., if it is an arugment then the argument
+///     anchored to the call site, e.g., if it is an argument then the argument
 ///     (IRP_ARGUMENT)
 class SubsumingPositionIterator {
   SmallVector<IRPosition, 4> IRPositions;
@@ -1494,116 +1493,6 @@ private:
   }
 };
 
-/// State for an integer range.
-struct IntegerRangeState : public AbstractState {
-
-  /// Bitwidth of the associated value.
-  uint32_t BitWidth;
-
-  /// State representing assumed range, initially set to empty.
-  ConstantRange Assumed;
-
-  /// State representing known range, initially set to [-inf, inf].
-  ConstantRange Known;
-
-  IntegerRangeState(uint32_t BitWidth)
-      : BitWidth(BitWidth), Assumed(ConstantRange::getEmpty(BitWidth)),
-        Known(ConstantRange::getFull(BitWidth)) {}
-
-  /// Return the worst possible representable state.
-  static ConstantRange getWorstState(uint32_t BitWidth) {
-    return ConstantRange::getFull(BitWidth);
-  }
-
-  /// Return the best possible representable state.
-  static ConstantRange getBestState(uint32_t BitWidth) {
-    return ConstantRange::getEmpty(BitWidth);
-  }
-
-  /// Return associated values' bit width.
-  uint32_t getBitWidth() const { return BitWidth; }
-
-  /// See AbstractState::isValidState()
-  bool isValidState() const override {
-    return BitWidth > 0 && !Assumed.isFullSet();
-  }
-
-  /// See AbstractState::isAtFixpoint()
-  bool isAtFixpoint() const override { return Assumed == Known; }
-
-  /// See AbstractState::indicateOptimisticFixpoint(...)
-  ChangeStatus indicateOptimisticFixpoint() override {
-    Known = Assumed;
-    return ChangeStatus::CHANGED;
-  }
-
-  /// See AbstractState::indicatePessimisticFixpoint(...)
-  ChangeStatus indicatePessimisticFixpoint() override {
-    Assumed = Known;
-    return ChangeStatus::CHANGED;
-  }
-
-  /// Return the known state encoding
-  ConstantRange getKnown() const { return Known; }
-
-  /// Return the assumed state encoding.
-  ConstantRange getAssumed() const { return Assumed; }
-
-  /// Unite assumed range with the passed state.
-  void unionAssumed(const ConstantRange &R) {
-    // Don't loose a known range.
-    Assumed = Assumed.unionWith(R).intersectWith(Known);
-  }
-
-  /// See IntegerRangeState::unionAssumed(..).
-  void unionAssumed(const IntegerRangeState &R) {
-    unionAssumed(R.getAssumed());
-  }
-
-  /// Unite known range with the passed state.
-  void unionKnown(const ConstantRange &R) {
-    // Don't loose a known range.
-    Known = Known.unionWith(R);
-    Assumed = Assumed.unionWith(Known);
-  }
-
-  /// See IntegerRangeState::unionKnown(..).
-  void unionKnown(const IntegerRangeState &R) { unionKnown(R.getKnown()); }
-
-  /// Intersect known range with the passed state.
-  void intersectKnown(const ConstantRange &R) {
-    Assumed = Assumed.intersectWith(R);
-    Known = Known.intersectWith(R);
-  }
-
-  /// See IntegerRangeState::intersectKnown(..).
-  void intersectKnown(const IntegerRangeState &R) {
-    intersectKnown(R.getKnown());
-  }
-
-  /// Equality for IntegerRangeState.
-  bool operator==(const IntegerRangeState &R) const {
-    return getAssumed() == R.getAssumed() && getKnown() == R.getKnown();
-  }
-
-  /// "Clamp" this state with \p R. The result is subtype dependent but it is
-  /// intended that only information assumed in both states will be assumed in
-  /// this one afterwards.
-  IntegerRangeState operator^=(const IntegerRangeState &R) {
-    // NOTE: `^=` operator seems like `intersect` but in this case, we need to
-    // take `union`.
-    unionAssumed(R);
-    return *this;
-  }
-
-  IntegerRangeState operator&=(const IntegerRangeState &R) {
-    // NOTE: `&=` operator seems like `intersect` but in this case, we need to
-    // take `union`.
-    unionKnown(R);
-    unionAssumed(R);
-    return *this;
-  }
-};
 /// Helper struct necessary as the modular build fails if the virtual method
 /// IRAttribute::manifest is defined in the Attributor.cpp.
 struct IRAttributeManifest {
@@ -1797,7 +1686,6 @@ template <typename base_ty, base_ty BestState, base_ty WorstState>
 raw_ostream &
 operator<<(raw_ostream &OS,
            const IntegerStateBase<base_ty, BestState, WorstState> &State);
-raw_ostream &operator<<(raw_ostream &OS, const IntegerRangeState &State);
 ///}
 
 struct AttributorPass : public PassInfoMixin<AttributorPass> {
@@ -2282,7 +2170,7 @@ struct AAAlign : public IRAttribute<
   /// Return assumed alignment.
   unsigned getAssumedAlign() const { return getAssumed(); }
 
-  /// Return known alignemnt.
+  /// Return known alignment.
   unsigned getKnownAlign() const { return getKnown(); }
 
   /// Create an abstract attribute view for the position \p IRP.
@@ -2428,55 +2316,6 @@ struct AAMemoryBehavior
   /// Create an abstract attribute view for the position \p IRP.
   static AAMemoryBehavior &createForPosition(const IRPosition &IRP,
                                              Attributor &A);
-
-  /// Unique ID (due to the unique address)
-  static const char ID;
-};
-
-/// An abstract interface for range value analysis.
-struct AAValueConstantRange : public IntegerRangeState,
-                              public AbstractAttribute,
-                              public IRPosition {
-  AAValueConstantRange(const IRPosition &IRP)
-      : IntegerRangeState(
-            IRP.getAssociatedValue().getType()->getIntegerBitWidth()),
-        IRPosition(IRP) {}
-
-  /// Return an IR position, see struct IRPosition.
-  const IRPosition &getIRPosition() const override { return *this; }
-
-  /// See AbstractAttribute::getState(...).
-  IntegerRangeState &getState() override { return *this; }
-  const AbstractState &getState() const override { return *this; }
-
-  /// Create an abstract attribute view for the position \p IRP.
-  static AAValueConstantRange &createForPosition(const IRPosition &IRP,
-                                                 Attributor &A);
-
-  /// Return an assumed range for the assocaited value a program point \p CtxI.
-  /// If \p I is nullptr, simply return an assumed range.
-  virtual ConstantRange
-  getAssumedConstantRange(Attributor &A,
-                          const Instruction *CtxI = nullptr) const = 0;
-
-  /// Return a known range for the assocaited value at a program point \p CtxI.
-  /// If \p I is nullptr, simply return a known range.
-  virtual ConstantRange
-  getKnownConstantRange(Attributor &A,
-                        const Instruction *CtxI = nullptr) const = 0;
-
-  /// Return an assumed constant for the assocaited value a program point \p
-  /// CtxI.
-  Optional<ConstantInt *>
-  getAssumedConstantInt(Attributor &A, const Instruction *CtxI = nullptr) const {
-    ConstantRange RangeV = getAssumedConstantRange(A, CtxI);
-    if (auto *C = RangeV.getSingleElement())
-      return cast<ConstantInt>(
-          ConstantInt::get(getAssociatedValue().getType(), *C));
-    if (RangeV.isEmptySet())
-      return llvm::None;
-    return nullptr;
-  }
 
   /// Unique ID (due to the unique address)
   static const char ID;

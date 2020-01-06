@@ -714,6 +714,17 @@ internal::Matcher<T> traverse(ast_type_traits::TraversalKind TK,
       .template unconditionalConvertTo<T>();
 }
 
+template <typename T>
+internal::BindableMatcher<T>
+traverse(ast_type_traits::TraversalKind TK,
+         const internal::BindableMatcher<T> &InnerMatcher) {
+  return internal::BindableMatcher<T>(
+      internal::DynTypedMatcher::constructRestrictedWrapper(
+          new internal::TraversalMatcher<T>(TK, InnerMatcher),
+          InnerMatcher.getID().first)
+          .template unconditionalConvertTo<T>());
+}
+
 template <typename... T>
 internal::TraversalWrapper<internal::VariadicOperatorMatcher<T...>>
 traverse(ast_type_traits::TraversalKind TK,
@@ -4341,6 +4352,35 @@ AST_POLYMORPHIC_MATCHER(isConstexpr,
                                                         FunctionDecl,
                                                         IfStmt)) {
   return Node.isConstexpr();
+}
+
+/// Matches selection statements with initializer.
+///
+/// Given:
+/// \code
+///  void foo() {
+///    if (int i = foobar(); i > 0) {}
+///    switch (int i = foobar(); i) {}
+///    for (auto& a = get_range(); auto& x : a) {}
+///  }
+///  void bar() {
+///    if (foobar() > 0) {}
+///    switch (foobar()) {}
+///    for (auto& x : get_range()) {}
+///  }
+/// \endcode
+/// ifStmt(hasInitStatement(anything()))
+///   matches the if statement in foo but not in bar.
+/// switchStmt(hasInitStatement(anything()))
+///   matches the switch statement in foo but not in bar.
+/// cxxForRangeStmt(hasInitStatement(anything()))
+///   matches the range for statement in foo but not in bar.
+AST_POLYMORPHIC_MATCHER_P(hasInitStatement,
+                          AST_POLYMORPHIC_SUPPORTED_TYPES(IfStmt, SwitchStmt,
+                                                          CXXForRangeStmt),
+                          internal::Matcher<Stmt>, InnerMatcher) {
+  const Stmt *Init = Node.getInit();
+  return Init != nullptr && InnerMatcher.matches(*Init, Finder, Builder);
 }
 
 /// Matches the condition expression of an if statement, for loop,

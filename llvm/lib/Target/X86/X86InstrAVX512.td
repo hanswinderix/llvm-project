@@ -7598,7 +7598,7 @@ multiclass avx512_cvtps2pd<bits<8> opc, string OpcodeStr,
 // Truncate Double to Float
 multiclass avx512_cvtpd2ps<bits<8> opc, string OpcodeStr, X86SchedWriteWidths sched> {
   let Predicates = [HasAVX512] in {
-    defm Z : avx512_vcvt_fp<opc, OpcodeStr, v8f32x_info, v8f64_info, X86vfpround, sched.ZMM>,
+    defm Z : avx512_vcvt_fp<opc, OpcodeStr, v8f32x_info, v8f64_info, X86any_vfpround, sched.ZMM>,
              avx512_vcvt_fp_rc<opc, OpcodeStr, v8f32x_info, v8f64_info,
                                X86vfproundRnd, sched.ZMM>, EVEX_V512;
   }
@@ -7606,7 +7606,7 @@ multiclass avx512_cvtpd2ps<bits<8> opc, string OpcodeStr, X86SchedWriteWidths sc
     defm Z128 : avx512_vcvt_fp<opc, OpcodeStr, v4f32x_info, v2f64x_info,
                                null_frag, sched.XMM, "{1to2}", "{x}", f128mem, VK2WM>,
                                EVEX_V128;
-    defm Z256 : avx512_vcvt_fp<opc, OpcodeStr, v4f32x_info, v4f64x_info, X86vfpround,
+    defm Z256 : avx512_vcvt_fp<opc, OpcodeStr, v4f32x_info, v4f64x_info, X86any_vfpround,
                                sched.YMM, "{1to4}", "{y}">, EVEX_V256;
   }
 
@@ -9621,7 +9621,7 @@ defm : AVX512_pmovx_patterns<"VPMOVSX", sext, sext_invec>;
 defm : AVX512_pmovx_patterns<"VPMOVZX", zext, zext_invec>;
 
 // Without BWI we can't do a trunc from v16i16 to v16i8. DAG combine can merge
-// ext+trunc aggresively making it impossible to legalize the DAG to this
+// ext+trunc aggressively making it impossible to legalize the DAG to this
 // pattern directly.
 let Predicates = [HasAVX512, NoBWI] in {
 def: Pat<(v16i8 (trunc (v16i16 VR256X:$src))),

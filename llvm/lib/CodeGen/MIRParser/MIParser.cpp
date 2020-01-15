@@ -545,8 +545,6 @@ private:
   const BasicBlock *getIRBlock(unsigned Slot);
   const BasicBlock *getIRBlock(unsigned Slot, const Function &F);
 
-  const Value *getIRValue(unsigned Slot);
-
   /// Get or create an MCSymbol for a given name.
   MCSymbol *getOrCreateMCSymbol(StringRef Name);
 
@@ -1736,8 +1734,8 @@ static bool getHexUint(const MIToken &Token, APInt &Result) {
   return false;
 }
 
-bool getUnsigned(const MIToken &Token, unsigned &Result,
-                 ErrorCallbackType ErrCB) {
+static bool getUnsigned(const MIToken &Token, unsigned &Result,
+                        ErrorCallbackType ErrCB) {
   if (Token.hasIntegerValue()) {
     const uint64_t Limit = uint64_t(std::numeric_limits<unsigned>::max()) + 1;
     uint64_t Val64 = Token.integerValue().getLimitedValue(Limit);
@@ -3137,10 +3135,6 @@ const BasicBlock *MIParser::getIRBlock(unsigned Slot, const Function &F) {
   DenseMap<unsigned, const BasicBlock *> CustomSlots2BasicBlocks;
   initSlots2BasicBlocks(F, CustomSlots2BasicBlocks);
   return getIRBlockFromSlot(Slot, CustomSlots2BasicBlocks);
-}
-
-const Value *MIParser::getIRValue(unsigned Slot) {
-  return PFS.getIRValue(Slot);
 }
 
 MCSymbol *MIParser::getOrCreateMCSymbol(StringRef Name) {

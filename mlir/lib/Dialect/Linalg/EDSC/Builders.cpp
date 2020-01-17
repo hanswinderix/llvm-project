@@ -87,17 +87,17 @@ operator()(std::function<void(void)> fun) {
   return ValueHandle::null();
 }
 
+namespace mlir {
+namespace edsc {
 template <>
-mlir::edsc::GenericLoopNestRangeBuilder<
-    loop::ForOp>::GenericLoopNestRangeBuilder(ArrayRef<edsc::ValueHandle *> ivs,
-                                              ArrayRef<Value> ranges) {
+GenericLoopNestRangeBuilder<loop::ForOp>::GenericLoopNestRangeBuilder(
+    ArrayRef<edsc::ValueHandle *> ivs, ArrayRef<Value> ranges) {
   builder = std::make_unique<LoopNestRangeBuilder>(ivs, ranges);
 }
 
 template <>
-mlir::edsc::GenericLoopNestRangeBuilder<
-    AffineForOp>::GenericLoopNestRangeBuilder(ArrayRef<ValueHandle *> ivs,
-                                              ArrayRef<Value> ranges) {
+GenericLoopNestRangeBuilder<AffineForOp>::GenericLoopNestRangeBuilder(
+    ArrayRef<ValueHandle *> ivs, ArrayRef<Value> ranges) {
   SmallVector<ValueHandle, 4> lbs;
   SmallVector<ValueHandle, 4> ubs;
   SmallVector<int64_t, 4> steps;
@@ -111,6 +111,8 @@ mlir::edsc::GenericLoopNestRangeBuilder<
   }
   builder = std::make_unique<AffineLoopNestBuilder>(ivs, lbs, ubs, steps);
 }
+} // namespace edsc
+} // namespace mlir
 
 static void getMaxDimIndex(ArrayRef<StructuredIndexed> structuredIndices,
                            unsigned &pos) {
@@ -182,14 +184,16 @@ Operation *mlir::edsc::makeGenericLinalgOp(
                              ? getElementTypeOrSelf(it.value())
                              : it.value().getType());
 
-  assert(op->getRegions().front().empty());
-  op->getRegions().front().push_front(new Block);
-  OpBuilder bb(op->getRegions().front());
-  ScopedContext scope(bb, op->getLoc());
+  assert(op->getNumRegions() == 1);
+  assert(op->getRegion(0).empty());
+  OpBuilder opBuilder(op);
+  ScopedContext scope(opBuilder, op->getLoc());
   BlockHandle b;
   auto handles = makeValueHandles(blockTypes);
-  BlockBuilder(&b, makeHandlePointers(MutableArrayRef<ValueHandle>(handles)))(
+  BlockBuilder(&b, op->getRegion(0),
+               makeHandlePointers(MutableArrayRef<ValueHandle>(handles)))(
       [&] { regionBuilder(b.getBlock()->getArguments()); });
+  assert(op->getRegion(0).getBlocks().size() == 1);
   return op;
 }
 

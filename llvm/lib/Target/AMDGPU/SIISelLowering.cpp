@@ -5687,9 +5687,8 @@ SDValue SITargetLowering::lowerSBuffer(EVT VT, SDLoc DL, SDValue Rsrc,
       auto WidenedOp = DAG.getMemIntrinsicNode(
           AMDGPUISD::SBUFFER_LOAD, DL, DAG.getVTList(WidenedVT), Ops, WidenedVT,
           MF.getMachineMemOperand(MMO, 0, WidenedVT.getStoreSize()));
-      auto Subvector = DAG.getNode(
-          ISD::EXTRACT_SUBVECTOR, DL, VT, WidenedOp,
-          DAG.getConstant(0, DL, getVectorIdxTy(DAG.getDataLayout())));
+      auto Subvector = DAG.getNode(ISD::EXTRACT_SUBVECTOR, DL, VT, WidenedOp,
+                                   DAG.getVectorIdxConstant(0, DL));
       return Subvector;
     }
 
@@ -6743,9 +6742,8 @@ SDValue SITargetLowering::getMemIntrinsicNode(unsigned Opcode, const SDLoc &DL,
   auto NewOp = DAG.getMemIntrinsicNode(Opcode, DL, WidenedVTList, Ops,
                                        WidenedMemVT, MMO);
   if (WidenedVT != VT) {
-    auto Extract = DAG.getNode(
-        ISD::EXTRACT_SUBVECTOR, DL, VT, NewOp,
-        DAG.getConstant(0, DL, getVectorIdxTy(DAG.getDataLayout())));
+    auto Extract = DAG.getNode(ISD::EXTRACT_SUBVECTOR, DL, VT, NewOp,
+                               DAG.getVectorIdxConstant(0, DL));
     NewOp = DAG.getMergeValues({ Extract, SDValue(NewOp.getNode(), 1) }, DL);
   }
   return NewOp;
@@ -7383,7 +7381,8 @@ SDValue SITargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
   SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
   // If there is a possibilty that flat instruction access scratch memory
   // then we need to use the same legalization rules we use for private.
-  if (AS == AMDGPUAS::FLAT_ADDRESS)
+  if (AS == AMDGPUAS::FLAT_ADDRESS &&
+      !Subtarget->hasMultiDwordFlatScratchAddressing())
     AS = MFI->hasFlatScratchInit() ?
          AMDGPUAS::PRIVATE_ADDRESS : AMDGPUAS::GLOBAL_ADDRESS;
 
@@ -7886,7 +7885,8 @@ SDValue SITargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
   SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
   // If there is a possibilty that flat instruction access scratch memory
   // then we need to use the same legalization rules we use for private.
-  if (AS == AMDGPUAS::FLAT_ADDRESS)
+  if (AS == AMDGPUAS::FLAT_ADDRESS &&
+      !Subtarget->hasMultiDwordFlatScratchAddressing())
     AS = MFI->hasFlatScratchInit() ?
          AMDGPUAS::PRIVATE_ADDRESS : AMDGPUAS::GLOBAL_ADDRESS;
 
@@ -9314,10 +9314,9 @@ SDValue SITargetLowering::performExtractVectorEltCombine(
       !isa<ConstantSDNode>(N->getOperand(1))) {
     SDLoc SL(N);
     SDValue Idx = N->getOperand(1);
-    EVT IdxVT = Idx.getValueType();
     SDValue V;
     for (unsigned I = 0, E = VecVT.getVectorNumElements(); I < E; ++I) {
-      SDValue IC = DAG.getConstant(I, SL, IdxVT);
+      SDValue IC = DAG.getVectorIdxConstant(I, SL);
       SDValue Elt = DAG.getNode(ISD::EXTRACT_VECTOR_ELT, SL, EltVT, Vec, IC);
       if (I == 0)
         V = Elt;

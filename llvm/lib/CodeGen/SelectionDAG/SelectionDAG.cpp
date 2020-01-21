@@ -2184,6 +2184,8 @@ SDValue SelectionDAG::GetDemandedBits(SDValue V, const APInt &DemandedBits,
                                       const APInt &DemandedElts) {
   switch (V.getOpcode()) {
   default:
+    return TLI->SimplifyMultipleUseDemandedBits(V, DemandedBits, DemandedElts,
+                                                *this, 0);
     break;
   case ISD::Constant: {
     auto *CV = cast<ConstantSDNode>(V.getNode());
@@ -2194,11 +2196,6 @@ SDValue SelectionDAG::GetDemandedBits(SDValue V, const APInt &DemandedBits,
       return getConstant(NewVal, SDLoc(V), V.getValueType());
     break;
   }
-  case ISD::OR:
-  case ISD::XOR:
-  case ISD::SIGN_EXTEND_INREG:
-    return TLI->SimplifyMultipleUseDemandedBits(V, DemandedBits, DemandedElts,
-                                                *this, 0);
   case ISD::SRL:
     // Only look at single-use SRLs.
     if (!V.getNode()->hasOneUse())
@@ -2227,19 +2224,6 @@ SDValue SelectionDAG::GetDemandedBits(SDValue V, const APInt &DemandedBits,
                                   AndVal))
         return V.getOperand(0);
     }
-    break;
-  }
-  case ISD::ANY_EXTEND: {
-    SDValue Src = V.getOperand(0);
-    unsigned SrcBitWidth = Src.getScalarValueSizeInBits();
-    // Being conservative here - only peek through if we only demand bits in the
-    // non-extended source (even though the extended bits are technically
-    // undef).
-    if (DemandedBits.getActiveBits() > SrcBitWidth)
-      break;
-    APInt SrcDemandedBits = DemandedBits.trunc(SrcBitWidth);
-    if (SDValue DemandedSrc = GetDemandedBits(Src, SrcDemandedBits))
-      return getNode(ISD::ANY_EXTEND, SDLoc(V), V.getValueType(), DemandedSrc);
     break;
   }
   }

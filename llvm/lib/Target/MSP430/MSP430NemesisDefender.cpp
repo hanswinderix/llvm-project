@@ -2698,7 +2698,7 @@ MSP430NemesisDefenderPass::AlignFingerprint(
         FPBBI->IsAligned= true;
 
         if (! FPBBI->IsLoopLatch) {
-          // Align/fix terminating instructions
+          // Align/fix terminating instructions (see paper on how to fix this)
           // Every block in the *aligned* loop region 
           //    either ends with exactly two terminating instructions 
           //    or either contains compensating instructions for two terminating

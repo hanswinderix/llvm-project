@@ -41,10 +41,18 @@ Type SPIRVTypeConverter::getIndexType(MLIRContext *context) {
 // TODO(ravishankarm): This is a utility function that should probably be
 // exposed by the SPIR-V dialect. Keeping it local till the use case arises.
 static Optional<int64_t> getTypeNumBytes(Type t) {
-  if (auto integerType = t.dyn_cast<IntegerType>()) {
-    return integerType.getWidth() / 8;
-  } else if (auto floatType = t.dyn_cast<FloatType>()) {
-    return floatType.getWidth() / 8;
+  if (spirv::SPIRVDialect::isValidScalarType(t)) {
+    auto bitWidth = t.getIntOrFloatBitWidth();
+    // According to the SPIR-V spec:
+    // "There is no physical size or bit pattern defined for values with boolean
+    // type. If they are stored (in conjunction with OpVariable), they can only
+    // be used with logical addressing operations, not physical, and only with
+    // non-externally visible shader Storage Classes: Workgroup, CrossWorkgroup,
+    // Private, Function, Input, and Output."
+    if (bitWidth == 1) {
+      return llvm::None;
+    }
+    return bitWidth / 8;
   } else if (auto memRefType = t.dyn_cast<MemRefType>()) {
     // TODO: Layout should also be controlled by the ABI attributes. For now
     // using the layout from MemRef.
@@ -72,6 +80,19 @@ static Optional<int64_t> getTypeNumBytes(Type t) {
       memrefSize = std::max(memrefSize, shape.value() * strides[shape.index()]);
     }
     return (offset + memrefSize) * elementSize.getValue();
+  } else if (auto tensorType = t.dyn_cast<TensorType>()) {
+    if (!tensorType.hasStaticShape()) {
+      return llvm::None;
+    }
+    auto elementSize = getTypeNumBytes(tensorType.getElementType());
+    if (!elementSize) {
+      return llvm::None;
+    }
+    int64_t size = elementSize.getValue();
+    for (auto shape : tensorType.getShape()) {
+      size *= shape;
+    }
+    return size;
   }
   // TODO: Add size computation for other types.
   return llvm::None;
@@ -123,6 +144,27 @@ static Type convertStdType(Type type) {
     }
   }
 
+  if (auto tensorType = type.dyn_cast<TensorType>()) {
+    // TODO(ravishankarm) : Handle dynamic shapes.
+    if (!tensorType.hasStaticShape()) {
+      return Type();
+    }
+    auto elementType = convertStdType(tensorType.getElementType());
+    if (!elementType) {
+      return Type();
+    }
+    auto elementSize = getTypeNumBytes(elementType);
+    if (!elementSize) {
+      return Type();
+    }
+    auto tensorSize = getTypeNumBytes(tensorType);
+    if (!tensorSize) {
+      return Type();
+    }
+    return spirv::ArrayType::get(elementType,
+                                 tensorSize.getValue() / elementSize.getValue(),
+                                 elementSize.getValue());
+  }
   return Type();
 }
 

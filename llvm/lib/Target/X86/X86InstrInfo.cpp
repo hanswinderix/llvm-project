@@ -2826,11 +2826,11 @@ unsigned X86InstrInfo::insertBranch(MachineBasicBlock &MBB,
   return Count;
 }
 
-bool X86InstrInfo::
-canInsertSelect(const MachineBasicBlock &MBB,
-                ArrayRef<MachineOperand> Cond,
-                unsigned TrueReg, unsigned FalseReg,
-                int &CondCycles, int &TrueCycles, int &FalseCycles) const {
+bool X86InstrInfo::canInsertSelect(const MachineBasicBlock &MBB,
+                                   ArrayRef<MachineOperand> Cond,
+                                   unsigned DstReg, unsigned TrueReg,
+                                   unsigned FalseReg, int &CondCycles,
+                                   int &TrueCycles, int &FalseCycles) const {
   // Not all subtargets have cmov instructions.
   if (!Subtarget.hasCMov())
     return false;
@@ -3189,9 +3189,9 @@ static unsigned getLoadStoreRegOpcode(unsigned Reg,
   }
 }
 
-bool X86InstrInfo::getMemOperandWithOffset(
-    const MachineInstr &MemOp, const MachineOperand *&BaseOp, int64_t &Offset,
-    const TargetRegisterInfo *TRI) const {
+bool X86InstrInfo::getMemOperandsWithOffset(
+    const MachineInstr &MemOp, SmallVectorImpl<const MachineOperand *> &BaseOps,
+    int64_t &Offset, const TargetRegisterInfo *TRI) const {
   const MCInstrDesc &Desc = MemOp.getDesc();
   int MemRefBegin = X86II::getMemoryOperandNo(Desc.TSFlags);
   if (MemRefBegin < 0)
@@ -3199,7 +3199,8 @@ bool X86InstrInfo::getMemOperandWithOffset(
 
   MemRefBegin += X86II::getOperandBias(Desc);
 
-  BaseOp = &MemOp.getOperand(MemRefBegin + X86::AddrBaseReg);
+  const MachineOperand *BaseOp =
+      &MemOp.getOperand(MemRefBegin + X86::AddrBaseReg);
   if (!BaseOp->isReg()) // Can be an MO_FrameIndex
     return false;
 
@@ -3221,6 +3222,7 @@ bool X86InstrInfo::getMemOperandWithOffset(
   if (!BaseOp->isReg())
     return false;
 
+  BaseOps.push_back(BaseOp);
   return true;
 }
 

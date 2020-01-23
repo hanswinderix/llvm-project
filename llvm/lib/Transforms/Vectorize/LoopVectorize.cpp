@@ -2343,7 +2343,7 @@ void InnerLoopVectorizer::vectorizeInterleaveGroup(Instruction *Instr,
       Value *ShuffledMask = Builder.CreateShuffleVector(
           BlockInMaskPart, Undefs, RepMask, "interleaved.mask");
       NewStoreInstr = Builder.CreateMaskedStore(
-          IVec, AddrParts[Part], Group->getAlignment(), ShuffledMask);
+          IVec, AddrParts[Part], Group->getAlign(), ShuffledMask);
     }
     else
       NewStoreInstr = Builder.CreateAlignedStore(IVec, AddrParts[Part],
@@ -2449,8 +2449,8 @@ void InnerLoopVectorizer::vectorizeMemoryInstruction(Instruction *Instr,
         }
         auto *VecPtr = CreateVecPtr(Part, State.get(Addr, {0, 0}));
         if (isMaskRequired)
-          NewSI = Builder.CreateMaskedStore(
-              StoredVal, VecPtr, Alignment.value(), BlockInMaskParts[Part]);
+          NewSI = Builder.CreateMaskedStore(StoredVal, VecPtr, Alignment,
+                                            BlockInMaskParts[Part]);
         else
           NewSI =
               Builder.CreateAlignedStore(StoredVal, VecPtr, Alignment.value());
@@ -6729,7 +6729,7 @@ VPValue *VPRecipeBuilder::createEdgeMask(BasicBlock *Src, BasicBlock *Dst,
   BranchInst *BI = dyn_cast<BranchInst>(Src->getTerminator());
   assert(BI && "Unexpected terminator found");
 
-  if (!BI->isConditional())
+  if (!BI->isConditional() || BI->getSuccessor(0) == BI->getSuccessor(1))
     return EdgeMaskCache[Edge] = SrcMask;
 
   VPValue *EdgeMask = Plan->getVPValue(BI->getCondition());

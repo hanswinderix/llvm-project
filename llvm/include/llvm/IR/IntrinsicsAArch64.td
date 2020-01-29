@@ -1032,6 +1032,13 @@ let TargetPrefix = "aarch64" in {  // All intrinsics start with "llvm.aarch64.".
                  LLVMVectorOfBitcastsToInt<0>],
                 [IntrNoMem]>;
 
+  class SVE2_2VectorArg_Pred_Long_Intrinsic
+    : Intrinsic<[llvm_anyvector_ty],
+                [LLVMScalarOrSameVectorWidth<0, llvm_i1_ty>,
+                 LLVMMatchType<0>,
+                 LLVMSubdivide2VectorType<0>],
+                [IntrNoMem]>;
+
   class SVE2_3VectorArg_Long_Intrinsic
     : Intrinsic<[llvm_anyvector_ty],
                 [LLVMMatchType<0>,
@@ -1079,6 +1086,14 @@ let TargetPrefix = "aarch64" in {  // All intrinsics start with "llvm.aarch64.".
                   [LLVMSubdivide2VectorType<0>, llvm_anyvector_ty,
                    llvm_i32_ty],
                   [IntrNoMem, ImmArg<2>]>;
+
+  class SVE2_3VectorArg_Indexed_Intrinsic
+    : Intrinsic<[llvm_anyvector_ty],
+                [LLVMMatchType<0>,
+                 LLVMSubdivide2VectorType<0>,
+                 LLVMSubdivide2VectorType<0>,
+                 llvm_i64_ty],
+                [IntrNoMem, ImmArg<3>]>;
 
   // NOTE: There is no relationship between these intrinsics beyond an attempt
   // to reuse currently identical class definitions.
@@ -1654,11 +1669,23 @@ def int_aarch64_sve_st1_scatter_scalar_offset : AdvSIMD_ScatterStore_VectorBase_
 // SVE2 - Non-widening pairwise arithmetic
 //
 
+def int_aarch64_sve_addp    : AdvSIMD_Pred2VectorArg_Intrinsic;
 def int_aarch64_sve_faddp   : AdvSIMD_Pred2VectorArg_Intrinsic;
 def int_aarch64_sve_fmaxp   : AdvSIMD_Pred2VectorArg_Intrinsic;
 def int_aarch64_sve_fmaxnmp : AdvSIMD_Pred2VectorArg_Intrinsic;
 def int_aarch64_sve_fminp   : AdvSIMD_Pred2VectorArg_Intrinsic;
 def int_aarch64_sve_fminnmp : AdvSIMD_Pred2VectorArg_Intrinsic;
+def int_aarch64_sve_smaxp   : AdvSIMD_Pred2VectorArg_Intrinsic;
+def int_aarch64_sve_sminp   : AdvSIMD_Pred2VectorArg_Intrinsic;
+def int_aarch64_sve_umaxp   : AdvSIMD_Pred2VectorArg_Intrinsic;
+def int_aarch64_sve_uminp   : AdvSIMD_Pred2VectorArg_Intrinsic;
+
+//
+// SVE2 - Widening pairwise arithmetic
+//
+
+def int_aarch64_sve_sadalp : SVE2_2VectorArg_Pred_Long_Intrinsic;
+def int_aarch64_sve_uadalp : SVE2_2VectorArg_Pred_Long_Intrinsic;
 
 //
 // SVE2 - Floating-point widening multiply-accumulate
@@ -1732,4 +1759,14 @@ def int_aarch64_sve_sqshrunt  : SVE2_2VectorArg_Imm_Narrowing_Intrinsic;
 
 def int_aarch64_sve_sqrshrunb : SVE2_1VectorArg_Imm_Narrowing_Intrinsic;
 def int_aarch64_sve_sqrshrunt : SVE2_2VectorArg_Imm_Narrowing_Intrinsic;
+
+def int_aarch64_sve_smlalb    : SVE2_3VectorArg_Indexed_Intrinsic;
+def int_aarch64_sve_smlalt    : SVE2_3VectorArg_Indexed_Intrinsic;
+def int_aarch64_sve_umlalb    : SVE2_3VectorArg_Indexed_Intrinsic;
+def int_aarch64_sve_umlalt    : SVE2_3VectorArg_Indexed_Intrinsic;
+def int_aarch64_sve_smlslb    : SVE2_3VectorArg_Indexed_Intrinsic;
+def int_aarch64_sve_smlslt    : SVE2_3VectorArg_Indexed_Intrinsic;
+def int_aarch64_sve_umlslb    : SVE2_3VectorArg_Indexed_Intrinsic;
+def int_aarch64_sve_umlslt    : SVE2_3VectorArg_Indexed_Intrinsic;
+
 }

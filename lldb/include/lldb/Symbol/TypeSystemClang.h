@@ -21,10 +21,12 @@
 #include <vector>
 
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/ASTFwd.h"
 #include "clang/AST/TemplateBase.h"
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/SmallVector.h"
 
+#include "Plugins/ExpressionParser/Clang/ClangPersistentVariables.h"
 #include "lldb/Core/ClangForward.h"
 #include "lldb/Expression/ExpressionVariable.h"
 #include "lldb/Symbol/CompilerType.h"
@@ -1006,7 +1008,7 @@ public:
   PersistentExpressionState *GetPersistentExpressionState() override;
 private:
   lldb::TargetWP m_target_wp;
-  std::unique_ptr<PersistentExpressionState>
+  std::unique_ptr<ClangPersistentVariables>
       m_persistent_variables; // These are the persistent variables associated
                               // with this process for the expression parser
   std::unique_ptr<ClangASTSource> m_scratch_ast_source_up;

@@ -150,6 +150,11 @@ def brtarget32 : Operand<OtherVT> {
   let EncoderMethod = "getBranchTarget32OpValue";
 }
 
+def calltarget : Operand<i64> {
+  let EncoderMethod = "getCallTargetOpValue";
+  let DecoderMethod = "DecodeCall";
+}
+
 def simm7Op32 : Operand<i32> {
   let DecoderMethod = "DecodeSIMM7";
 }
@@ -192,7 +197,10 @@ def callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_SPCallSeqStart,
 def callseq_end   : SDNode<"ISD::CALLSEQ_END",   SDT_SPCallSeqEnd,
                            [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
 
-// def SDT_SPCall    : SDTypeProfile<0, -1, [SDTCisVT<0, i64>]>;
+def SDT_SPCall    : SDTypeProfile<0, -1, [SDTCisVT<0, i64>]>;
+def call          : SDNode<"VEISD::CALL", SDT_SPCall,
+                           [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
+                            SDNPVariadic]>;
 
 def retflag       : SDNode<"VEISD::RET_FLAG", SDTNone,
                            [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
@@ -357,6 +365,18 @@ multiclass RRNCm<string opcStr, bits<8>opc,
   RRmrr<opcStr, opc, RC, Ty, RC, Ty, OpNode>,
   RRmir<opcStr, opc, RC, Ty, RC, Ty, immOp, OpNode>,
   RRmiz<opcStr, opc, RC, Ty, RC, Ty, immOp, OpNode>,
+  RRNDmrm<opcStr, opc, RC, Ty, RC, Ty, immOp2>,
+  RRNDmim<opcStr, opc, RC, Ty, RC, Ty, immOp, immOp2>;
+
+// Used by fadd, fsub, and similar floating point instructions
+//   The order of operands are "$sx, $sy, $sz"
+
+multiclass RRFm<string opcStr, bits<8>opc,
+               RegisterClass RC, ValueType Ty, Operand immOp, Operand immOp2,
+               SDPatternOperator OpNode=null_frag> :
+  RRmrr<opcStr, opc, RC, Ty, RC, Ty, OpNode>,
+  RRmir<opcStr, opc, RC, Ty, RC, Ty, immOp, null_frag>,
+  RRmiz<opcStr, opc, RC, Ty, RC, Ty, immOp, null_frag>,
   RRNDmrm<opcStr, opc, RC, Ty, RC, Ty, immOp2>,
   RRNDmim<opcStr, opc, RC, Ty, RC, Ty, immOp, immOp2>;
 
@@ -549,6 +569,11 @@ let cx = 0 in
 defm LEA32 : RMm<"lea", 0x06, I32, i32, simm7Op32, simm32Op32, add>;
 }
 
+let cx = 0, cy = 1, cz = 0, sz = 0, hasSideEffects = 0 in {
+  def LEAasx : RM<
+      0x06, (outs I64:$sx), (ins MEMri:$addr),
+      "lea $sx,$addr", [(set iPTR:$sx, ADDRri:$addr)]>;
+}
 
 // 5.3.2.2. Fixed-Point Arithmetic Operation Instructions
 
@@ -654,6 +679,26 @@ def : Pat<(i32 (srl i32:$src, i32:$val)),
             $src, sub_i32), 32), $val), sub_i32)>;
 
 // 5.3.2.5. Floating-point Arithmetic Operation Instructions
+let cx = 0 in
+defm FAD : RRFm<"fadd.d", 0x4C, I64, f64, simm7Op64, uimm6Op64, fadd>;
+let cx = 1 in
+defm FADS : RRFm<"fadd.s", 0x4C, F32, f32, simm7Op32, uimm6Op32, fadd>;
+
+let cx = 0 in
+defm FSB : RRFm<"fsub.d", 0x5C, I64, f64, simm7Op64, uimm6Op64, fsub>;
+let cx = 1 in
+defm FSBS : RRFm<"fsub.s", 0x5C, F32, f32, simm7Op32, uimm6Op32, fsub>;
+
+let cx = 0 in
+defm FMP : RRFm<"fmul.d", 0x4D, I64, f64, simm7Op64, uimm6Op64, fmul>;
+let cx = 1 in
+defm FMPS : RRFm<"fmul.s", 0x4D, F32, f32, simm7Op32, uimm6Op32, fmul>;
+
+let cx = 0 in
+defm FDV : RRFm<"fdiv.d", 0x5D, I64, f64, simm7Op64, uimm6Op64, fdiv>;
+let cx = 1 in
+defm FDVS : RRFm<"fdiv.s", 0x5D, F32, f32, simm7Op32, uimm6Op32, fdiv>;
+
 // FCP instruction
 let cx = 0 in
 defm FCP : RRm<"fcmp.d", 0x7E, I64, f64, simm7Op64, uimm6Op64>;
@@ -776,6 +821,27 @@ def MONC : RR<
     "monc">;
 
 //===----------------------------------------------------------------------===//
+// Instructions for CodeGenOnly
+//===----------------------------------------------------------------------===//
+
+let isCodeGenOnly = 1 in {
+
+// Call instruction
+let Defs = [SX10], Uses = [SX11], hasDelaySlot = 1, isCall = 1, hasSideEffects = 0 in {
+let cx = 0, sx = 10, cy = 0, sy = 0, cz = 0, sz = 0 in
+def CALL : RM<
+    0x08, (outs), (ins calltarget:$imm32, variable_ops),
+    "bsic %lr, $imm32">;
+// use sz to represent a register
+let cx = 0, sx = 10, cy = 0, sy = 0, cz = 1, imm32 = 0 in
+def CALLr : RM<
+    0x08, (outs), (ins I64:$sz, variable_ops),
+    "bsic %lr, (,$sz)">;
+}
+
+}
+
+//===----------------------------------------------------------------------===//
 // Pattern Matchings
 //===----------------------------------------------------------------------===//
 
@@ -892,6 +958,13 @@ def : Pat<(VElo tglobaladdr:$in), (ANDrm0 (LEAzzi tglobaladdr:$in), 32)>;
 def : Pat<(add (VEhi tglobaladdr:$in1), (VElo tglobaladdr:$in2)),
           (LEASLrzi (ANDrm0 (LEAzzi tglobaladdr:$in2), 32),
                     (tglobaladdr:$in1))>;
+
+// Calls
+def : Pat<(call tglobaladdr:$dst),
+          (CALL tglobaladdr:$dst)>;
+def : Pat<(call i64:$dst),
+          (CALLr i64:$dst)>;
+
 
 //===----------------------------------------------------------------------===//
 // Pseudo Instructions

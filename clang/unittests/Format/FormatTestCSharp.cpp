@@ -409,5 +409,21 @@ TEST_F(FormatTestCSharp, CSharpSpaceAfterCStyleCast) {
   verifyFormat("(int) x / y;", Style);
 }
 
+TEST_F(FormatTestCSharp, CSharpEscapedQuotesInVerbatimStrings) {
+  FormatStyle Style = getGoogleStyle(FormatStyle::LK_CSharp);
+
+  verifyFormat(R"(string str = @"""")", Style);
+  verifyFormat(R"(string str = @"""Hello world""")", Style);
+  verifyFormat(R"(string str = $@"""Hello {friend}""")", Style);
+}
+
+TEST_F(FormatTestCSharp, CSharpQuotesInInterpolatedStrings) {
+  FormatStyle Style = getGoogleStyle(FormatStyle::LK_CSharp);
+
+  verifyFormat(R"(string str1 = $"{null ?? "null"}";)", Style);
+  verifyFormat(R"(string str2 = $"{{{braceCount} braces";)", Style);
+  verifyFormat(R"(string str3 = $"{braceCount}}} braces";)", Style);
+}
+
 } // namespace format
 } // end namespace clang

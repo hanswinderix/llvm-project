@@ -1584,7 +1584,7 @@ void BaseMemOpClusterMutation::clusterNeighboringMemOps(
     SUnit *SUb = MemOpRecords[Idx+1].SU;
     if (TII->shouldClusterMemOps(MemOpRecords[Idx].BaseOps,
                                  MemOpRecords[Idx + 1].BaseOps,
-                                 ClusterLength)) {
+                                 ClusterLength + 1)) {
       if (SUa->NodeNum > SUb->NodeNum)
         std::swap(SUa, SUb);
       if (DAG->addEdge(SUb, SDep(SUa, SDep::Cluster))) {
@@ -3695,7 +3695,7 @@ struct DOTGraphTraits<ScheduleDAGMI*> : public DefaultDOTGraphTraits {
   DOTGraphTraits(bool isSimple = false) : DefaultDOTGraphTraits(isSimple) {}
 
   static std::string getGraphName(const ScheduleDAG *G) {
-    return G->MF.getName();
+    return std::string(G->MF.getName());
   }
 
   static bool renderGraphFromBottomUp() {

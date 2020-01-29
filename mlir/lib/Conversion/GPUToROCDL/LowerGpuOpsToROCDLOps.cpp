@@ -1,6 +1,6 @@
 //===- LowerGpuOpsToROCDLOps.cpp - MLIR GPU to ROCDL lowering passes ------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -58,6 +58,8 @@ public:
                                                  "_ocml_cos_f64");
     patterns.insert<OpToFuncCallLowering<ExpOp>>(converter, "_ocml_exp_f32",
                                                  "_ocml_exp_f64");
+    patterns.insert<OpToFuncCallLowering<TanhOp>>(converter, "_ocml_tanh_f32",
+                                                  "_ocml_tanh_f64");
 
     ConversionTarget target(getContext());
     target.addLegalDialect<LLVM::LLVMDialect, ROCDL::ROCDLDialect>();

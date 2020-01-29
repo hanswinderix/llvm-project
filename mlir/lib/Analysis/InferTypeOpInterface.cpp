@@ -1,6 +1,6 @@
 //===- InferTypeOpInterface.cpp - Infer Type Interfaces ---------*- C++ -*-===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -53,8 +53,8 @@ LogicalResult mlir::detail::verifyInferredResultTypes(Operation *op) {
                                         op->getOperands(), op->getAttrs(),
                                         op->getRegions(), inferedReturnTypes)))
     return failure();
-  SmallVector<Type, 4> resultTypes(op->getResultTypes());
-  if (!retTypeFn.isCompatibleReturnTypes(inferedReturnTypes, resultTypes))
+  if (!retTypeFn.isCompatibleReturnTypes(inferedReturnTypes,
+                                         op->getResultTypes()))
     return op->emitOpError(
         "inferred type incompatible with return type of operation");
   return success();

@@ -54,7 +54,8 @@ bool MSP430RTLInternalizer::internalize(MachineInstr &MI) {
       std::string * N = new std::string();
       N->append(MO->getSymbolName());
       N->append("_");
-      N->append(sllvm::getProtectionDomain(&MI.getMF()->getFunction()));
+      N->append(
+        std::string(sllvm::getProtectionDomain(&MI.getMF()->getFunction())));
       *MO = MachineOperand::CreateES(N->c_str());
       MadeChange = true;
     }

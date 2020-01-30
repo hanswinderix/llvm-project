@@ -2190,7 +2190,7 @@ void MSP430NemesisDefenderPass::CompensateCall(const MachineInstr &Call,
           N->append(MO.getSymbolName());
           break;
         case MachineOperand::MO_GlobalAddress :
-          N->append(MO.getGlobal()->getName());
+          N->append(std::string(MO.getGlobal()->getName()));
           break;
         default:
           llvm_unreachable("Usupported machine operand");
@@ -3074,7 +3074,7 @@ void MSP430NemesisDefenderPass::SecureCall(MachineInstr &Call) {
           N->append(MO.getSymbolName());
           break;
         case MachineOperand::MO_GlobalAddress :
-          N->append(MO.getGlobal()->getName());
+          N->append(std::string(MO.getGlobal()->getName()));
           break;
         default:
           llvm_unreachable("Usupported machine operand");

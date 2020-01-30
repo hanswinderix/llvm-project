@@ -313,7 +313,7 @@ void SancusTransformation::createSancusModuleStruct(Module &M) {
   auto V = ConstantDataArray::getString(M.getContext(), getPMName(&M));
   auto GV = new GlobalVariable(
       M, V->getType(), true, GlobalValue::PrivateLinkage, V);
-  GV->setAlignment(1);
+  GV->setAlignment(MaybeAlign(1));
 
   Constant *IdxList[] = {
     Constant::getNullValue(Type::getInt8Ty(Ctx)),
@@ -340,7 +340,7 @@ void SancusTransformation::createSancusModuleStruct(Module &M) {
   GV->setLinkage(GlobalValue::ExternalLinkage);
   GV->setInitializer(Init);
   GV->setDSOLocal(true);
-  GV->setAlignment(2);
+  GV->setAlignment(MaybeAlign(2));
 }
 
 void SancusTransformation::createDispatch(Module &M) {

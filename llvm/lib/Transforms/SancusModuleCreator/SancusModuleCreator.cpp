@@ -127,7 +127,7 @@ bool SancusModuleCreator::handleFunction(Function& f)
     if (f.getName() == "main")
     {
         f.setSection(".init9");
-        f.setAlignment(2);
+        f.setAlignment(MaybeAlign(2));
         modified = true;
     }
 
@@ -276,7 +276,7 @@ void SancusModuleCreator::createFunctionTable(Module& m)
         Constant* funcFields[] = {ConstantExpr::getBitCast(f, voidPtrTy),
                                   ConstantInt::get(wordTy, ccInfo.argsLength),
                                   ConstantInt::get(wordTy, ccInfo.retRegsUsage)};
-        funcsEls[info.getTableSection(f->getName())]
+        funcsEls[info.getTableSection(std::string(f->getName()))]
             .push_back(ConstantStruct::get(funcInfoTy, funcFields));
     }
 
@@ -290,7 +290,7 @@ void SancusModuleCreator::createFunctionTable(Module& m)
             new GlobalVariable(m, funcsTy, /*isConstant=*/true,
                                GlobalVariable::InternalLinkage, funcsInit);
         table->setSection(it.first);
-        table->setAlignment(2);
+        table->setAlignment(MaybeAlign(2));
     }
 }
 
@@ -317,7 +317,7 @@ Function* SancusModuleCreator::getStub(Function& caller, Function& callee)
     std::string stubAsm;
 
     FunctionCcInfo ccInfo(&callee);
-    std::string calleeName = fixSymbolName(callee.getName());
+    std::string calleeName = fixSymbolName(std::string(callee.getName()));
 
     if (callerInfo.name == calleeInfo.name) // call within SM/unprotected
         stub = &callee;
@@ -459,7 +459,7 @@ SancusModuleInfo SancusModuleCreator::getSancusModuleInfo(const GlobalValue* gv)
             // ignore invalid annotations
             if (!pair.second.empty() && IS_VALID_SM_ANNOTATION(pair.first))
             {
-                info.name    = fixSymbolName(pair.second);
+                info.name    = fixSymbolName(std::string(pair.second));
                 info.isMmio  = (pair.first==SM_MMIO_ENTRY_ANNOTATION);
                 info.isInSm  = true;
                 info.isEntry = (pair.first==SM_ENTRY_ANNOTATION) || info.isMmio;

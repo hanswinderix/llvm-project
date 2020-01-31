@@ -33,6 +33,7 @@ set(LIBS
   MLIRLLVMIR
   MLIRLoopOps
   MLIRNVVMIR
+  MLIROpenMP
   MLIROptMain
   MLIRParser
   MLIRPass
@@ -40,6 +41,7 @@ set(LIBS
   MLIRQuantOps
   MLIRROCDLIR
   MLIRSPIRV
+  MLIRLinalgToSPIRVTransforms
   MLIRStandardToSPIRVTransforms
   MLIRSPIRVTestPasses
   MLIRSPIRVTransforms

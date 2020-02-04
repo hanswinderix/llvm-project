@@ -1320,18 +1320,17 @@ bool SITargetLowering::allowsMisalignedMemoryAccesses(
 }
 
 EVT SITargetLowering::getOptimalMemOpType(
-    uint64_t Size, unsigned DstAlign, unsigned SrcAlign, bool IsMemset,
-    bool ZeroMemset, bool MemcpyStrSrc,
-    const AttributeList &FuncAttributes) const {
+    const MemOp &Op, const AttributeList &FuncAttributes) const {
   // FIXME: Should account for address space here.
 
   // The default fallback uses the private pointer size as a guess for a type to
   // use. Make sure we switch these to 64-bit accesses.
 
-  if (Size >= 16 && DstAlign >= 4) // XXX: Should only do for global
+  if (Op.size() >= 16 &&
+      Op.getDstAlign() >= 4) // XXX: Should only do for global
     return MVT::v4i32;
 
-  if (Size >= 8 && DstAlign >= 4)
+  if (Op.size() >= 8 && Op.getDstAlign() >= 4)
     return MVT::v2i32;
 
   // Use the default.
@@ -2837,7 +2836,7 @@ SDValue SITargetLowering::LowerCall(CallLoweringInfo &CLI,
         // FIXME: We can have better than the minimum byval required alignment.
         Alignment =
             Flags.isByVal()
-                ? MaybeAlign(Flags.getByValAlign())
+                ? Flags.getNonZeroByValAlign()
                 : commonAlignment(Subtarget->getStackAlignment(), Offset);
 
         Offset = Offset + FPDiff;
@@ -2864,11 +2863,12 @@ SDValue SITargetLowering::LowerCall(CallLoweringInfo &CLI,
       if (Outs[i].Flags.isByVal()) {
         SDValue SizeNode =
             DAG.getConstant(Outs[i].Flags.getByValSize(), DL, MVT::i32);
-        SDValue Cpy = DAG.getMemcpy(
-            Chain, DL, DstAddr, Arg, SizeNode, Outs[i].Flags.getByValAlign(),
-            /*isVol = */ false, /*AlwaysInline = */ true,
-            /*isTailCall = */ false, DstInfo,
-            MachinePointerInfo(AMDGPUAS::PRIVATE_ADDRESS));
+        SDValue Cpy =
+            DAG.getMemcpy(Chain, DL, DstAddr, Arg, SizeNode,
+                          Outs[i].Flags.getNonZeroByValAlign(),
+                          /*isVol = */ false, /*AlwaysInline = */ true,
+                          /*isTailCall = */ false, DstInfo,
+                          MachinePointerInfo(AMDGPUAS::PRIVATE_ADDRESS));
 
         MemOpChains.push_back(Cpy);
       } else {
@@ -5670,7 +5670,7 @@ SDValue SITargetLowering::lowerSBuffer(EVT VT, SDLoc DL, SDValue Rsrc,
 
   if (NumElts == 8 || NumElts == 16) {
     NumLoads = NumElts / 4;
-    LoadVT = MVT::v4i32;
+    LoadVT = MVT::getVectorVT(LoadVT.getScalarType(), 4);
   }
 
   SDVTList VTList = DAG.getVTList({LoadVT, MVT::Glue});
@@ -5696,7 +5696,7 @@ SDValue SITargetLowering::lowerSBuffer(EVT VT, SDLoc DL, SDValue Rsrc,
                                         LoadVT, MMO, DAG));
   }
 
-  if (VT == MVT::v8i32 || VT == MVT::v16i32)
+  if (NumElts == 8 || NumElts == 16)
     return DAG.getNode(ISD::CONCAT_VECTORS, DL, VT, Loads);
 
   return Loads[0];
@@ -10587,6 +10587,8 @@ SITargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
         return std::make_pair(RC->getRegister(Idx), RC);
     }
   }
+
+  // FIXME: Returns VS_32 for physical SGPR constraints
   return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
 }
 

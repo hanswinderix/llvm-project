@@ -525,7 +525,6 @@ void ASTWorker::update(ParseInputs Inputs, WantDiagnostics WantDiags) {
           if (RebuildTimes.size() == RebuildTimes.capacity())
             RebuildTimes.erase(RebuildTimes.begin());
           RebuildTimes.push_back(RebuildDuration);
-          Mutex.unlock();
         }
       }
       trace::Span Span("Running main AST callback");

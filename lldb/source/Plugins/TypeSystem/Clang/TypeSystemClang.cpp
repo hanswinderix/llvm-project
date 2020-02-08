@@ -81,6 +81,8 @@ using namespace lldb_private;
 using namespace clang;
 using llvm::StringSwitch;
 
+LLDB_PLUGIN(TypeSystemClang);
+
 namespace {
 #ifdef LLDB_CONFIGURATION_DEBUG
 static void VerifyDecl(clang::Decl *decl) {
@@ -4259,8 +4261,7 @@ TypeSystemClang::GetPointerType(lldb::opaque_compiler_type_t type) {
   if (type) {
     clang::QualType qual_type(GetQualType(type));
 
-    const clang::Type::TypeClass type_class = qual_type->getTypeClass();
-    switch (type_class) {
+    switch (qual_type.getDesugaredType(getASTContext())->getTypeClass()) {
     case clang::Type::ObjCObject:
     case clang::Type::ObjCInterface:
       return GetType(getASTContext().getObjCObjectPointerType(qual_type));

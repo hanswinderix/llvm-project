@@ -1299,10 +1299,10 @@ EVT SITargetLowering::getOptimalMemOpType(
   // use. Make sure we switch these to 64-bit accesses.
 
   if (Op.size() >= 16 &&
-      Op.getDstAlign() >= 4) // XXX: Should only do for global
+      Op.isDstAligned(Align(4))) // XXX: Should only do for global
     return MVT::v4i32;
 
-  if (Op.size() >= 8 && Op.getDstAlign() >= 4)
+  if (Op.size() >= 8 && Op.isDstAligned(Align(4)))
     return MVT::v2i32;
 
   // Use the default.
@@ -3303,7 +3303,7 @@ computeIndirectRegAndOffset(const SIRegisterInfo &TRI,
   if (Offset >= NumElts || Offset < 0)
     return std::make_pair(AMDGPU::sub0, Offset);
 
-  return std::make_pair(AMDGPU::sub0 + Offset, 0);
+  return std::make_pair(AMDGPURegisterInfo::getSubRegFromChannel(Offset), 0);
 }
 
 // Return true if the index is an SGPR and was set.
@@ -5119,6 +5119,9 @@ static SDValue getBuildDwordsVector(SelectionDAG &DAG, SDLoc DL,
   } else if (Elts.size() == 2) {
     Type = MVT::v2f32;
     NumElts = 2;
+  } else if (Elts.size() == 3) {
+    Type = MVT::v3f32;
+    NumElts = 3;
   } else if (Elts.size() <= 4) {
     Type = MVT::v4f32;
     NumElts = 4;
@@ -5404,26 +5407,27 @@ SDValue SITargetLowering::lowerImage(SDValue Op,
     IsA16 = true;
     const MVT VectorVT = VAddrScalarVT == MVT::f16 ? MVT::v2f16 : MVT::v2i16;
     for (unsigned i = AddrIdx; i < (AddrIdx + NumMIVAddrs); ++i) {
-      SDValue AddrLo, AddrHi;
+      SDValue AddrLo;
       // Push back extra arguments.
       if (i < DimIdx) {
         AddrLo = Op.getOperand(i);
       } else {
-        AddrLo = Op.getOperand(i);
         // Dz/dh, dz/dv and the last odd coord are packed with undef. Also,
         // in 1D, derivatives dx/dh and dx/dv are packed with undef.
         if (((i + 1) >= (AddrIdx + NumMIVAddrs)) ||
             ((NumGradients / 2) % 2 == 1 &&
             (i == DimIdx + (NumGradients / 2) - 1 ||
              i == DimIdx + NumGradients - 1))) {
-          AddrHi = DAG.getUNDEF(MVT::f16);
+          AddrLo = Op.getOperand(i);
+          if (AddrLo.getValueType() != MVT::i16)
+            AddrLo = DAG.getBitcast(MVT::i16, Op.getOperand(i));
+          AddrLo = DAG.getNode(ISD::ANY_EXTEND, DL, MVT::i32, AddrLo);
         } else {
-          AddrHi = Op.getOperand(i + 1);
+          AddrLo = DAG.getBuildVector(VectorVT, DL,
+                                      {Op.getOperand(i), Op.getOperand(i + 1)});
           i++;
         }
-        AddrLo = DAG.getNode(ISD::SCALAR_TO_VECTOR, DL, VectorVT,
-                             {AddrLo, AddrHi});
-        AddrLo = DAG.getBitcast(MVT::i32, AddrLo);
+        AddrLo = DAG.getBitcast(MVT::f32, AddrLo);
       }
       VAddrs.push_back(AddrLo);
     }
@@ -7414,19 +7418,12 @@ SDValue SITargetLowering::lowerFastUnsafeFDIV(SDValue Op,
   EVT VT = Op.getValueType();
   const SDNodeFlags Flags = Op->getFlags();
 
-  bool FastUnsafeRcpLegal = DAG.getTarget().Options.UnsafeFPMath ||
-         (Flags.hasAllowReciprocal() &&
-          ((VT == MVT::f32 && hasFP32Denormals(DAG.getMachineFunction())) ||
-            VT == MVT::f16 ||
-            Flags.hasApproximateFuncs()));
+  bool AllowInaccurateRcp = DAG.getTarget().Options.UnsafeFPMath ||
+                            Flags.hasApproximateFuncs();
 
-  // Do rcp optimization only when fast unsafe rcp is legal here.
-  // NOTE: We already performed RCP optimization to insert intrinsics in
-  // AMDGPUCodeGenPrepare. Ideally there should have no opportunity here to
-  // rcp optimization.
-  //   However, there are cases like FREM, which is expended into a sequence
-  // of instructions including FDIV, which may expose new opportunities.
-  if (!FastUnsafeRcpLegal)
+  // Without !fpmath accuracy information, we can't do more because we don't
+  // know exactly whether rcp is accurate enough to meet !fpmath requirement.
+  if (!AllowInaccurateRcp)
     return SDValue();
 
   if (const ConstantFPSDNode *CLHS = dyn_cast<ConstantFPSDNode>(LHS)) {
@@ -10864,7 +10861,15 @@ SITargetLowering::getRegClassFor(MVT VT, bool isDivergent) const {
   return RC;
 }
 
-static bool hasCFUser(const Value *V, SmallPtrSet<const Value *, 16> &Visited) {
+static bool hasCFUser(const Value *V, SmallPtrSet<const Value *, 16> &Visited,
+                      unsigned WaveSize) {
+  // FIXME: We asssume we never cast the mask results of a control flow
+  // intrinsic.
+  // Early exit if the type won't be consistent as a compile time hack.
+  IntegerType *IT = dyn_cast<IntegerType>(V->getType());
+  if (!IT || IT->getBitWidth() != WaveSize)
+    return false;
+
   if (!isa<Instruction>(V))
     return false;
   if (!Visited.insert(V).second)
@@ -10896,7 +10901,7 @@ static bool hasCFUser(const Value *V, SmallPtrSet<const Value *, 16> &Visited) {
         }
       }
     } else {
-      Result = hasCFUser(U, Visited);
+      Result = hasCFUser(U, Visited, WaveSize);
     }
     if (Result)
       break;
@@ -10955,5 +10960,5 @@ bool SITargetLowering::requiresUniformRegister(MachineFunction &MF,
     }
   }
   SmallPtrSet<const Value *, 16> Visited;
-  return hasCFUser(V, Visited);
+  return hasCFUser(V, Visited, Subtarget->getWavefrontSize());
 }

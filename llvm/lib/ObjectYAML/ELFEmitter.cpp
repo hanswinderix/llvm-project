@@ -543,8 +543,8 @@ ELFState<ELFT>::toELFSymbols(ArrayRef<ELFYAML::Symbol> Symbols,
     // If NameIndex, which contains the name offset, is explicitly specified, we
     // use it. This is useful for preparing broken objects. Otherwise, we add
     // the specified Name to the string table builder to get its offset.
-    if (Sym.NameIndex)
-      Symbol.st_name = *Sym.NameIndex;
+    if (Sym.StName)
+      Symbol.st_name = *Sym.StName;
     else if (!Sym.Name.empty())
       Symbol.st_name = Strtab.getOffset(ELFYAML::dropUniqueSuffix(Sym.Name));
 
@@ -1230,12 +1230,9 @@ void ELFState<ELFT>::writeSectionContent(Elf_Shdr &SHeader,
     return;
   }
 
-  for (const ELFYAML::AddrsigSymbol &Sym : *Section.Symbols) {
-    uint64_t Val =
-        Sym.Name ? toSymbolIndex(*Sym.Name, Section.Name, /*IsDynamic=*/false)
-                 : (uint32_t)*Sym.Index;
-    SHeader.sh_size += encodeULEB128(Val, OS);
-  }
+  for (StringRef Sym : *Section.Symbols)
+    SHeader.sh_size += encodeULEB128(
+        toSymbolIndex(Sym, Section.Name, /*IsDynamic=*/false), OS);
 }
 
 template <class ELFT>

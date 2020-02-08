@@ -102,7 +102,6 @@ struct ProgramHeader {
 
 struct Symbol {
   StringRef Name;
-  Optional<uint32_t> NameIndex;
   ELF_STT Type;
   StringRef Section;
   Optional<ELF_SHN> Index;
@@ -110,6 +109,8 @@ struct Symbol {
   llvm::yaml::Hex64 Value;
   llvm::yaml::Hex64 Size;
   Optional<uint8_t> Other;
+
+  Optional<uint32_t> StName;
 };
 
 struct SectionOrType {
@@ -340,19 +341,10 @@ struct VerneedSection : Section {
   }
 };
 
-struct AddrsigSymbol {
-  AddrsigSymbol(StringRef N) : Name(N), Index(None) {}
-  AddrsigSymbol(llvm::yaml::Hex32 Ndx) : Name(None), Index(Ndx) {}
-  AddrsigSymbol() : Name(None), Index(None) {}
-
-  Optional<StringRef> Name;
-  Optional<llvm::yaml::Hex32> Index;
-};
-
 struct AddrsigSection : Section {
   Optional<yaml::BinaryRef> Content;
   Optional<llvm::yaml::Hex64> Size;
-  Optional<std::vector<AddrsigSymbol>> Symbols;
+  Optional<std::vector<YAMLFlowString>> Symbols;
 
   AddrsigSection() : Section(ChunkKind::Addrsig) {}
 
@@ -532,7 +524,6 @@ struct Object {
 } // end namespace ELFYAML
 } // end namespace llvm
 
-LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::ELFYAML::AddrsigSymbol)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::ELFYAML::StackSizeEntry)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::ELFYAML::DynamicEntry)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::ELFYAML::LinkerOption)
@@ -698,10 +689,6 @@ template <> struct MappingTraits<ELFYAML::VerneedEntry> {
 
 template <> struct MappingTraits<ELFYAML::VernauxEntry> {
   static void mapping(IO &IO, ELFYAML::VernauxEntry &E);
-};
-
-template <> struct MappingTraits<ELFYAML::AddrsigSymbol> {
-  static void mapping(IO &IO, ELFYAML::AddrsigSymbol &Sym);
 };
 
 template <> struct MappingTraits<ELFYAML::LinkerOption> {

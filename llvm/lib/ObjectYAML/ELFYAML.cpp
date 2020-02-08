@@ -984,7 +984,7 @@ struct NormalizedOther {
 
 void MappingTraits<ELFYAML::Symbol>::mapping(IO &IO, ELFYAML::Symbol &Symbol) {
   IO.mapOptional("Name", Symbol.Name, StringRef());
-  IO.mapOptional("NameIndex", Symbol.NameIndex);
+  IO.mapOptional("StName", Symbol.StName);
   IO.mapOptional("Type", Symbol.Type, ELFYAML::ELF_STT(0));
   IO.mapOptional("Section", Symbol.Section, StringRef());
   IO.mapOptional("Index", Symbol.Index);
@@ -1006,8 +1006,6 @@ StringRef MappingTraits<ELFYAML::Symbol>::validate(IO &IO,
                                                    ELFYAML::Symbol &Symbol) {
   if (Symbol.Index && Symbol.Section.data())
     return "Index and Section cannot both be specified for Symbol";
-  if (Symbol.NameIndex && !Symbol.Name.empty())
-    return "Name and NameIndex cannot both be specified for Symbol";
   return StringRef();
 }
 
@@ -1383,11 +1381,6 @@ StringRef MappingTraits<std::unique_ptr<ELFYAML::Chunk>>::validate(
 
     if (!Sec->Symbols)
       return {};
-
-    for (const ELFYAML::AddrsigSymbol &AS : *Sec->Symbols)
-      if (AS.Index && AS.Name)
-        return "\"Index\" and \"Name\" cannot be used together when defining a "
-               "symbol";
     return {};
   }
 
@@ -1602,12 +1595,6 @@ void MappingTraits<ELFYAML::Object>::mapping(IO &IO, ELFYAML::Object &Object) {
   IO.mapOptional("Symbols", Object.Symbols);
   IO.mapOptional("DynamicSymbols", Object.DynamicSymbols);
   IO.setContext(nullptr);
-}
-
-void MappingTraits<ELFYAML::AddrsigSymbol>::mapping(IO &IO, ELFYAML::AddrsigSymbol &Sym) {
-  assert(IO.getContext() && "The IO context is not initialized");
-  IO.mapOptional("Name", Sym.Name);
-  IO.mapOptional("Index", Sym.Index);
 }
 
 void MappingTraits<ELFYAML::LinkerOption>::mapping(IO &IO,

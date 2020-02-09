@@ -1727,6 +1727,10 @@ public:
 
   /// Returns the name of the symbol used to emit stack probes or the empty
   /// string if not applicable.
+  virtual bool hasStackProbeSymbol(MachineFunction &MF) const { return false; }
+
+  virtual bool hasInlineStackProbe(MachineFunction &MF) const { return false; }
+
   virtual StringRef getStackProbeSymbolName(MachineFunction &MF) const {
     return "";
   }
@@ -3426,20 +3430,6 @@ public:
   virtual bool isDesirableToCommuteWithShift(const SDNode *N,
                                              CombineLevel Level) const {
     return true;
-  }
-
-  // Return true if it is profitable to combine a BUILD_VECTOR with a stride-pattern
-  // to a shuffle and a truncate.
-  // Example of such a combine:
-  // v4i32 build_vector((extract_elt V, 1),
-  //                    (extract_elt V, 3),
-  //                    (extract_elt V, 5),
-  //                    (extract_elt V, 7))
-  //  -->
-  // v4i32 truncate (bitcast (shuffle<1,u,3,u,5,u,7,u> V, u) to v4i64)
-  virtual bool isDesirableToCombineBuildVectorToShuffleTruncate(
-      ArrayRef<int> ShuffleMask, EVT SrcVT, EVT TruncVT) const {
-    return false;
   }
 
   /// Return true if the target has native support for the specified value type

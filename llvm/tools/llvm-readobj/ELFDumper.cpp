@@ -1087,7 +1087,7 @@ ELFDumper<ELFT>::getSymbolVersionByIndex(uint32_t SymbolVersionIndex,
 
   // Lookup this symbol in the version table.
   if (Error E = LoadVersionMap())
-    return std::move(E);
+    return E;
   if (VersionIndex >= VersionMap.size() || !VersionMap[VersionIndex])
     return createError("SHT_GNU_versym section refers to a version index " +
                        Twine(VersionIndex) + " which is missing");
@@ -5748,12 +5748,16 @@ void LLVMStyle<ELFT>::printSectionHeaders(const ELFO *Obj) {
 
   int SectionIndex = -1;
   ArrayRef<Elf_Shdr> Sections = unwrapOrError(this->FileName, Obj->sections());
-  const ELFObjectFile<ELFT> *ElfObj = this->dumper()->getElfObject();
   std::vector<EnumEntry<unsigned>> FlagsList =
       getSectionFlagsForTarget(Obj->getHeader()->e_machine);
   for (const Elf_Shdr &Sec : Sections) {
-    StringRef Name = unwrapOrError(
-        ElfObj->getFileName(), Obj->getSectionName(&Sec, this->WarningHandler));
+    StringRef Name = "<?>";
+    if (Expected<StringRef> SecNameOrErr =
+            Obj->getSectionName(&Sec, this->WarningHandler))
+      Name = *SecNameOrErr;
+    else
+      this->reportUniqueWarning(SecNameOrErr.takeError());
+
     DictScope SectionD(W, "Section");
     W.printNumber("Index", ++SectionIndex);
     W.printNumber("Name", Name, Sec.sh_name);

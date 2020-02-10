@@ -327,7 +327,7 @@ Error DWARFDebugLine::Prologue::parse(
         PrologueOffset, TotalLength);
   }
   FormParams.Version = DebugLineData.getU16(OffsetPtr);
-  if (getVersion() < 2)
+  if (getVersion() < 2 || getVersion() > 5)
     // Treat this error as unrecoverable - we cannot be sure what any of
     // the data represents including the length field, so cannot skip it or make
     // any reasonable assumptions.
@@ -522,7 +522,7 @@ Expected<const DWARFDebugLine::LineTable *> DWARFDebugLine::getOrParseLineTable(
   if (Pos.second) {
     if (Error Err =
             LT->parse(DebugLineData, &Offset, Ctx, U, RecoverableErrorCallback))
-      return std::move(Err);
+      return Err;
     return LT;
   }
   return LT;

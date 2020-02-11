@@ -6,20 +6,18 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "mlir/Dialect/Linalg/EDSC/Builders.h"
-#include "mlir/Dialect/Linalg/EDSC/Intrinsics.h"
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
-#include "mlir/Dialect/Utils/StructuredOpsUtils.h"
-#include "mlir/EDSC/Builders.h"
-#include "mlir/EDSC/Intrinsics.h"
-#include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/Dialect/AffineOps/EDSC/Intrinsics.h"
+#include "mlir/Dialect/Linalg/EDSC/Intrinsics.h"
+#include "mlir/Dialect/LoopOps/EDSC/Builders.h"
+#include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
+#include "mlir/Dialect/Utils/StructuredOpsUtils.h"
+#include "mlir/IR/AffineExpr.h"
 #include "mlir/Support/Functional.h"
 
 using namespace mlir;
 using namespace mlir::edsc;
 using namespace mlir::edsc::intrinsics;
-using namespace mlir::edsc::ops;
 using namespace mlir::linalg;
 using namespace mlir::loop;
 
@@ -132,18 +130,6 @@ GenericLoopNestRangeBuilder<loop::ParallelOp>::GenericLoopNestRangeBuilder(
 } // namespace edsc
 } // namespace mlir
 
-static void getMaxDimIndex(ArrayRef<StructuredIndexed> structuredIndices,
-                           unsigned &pos) {
-  for (auto sidx : structuredIndices) {
-    for (auto expr : sidx.getExprs()) {
-      expr.walk([&pos](AffineExpr e) {
-        if (auto d = e.dyn_cast<AffineDimExpr>())
-          pos = std::max(pos, d.getPosition());
-      });
-    }
-  }
-}
-
 Operation *mlir::edsc::makeGenericLinalgOp(
     ArrayRef<IteratorType> iteratorTypes, ArrayRef<StructuredIndexed> inputs,
     ArrayRef<StructuredIndexed> outputs,
@@ -157,20 +143,16 @@ Operation *mlir::edsc::makeGenericLinalgOp(
   auto *ctx = builder.getContext();
   unsigned nInputs = inputs.size();
   unsigned nOutputs = outputs.size();
-  unsigned maxPos = 0;
-  getMaxDimIndex(inputs, maxPos);
-  getMaxDimIndex(outputs, maxPos);
-  // maxPos is 0 indexed, need to turn this into a count (i.e. +1)
-  unsigned nDims = maxPos + 1;
 
-  SmallVector<AffineMap, 4> maps;
-  maps.reserve(nInputs + nOutputs);
-  for (auto in : inputs)
-    maps.push_back(
-        AffineMap::get(/*dimCount=*/nDims, /*symbolCount=*/0, in.getExprs()));
-  for (auto out : outputs)
-    maps.push_back(
-        AffineMap::get(/*dimCount=*/nDims, /*symbolCount=*/0, out.getExprs()));
+  SmallVector<SmallVector<AffineExpr, 4>, 4> exprsList;
+  exprsList.reserve(nInputs + nOutputs);
+  for (auto structuredIndexed : inputs)
+    exprsList.emplace_back(structuredIndexed.getExprs().begin(),
+                           structuredIndexed.getExprs().end());
+  for (auto structuredIndexed : outputs)
+    exprsList.emplace_back(structuredIndexed.getExprs().begin(),
+                           structuredIndexed.getExprs().end());
+  auto maps = AffineMap::inferFromExprList(exprsList);
 
   unsigned nViews = nInputs + nOutputs;
   SmallVector<Value, 4> values;
@@ -261,8 +243,8 @@ Operation *mlir::edsc::ops::linalg_pointwise(UnaryPointwiseOpBuilder unaryOp,
 
 Operation *mlir::edsc::ops::linalg_pointwise_tanh(StructuredIndexed I,
                                                   StructuredIndexed O) {
-  using edsc::intrinsics::tanh;
-  UnaryPointwiseOpBuilder unOp([](ValueHandle a) -> Value { return tanh(a); });
+  UnaryPointwiseOpBuilder unOp(
+      [](ValueHandle a) -> Value { return std_tanh(a); });
   return linalg_pointwise(unOp, I, O);
 }
 
@@ -302,9 +284,8 @@ Operation *mlir::edsc::ops::linalg_pointwise_max(StructuredIndexed I1,
                                                  StructuredIndexed I2,
                                                  StructuredIndexed O) {
   BinaryPointwiseOpBuilder binOp([](ValueHandle a, ValueHandle b) -> Value {
-    using edsc::intrinsics::select;
     using edsc::op::operator>;
-    return select(a > b, a, b).getValue();
+    return std_select(a > b, a, b).getValue();
   });
   return linalg_pointwise(binOp, I1, I2, O);
 }

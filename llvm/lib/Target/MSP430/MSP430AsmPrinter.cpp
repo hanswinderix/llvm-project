@@ -60,7 +60,7 @@ namespace {
     bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
                                const char *ExtraCode, raw_ostream &O) override;
 
-    void EmitEndOfAsmFile(Module &) override;
+    void emitEndOfAsmFile(Module &) override;
 
     void emitInstruction(const MachineInstr *MI) override;
 
@@ -87,7 +87,7 @@ static std::string string_replace(
   return newstr;
 }
 
-void MSP430AsmPrinter::EmitEndOfAsmFile(Module &M) {
+void MSP430AsmPrinter::emitEndOfAsmFile(Module &M) {
   if (sllvm::isPM(&M) && (! sllvm::sancus::hasFixedDataSection(&M))) {
     // TODO: Have section names generated
     // TODO: Use OutStreamer.setSection, pushSection or something similar

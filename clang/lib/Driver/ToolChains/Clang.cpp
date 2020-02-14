@@ -463,6 +463,11 @@ static void addExceptionArgs(const ArgList &Args, types::ID InputType,
     }
   }
 
+  // OPT_fignore_exceptions means exception could still be thrown,
+  // but no clean up or catch would happen in current module.
+  // So we do not set EH to false.
+  Args.AddLastArg(CmdArgs, options::OPT_fignore_exceptions);
+
   if (EH)
     CmdArgs.push_back("-fexceptions");
 }
@@ -2580,6 +2585,7 @@ static void RenderFloatingPointOptions(const ToolChain &TC, const Driver &D,
         optID = options::OPT_frounding_math;
         FPExceptionBehavior = "strict";
         FPModel = Val;
+        FPContract = "off";
         TrappingMath = true;
       } else
         D.Diag(diag::err_drv_unsupported_option_argument)
@@ -2767,8 +2773,7 @@ static void RenderFloatingPointOptions(const ToolChain &TC, const Driver &D,
       if (HonorINFs && HonorNaNs &&
         !AssociativeMath && !ReciprocalMath &&
         SignedZeros && TrappingMath && RoundingFPMath &&
-        DenormalFPMath != llvm::DenormalMode::getIEEE() &&
-        FPContract.empty())
+        (FPContract.equals("off") || FPContract.empty()))
         // OK: Current Arg doesn't conflict with -ffp-model=strict
         ;
       else {
@@ -6143,7 +6148,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (Output.getType() == types::TY_Object &&
       Args.hasFlag(options::OPT__SLASH_showFilenames,
                    options::OPT__SLASH_showFilenames_, false)) {
-    C.getJobs().getJobs().back()->setPrintInputFilenames(true);
+    C.getJobs().getJobs().back()->PrintInputFilenames = true;
   }
 
   if (Arg *A = Args.getLastArg(options::OPT_pg))

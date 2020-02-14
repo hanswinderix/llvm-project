@@ -11704,7 +11704,7 @@ static int matchShuffleAsBitRotate(ArrayRef<int> Mask, int NumSubElts) {
   return RotateAmt;
 }
 
-/// Lower shuffle using ISD::ROTL rotations.
+/// Lower shuffle using X86ISD::VROTLI rotations.
 static SDValue lowerShuffleAsBitRotate(const SDLoc &DL, MVT VT, SDValue V1,
                                        ArrayRef<int> Mask,
                                        const X86Subtarget &Subtarget,
@@ -11730,19 +11730,32 @@ static SDValue lowerShuffleAsBitRotate(const SDLoc &DL, MVT VT, SDValue V1,
     if (RotateAmt < 0)
       continue;
 
+    int NumElts = VT.getVectorNumElements();
+    MVT RotateSVT = MVT::getIntegerVT(EltSizeInBits * NumSubElts);
+    MVT RotateVT = MVT::getVectorVT(RotateSVT, NumElts / NumSubElts);
+
     // For pre-SSSE3 targets, if we are shuffling vXi8 elts then ISD::ROTL,
     // expanded to OR(SRL,SHL), will be more efficient, but if they can
     // widen to vXi16 or more then existing lowering should will be better.
     int RotateAmtInBits = RotateAmt * EltSizeInBits;
-    if (!IsLegal && (RotateAmtInBits % 16) == 0)
-      return SDValue();
+    if (!IsLegal) {
+      if ((RotateAmtInBits % 16) == 0)
+        return SDValue();
+      // TODO: Use getTargetVShiftByConstNode.
+      unsigned ShlAmt = RotateAmtInBits;
+      unsigned SrlAmt = RotateSVT.getScalarSizeInBits() - RotateAmtInBits;
+      V1 = DAG.getBitcast(RotateVT, V1);
+      SDValue SHL = DAG.getNode(X86ISD::VSHLI, DL, RotateVT, V1,
+                                DAG.getTargetConstant(ShlAmt, DL, MVT::i8));
+      SDValue SRL = DAG.getNode(X86ISD::VSRLI, DL, RotateVT, V1,
+                                DAG.getTargetConstant(SrlAmt, DL, MVT::i8));
+      SDValue Rot = DAG.getNode(ISD::OR, DL, RotateVT, SHL, SRL);
+      return DAG.getBitcast(VT, Rot);
+    }
 
-    int NumElts = VT.getVectorNumElements();
-    MVT RotateSVT = MVT::getIntegerVT(EltSizeInBits * NumSubElts);
-    MVT RotateVT = MVT::getVectorVT(RotateSVT, NumElts / NumSubElts);
     SDValue Rot =
-        DAG.getNode(ISD::ROTL, DL, RotateVT, DAG.getBitcast(RotateVT, V1),
-                    DAG.getConstant(RotateAmtInBits, DL, RotateVT));
+        DAG.getNode(X86ISD::VROTLI, DL, RotateVT, DAG.getBitcast(RotateVT, V1),
+                    DAG.getTargetConstant(RotateAmtInBits, DL, MVT::i8));
     return DAG.getBitcast(VT, Rot);
   }
 
@@ -21653,8 +21666,14 @@ static SDValue LowerVSETCC(SDValue Op, const X86Subtarget &Subtarget,
     bool IsSignaling = Op.getOpcode() == ISD::STRICT_FSETCCS;
     SDValue Chain = IsStrict ? Op.getOperand(0) : SDValue();
 
+    // If we have a strict compare with a vXi1 result and the input is 128/256
+    // bits we can't use a masked compare unless we have VLX. If we use a wider
+    // compare like we do for non-strict, we might trigger spurious exceptions
+    // from the upper elements. Instead emit a AVX compare and convert to mask.
     unsigned Opc;
-    if (Subtarget.hasAVX512() && VT.getVectorElementType() == MVT::i1) {
+    if (Subtarget.hasAVX512() && VT.getVectorElementType() == MVT::i1 &&
+        (!IsStrict || Subtarget.hasVLX() ||
+         Op0.getSimpleValueType().is512BitVector())) {
       assert(VT.getVectorNumElements() <= 16);
       Opc = IsStrict ? X86ISD::STRICT_CMPM : X86ISD::CMPM;
     } else {
@@ -21750,10 +21769,19 @@ static SDValue LowerVSETCC(SDValue Op, const X86Subtarget &Subtarget,
             Opc, dl, VT, Op0, Op1, DAG.getTargetConstant(SSECC, dl, MVT::i8));
     }
 
-    // If this is SSE/AVX CMPP, bitcast the result back to integer to match the
-    // result type of SETCC. The bitcast is expected to be optimized away
-    // during combining/isel.
-    Cmp = DAG.getBitcast(Op.getSimpleValueType(), Cmp);
+    if (VT.getSizeInBits() > Op.getSimpleValueType().getSizeInBits()) {
+      // We emitted a compare with an XMM/YMM result. Finish converting to a
+      // mask register using a vptestm.
+      EVT CastVT = EVT(VT).changeVectorElementTypeToInteger();
+      Cmp = DAG.getBitcast(CastVT, Cmp);
+      Cmp = DAG.getSetCC(dl, Op.getSimpleValueType(), Cmp,
+                         DAG.getConstant(0, dl, CastVT), ISD::SETNE);
+    } else {
+      // If this is SSE/AVX CMPP, bitcast the result back to integer to match
+      // the result type of SETCC. The bitcast is expected to be optimized
+      // away during combining/isel.
+      Cmp = DAG.getBitcast(Op.getSimpleValueType(), Cmp);
+    }
 
     if (IsStrict)
       return DAG.getMergeValues({Cmp, Chain}, dl);
@@ -32945,7 +32973,7 @@ void X86TargetLowering::computeKnownBitsForTargetNode(const SDValue Op,
     APInt DemandedElt = APInt::getOneBitSet(SrcVT.getVectorNumElements(),
                                             Op.getConstantOperandVal(1));
     Known = DAG.computeKnownBits(Src, DemandedElt, Depth + 1);
-    Known = Known.zextOrTrunc(BitWidth, false);
+    Known = Known.anyextOrTrunc(BitWidth);
     Known.Zero.setBitsFrom(SrcVT.getScalarSizeInBits());
     break;
   }
@@ -33059,7 +33087,7 @@ void X86TargetLowering::computeKnownBitsForTargetNode(const SDValue Op,
       if ((Shift + Length) <= BitWidth) {
         Known = DAG.computeKnownBits(Op0, Depth + 1);
         Known = Known.extractBits(Length, Shift);
-        Known = Known.zextOrTrunc(BitWidth, true /* ExtBitsAreKnownZero */);
+        Known = Known.zextOrTrunc(BitWidth);
       }
     }
     break;
@@ -36484,7 +36512,7 @@ bool X86TargetLowering::SimplifyDemandedBitsForTargetNode(
         return TLO.CombineTo(
             Op, TLO.DAG.getNode(Opc, SDLoc(Op), VT, V, Op.getOperand(1)));
 
-      Known = KnownVec.zext(BitWidth, true);
+      Known = KnownVec.zext(BitWidth);
       return false;
     }
     break;
@@ -43168,18 +43196,20 @@ static unsigned negateFMAOpcode(unsigned Opcode, bool NegMul, bool NegAcc,
 
 /// Do target-specific dag combines on floating point negations.
 static SDValue combineFneg(SDNode *N, SelectionDAG &DAG,
+                           TargetLowering::DAGCombinerInfo &DCI,
                            const X86Subtarget &Subtarget) {
   EVT OrigVT = N->getValueType(0);
   SDValue Arg = isFNEG(DAG, N);
   if (!Arg)
     return SDValue();
 
+  const TargetLowering &TLI = DAG.getTargetLoweringInfo();
   EVT VT = Arg.getValueType();
   EVT SVT = VT.getScalarType();
   SDLoc DL(N);
 
   // Let legalize expand this if it isn't a legal type yet.
-  if (!DAG.getTargetLoweringInfo().isTypeLegal(VT))
+  if (!TLI.isTypeLegal(VT))
     return SDValue();
 
   // If we're negating a FMUL node on a target with FMA, then we can avoid the
@@ -43193,41 +43223,27 @@ static SDValue combineFneg(SDNode *N, SelectionDAG &DAG,
     return DAG.getBitcast(OrigVT, NewNode);
   }
 
-  // If we're negating an FMA node, then we can adjust the
-  // instruction to include the extra negation.
-  if (Arg.hasOneUse() && Subtarget.hasAnyFMA()) {
-    switch (Arg.getOpcode()) {
-    case ISD::FMA:
-    case X86ISD::FMSUB:
-    case X86ISD::FNMADD:
-    case X86ISD::FNMSUB:
-    case X86ISD::FMADD_RND:
-    case X86ISD::FMSUB_RND:
-    case X86ISD::FNMADD_RND:
-    case X86ISD::FNMSUB_RND: {
-      // We can't handle scalar intrinsic node here because it would only
-      // invert one element and not the whole vector. But we could try to handle
-      // a negation of the lower element only.
-      unsigned NewOpcode = negateFMAOpcode(Arg.getOpcode(), false, false, true);
-      return DAG.getBitcast(OrigVT, DAG.getNode(NewOpcode, DL, VT, Arg->ops()));
-    }
-    }
-  }
+  bool CodeSize = DAG.getMachineFunction().getFunction().hasOptSize();
+  bool LegalOperations = !DCI.isBeforeLegalizeOps();
+  if (TLI.getNegatibleCost(Arg, DAG, LegalOperations, CodeSize) !=
+      TargetLowering::NegatibleCost::Expensive)
+    return DAG.getBitcast(
+        OrigVT, TLI.getNegatedExpression(Arg, DAG, LegalOperations, CodeSize));
 
   return SDValue();
 }
 
-char X86TargetLowering::isNegatibleForFree(SDValue Op, SelectionDAG &DAG,
-                                           bool LegalOperations,
-                                           bool ForCodeSize,
-                                           unsigned Depth) const {
+TargetLowering::NegatibleCost
+X86TargetLowering::getNegatibleCost(SDValue Op, SelectionDAG &DAG,
+                                    bool LegalOperations, bool ForCodeSize,
+                                    unsigned Depth) const {
   // fneg patterns are removable even if they have multiple uses.
   if (isFNEG(DAG, Op.getNode(), Depth))
-    return 2;
+    return NegatibleCost::Cheaper;
 
   // Don't recurse exponentially.
   if (Depth > SelectionDAG::MaxRecursionDepth)
-    return 0;
+    return NegatibleCost::Expensive;
 
   EVT VT = Op.getValueType();
   EVT SVT = VT.getScalarType();
@@ -43248,20 +43264,20 @@ char X86TargetLowering::isNegatibleForFree(SDValue Op, SelectionDAG &DAG,
     // This is always negatible for free but we might be able to remove some
     // extra operand negations as well.
     for (int i = 0; i != 3; ++i) {
-      char V = isNegatibleForFree(Op.getOperand(i), DAG, LegalOperations,
-                                  ForCodeSize, Depth + 1);
-      if (V == 2)
+      NegatibleCost V = getNegatibleCost(Op.getOperand(i), DAG, LegalOperations,
+                                         ForCodeSize, Depth + 1);
+      if (V == NegatibleCost::Cheaper)
         return V;
     }
-    return 1;
+    return NegatibleCost::Neutral;
   }
   case X86ISD::FRCP:
-    return isNegatibleForFree(Op.getOperand(0), DAG, LegalOperations,
-                              ForCodeSize, Depth + 1);
+    return getNegatibleCost(Op.getOperand(0), DAG, LegalOperations, ForCodeSize,
+                            Depth + 1);
   }
 
-  return TargetLowering::isNegatibleForFree(Op, DAG, LegalOperations,
-                                            ForCodeSize, Depth);
+  return TargetLowering::getNegatibleCost(Op, DAG, LegalOperations, ForCodeSize,
+                                          Depth);
 }
 
 SDValue X86TargetLowering::getNegatedExpression(SDValue Op, SelectionDAG &DAG,
@@ -43293,9 +43309,9 @@ SDValue X86TargetLowering::getNegatedExpression(SDValue Op, SelectionDAG &DAG,
     // extra operand negations as well.
     SmallVector<SDValue, 4> NewOps(Op.getNumOperands(), SDValue());
     for (int i = 0; i != 3; ++i) {
-      char V = isNegatibleForFree(Op.getOperand(i), DAG, LegalOperations,
-                                  ForCodeSize, Depth + 1);
-      if (V == 2)
+      NegatibleCost V = getNegatibleCost(Op.getOperand(i), DAG, LegalOperations,
+                                         ForCodeSize, Depth + 1);
+      if (V == NegatibleCost::Cheaper)
         NewOps[i] = getNegatedExpression(Op.getOperand(i), DAG, LegalOperations,
                                          ForCodeSize, Depth + 1);
     }
@@ -43392,7 +43408,7 @@ static SDValue combineXor(SDNode *N, SelectionDAG &DAG,
   if (SDValue FPLogic = convertIntLogicToFPLogic(N, DAG, Subtarget))
     return FPLogic;
 
-  return combineFneg(N, DAG, Subtarget);
+  return combineFneg(N, DAG, DCI, Subtarget);
 }
 
 static SDValue combineBEXTR(SDNode *N, SelectionDAG &DAG,
@@ -43497,6 +43513,7 @@ static SDValue combineFAndn(SDNode *N, SelectionDAG &DAG,
 
 /// Do target-specific dag combines on X86ISD::FOR and X86ISD::FXOR nodes.
 static SDValue combineFOr(SDNode *N, SelectionDAG &DAG,
+                          TargetLowering::DAGCombinerInfo &DCI,
                           const X86Subtarget &Subtarget) {
   assert(N->getOpcode() == X86ISD::FOR || N->getOpcode() == X86ISD::FXOR);
 
@@ -43508,7 +43525,7 @@ static SDValue combineFOr(SDNode *N, SelectionDAG &DAG,
   if (isNullFPScalarOrVectorConst(N->getOperand(1)))
     return N->getOperand(0);
 
-  if (SDValue NewVal = combineFneg(N, DAG, Subtarget))
+  if (SDValue NewVal = combineFneg(N, DAG, DCI, Subtarget))
     return NewVal;
 
   return lowerX86FPLogicOp(N, DAG, Subtarget);
@@ -44154,7 +44171,8 @@ static SDValue combineFMA(SDNode *N, SelectionDAG &DAG,
   auto invertIfNegative = [&DAG, &TLI, &DCI](SDValue &V) {
     bool CodeSize = DAG.getMachineFunction().getFunction().hasOptSize();
     bool LegalOperations = !DCI.isBeforeLegalizeOps();
-    if (TLI.isNegatibleForFree(V, DAG, LegalOperations, CodeSize) == 2) {
+    if (TLI.getNegatibleCost(V, DAG, LegalOperations, CodeSize) ==
+        TargetLowering::NegatibleCost::Cheaper) {
       V = TLI.getNegatedExpression(V, DAG, LegalOperations, CodeSize);
       return true;
     }
@@ -44163,7 +44181,8 @@ static SDValue combineFMA(SDNode *N, SelectionDAG &DAG,
     if (V.getOpcode() == ISD::EXTRACT_VECTOR_ELT &&
         isNullConstant(V.getOperand(1))) {
       SDValue Vec = V.getOperand(0);
-      if (TLI.isNegatibleForFree(Vec, DAG, LegalOperations, CodeSize) == 2) {
+      if (TLI.getNegatibleCost(Vec, DAG, LegalOperations, CodeSize) ==
+          TargetLowering::NegatibleCost::Cheaper) {
         SDValue NegVal =
             TLI.getNegatedExpression(Vec, DAG, LegalOperations, CodeSize);
         V = DAG.getNode(ISD::EXTRACT_VECTOR_ELT, SDLoc(V), V.getValueType(),
@@ -44209,7 +44228,8 @@ static SDValue combineFMADDSUB(SDNode *N, SelectionDAG &DAG,
   bool LegalOperations = !DCI.isBeforeLegalizeOps();
 
   SDValue N2 = N->getOperand(2);
-  if (TLI.isNegatibleForFree(N2, DAG, LegalOperations, CodeSize) != 2)
+  if (TLI.getNegatibleCost(N2, DAG, LegalOperations, CodeSize) !=
+      TargetLowering::NegatibleCost::Cheaper)
     return SDValue();
 
   SDValue NegN2 = TLI.getNegatedExpression(N2, DAG, LegalOperations, CodeSize);
@@ -46669,14 +46689,14 @@ SDValue X86TargetLowering::PerformDAGCombine(SDNode *N,
     return combineUIntToFP(N, DAG, Subtarget);
   case ISD::FADD:
   case ISD::FSUB:           return combineFaddFsub(N, DAG, Subtarget);
-  case ISD::FNEG:           return combineFneg(N, DAG, Subtarget);
+  case ISD::FNEG:           return combineFneg(N, DAG, DCI, Subtarget);
   case ISD::TRUNCATE:       return combineTruncate(N, DAG, Subtarget);
   case X86ISD::VTRUNC:      return combineVTRUNC(N, DAG);
   case X86ISD::ANDNP:       return combineAndnp(N, DAG, DCI, Subtarget);
   case X86ISD::FAND:        return combineFAnd(N, DAG, Subtarget);
   case X86ISD::FANDN:       return combineFAndn(N, DAG, Subtarget);
   case X86ISD::FXOR:
-  case X86ISD::FOR:         return combineFOr(N, DAG, Subtarget);
+  case X86ISD::FOR:         return combineFOr(N, DAG, DCI, Subtarget);
   case X86ISD::FMIN:
   case X86ISD::FMAX:        return combineFMinFMax(N, DAG);
   case ISD::FMINNUM:

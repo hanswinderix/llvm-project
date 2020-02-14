@@ -481,7 +481,7 @@ TEST(CompletionTest, Kinds) {
               AllOf(Has("function", CompletionItemKind::Function),
                     Has("variable", CompletionItemKind::Variable),
                     Has("int", CompletionItemKind::Keyword),
-                    Has("Struct", CompletionItemKind::Class),
+                    Has("Struct", CompletionItemKind::Struct),
                     Has("MACRO", CompletionItemKind::Text),
                     Has("indexFunction", CompletionItemKind::Function),
                     Has("indexVariable", CompletionItemKind::Variable),
@@ -529,6 +529,17 @@ TEST(CompletionTest, Kinds) {
           AllOf(Named("complete_variable"), Kind(CompletionItemKind::Variable)),
           AllOf(Named("complete_static_member"),
                 Kind(CompletionItemKind::Property))));
+
+   Results = completions(
+      R"cpp(
+        enum Color {
+          Red
+        };
+        Color u = ^
+      )cpp");
+   EXPECT_THAT(Results.Completions,
+               Contains(
+                   AllOf(Named("Red"), Kind(CompletionItemKind::EnumMember))));
 }
 
 TEST(CompletionTest, NoDuplicates) {
@@ -1627,6 +1638,7 @@ TEST(CompletionTest, Render) {
   Include.Header = "\"foo.h\"";
   C.Kind = CompletionItemKind::Method;
   C.Score.Total = 1.0;
+  C.Score.ExcludingName = .5;
   C.Origin = SymbolOrigin::AST | SymbolOrigin::Static;
 
   CodeCompleteOptions Opts;
@@ -1644,6 +1656,7 @@ TEST(CompletionTest, Render) {
   EXPECT_THAT(R.additionalTextEdits, IsEmpty());
   EXPECT_EQ(R.sortText, sortText(1.0, "x"));
   EXPECT_FALSE(R.deprecated);
+  EXPECT_EQ(R.score, .5f);
 
   Opts.EnableSnippets = true;
   R = C.render(Opts);

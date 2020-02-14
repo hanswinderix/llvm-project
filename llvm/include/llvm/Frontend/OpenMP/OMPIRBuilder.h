@@ -34,6 +34,9 @@ public:
   /// before any other method and only once!
   void initialize();
 
+  /// Finalize the underlying module, e.g., by outlining regions.
+  void finalize();
+
   /// Add attributes known for \p FnID to \p Fn.
   void addAttributes(omp::RuntimeFunction FnID, Function &Fn);
 
@@ -168,10 +171,21 @@ public:
                  Value *IfCondition, Value *NumThreads,
                  omp::ProcBindKind ProcBind, bool IsCancellable);
 
+
   /// Generator for '#omp flush'
   ///
   /// \param Loc The location where the flush directive was encountered
   void CreateFlush(const LocationDescription &Loc);
+
+  /// Generator for '#omp taskwait'
+  ///
+  /// \param Loc The location where the taskwait directive was encountered.
+  void CreateTaskwait(const LocationDescription& Loc);
+
+  /// Generator for '#omp taskyield'
+  ///
+  /// \param Loc The location where the taskyield directive was encountered.
+  void CreateTaskyield(const LocationDescription& Loc);
 
   ///}
 
@@ -238,6 +252,16 @@ private:
            FinalizationStack.back().DK == DK;
   }
 
+  /// Generate a taskwait runtime call.
+  ///
+  /// \param Loc The location at which the request originated and is fulfilled.
+  void emitTaskwaitImpl(const LocationDescription &Loc);
+
+  /// Generate a taskyield runtime call.
+  ///
+  /// \param Loc The location at which the request originated and is fulfilled.
+  void emitTaskyieldImpl(const LocationDescription &Loc);
+
   /// Return the current thread ID.
   ///
   /// \param Ident The ident (ident_t*) describing the query origin.
@@ -254,6 +278,20 @@ private:
 
   /// Map to remember existing ident_t*.
   DenseMap<std::pair<Constant *, uint64_t>, GlobalVariable *> IdentMap;
+
+  /// Helper that contains information about regions we need to outline
+  /// during finalization.
+  struct OutlineInfo {
+    SmallVector<BasicBlock *, 32> Blocks;
+    using PostOutlineCBTy = std::function<void(Function &)>;
+    PostOutlineCBTy PostOutlineCB;
+  };
+
+  /// Collection of regions that need to be outlined during finalization.
+  SmallVector<OutlineInfo, 16> OutlineInfos;
+
+  /// Add a new region that will be outlined later.
+  void addOutlineInfo(OutlineInfo &&OI) { OutlineInfos.emplace_back(OI); }
 };
 
 } // end namespace llvm

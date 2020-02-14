@@ -62,7 +62,7 @@ namespace {
 
     void EmitEndOfAsmFile(Module &) override;
 
-    void EmitInstruction(const MachineInstr *MI) override;
+    void emitInstruction(const MachineInstr *MI) override;
 
     void EmitInterruptVectorSection(MachineFunction &ISR);
   };
@@ -213,7 +213,7 @@ bool MSP430AsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
 }
 
 //===----------------------------------------------------------------------===//
-void MSP430AsmPrinter::EmitInstruction(const MachineInstr *MI) {
+void MSP430AsmPrinter::emitInstruction(const MachineInstr *MI) {
   MSP430MCInstLower MCInstLowering(OutContext, *this);
 
   MCInst TmpInst;
@@ -245,7 +245,7 @@ bool MSP430AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   }
 
   SetupMachineFunction(MF);
-  EmitFunctionBody();
+  emitFunctionBody();
   return false;
 }
 

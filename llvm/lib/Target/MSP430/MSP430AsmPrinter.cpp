@@ -91,40 +91,40 @@ void MSP430AsmPrinter::emitEndOfAsmFile(Module &M) {
   if (sllvm::isPM(&M) && (! sllvm::sancus::hasFixedDataSection(&M))) {
     // TODO: Have section names generated
     // TODO: Use OutStreamer.setSection, pushSection or something similar
-    OutStreamer->EmitRawText(
+    OutStreamer->emitRawText(
         "\t.section\t.sllvm.text." + sllvm::getPMName(&M) + ",\"ax\",@progbits");
     // TOOD: Hide template expansion functionality in sllvm::sancus module
-    //   Example:  OutStreamer->EmitRawText(asm_mpyi(sllvm::getPMName(&M));
-    OutStreamer->EmitRawText(string_replace(
+    //   Example:  OutStreamer->emitRawText(asm_mpyi(sllvm::getPMName(&M));
+    OutStreamer->emitRawText(string_replace(
         sllvm::sancus::asm_eenter, "<pm>", sllvm::getPMName(&M)).c_str());
-    OutStreamer->EmitRawText(string_replace(
+    OutStreamer->emitRawText(string_replace(
         sllvm::sancus::asm_eexit, "<pm>", sllvm::getPMName(&M)).c_str());
-    OutStreamer->EmitRawText(string_replace(
+    OutStreamer->emitRawText(string_replace(
           sllvm::sancus::asm_excall, "<pm>", sllvm::getPMName(&M)).c_str());
-    OutStreamer->EmitRawText(string_replace(
+    OutStreamer->emitRawText(string_replace(
         sllvm::sancus::asm_ereturn, "<pm>", sllvm::getPMName(&M)).c_str());
-    OutStreamer->EmitRawText(string_replace(
+    OutStreamer->emitRawText(string_replace(
           sllvm::sancus::asm_attest, "<pm>", sllvm::getPMName(&M)).c_str());
-    OutStreamer->EmitRawText(string_replace(
+    OutStreamer->emitRawText(string_replace(
           sllvm::sancus::asm_reti, "<pm>", sllvm::getPMName(&M)).c_str());
 
-    OutStreamer->EmitRawText(string_replace(
+    OutStreamer->emitRawText(string_replace(
           sllvm::sancus::asm_mpyi, "<pm>", sllvm::getPMName(&M)).c_str());
-    OutStreamer->EmitRawText(string_replace(
+    OutStreamer->emitRawText(string_replace(
           sllvm::sancus::asm_divu, "<pm>", sllvm::getPMName(&M)).c_str());
-    OutStreamer->EmitRawText(string_replace(
+    OutStreamer->emitRawText(string_replace(
           sllvm::sancus::asm_divumodhi4, "<pm>", sllvm::getPMName(&M)).c_str());
-    OutStreamer->EmitRawText(string_replace(
+    OutStreamer->emitRawText(string_replace(
           sllvm::sancus::asm_remi, "<pm>", sllvm::getPMName(&M)).c_str());
-    OutStreamer->EmitRawText(string_replace(
+    OutStreamer->emitRawText(string_replace(
           sllvm::sancus::asm_divi, "<pm>", sllvm::getPMName(&M)).c_str());
 
-    OutStreamer->EmitRawText(string_replace(
+    OutStreamer->emitRawText(string_replace(
           sllvm::sancus::asm_aliases, "<pm>", sllvm::getPMName(&M)).c_str());
 
     // TODO: Use OutStreamer.setSection, pushSection or something similar
-    OutStreamer->EmitRawText("\t.text");
-    //OutStreamer->EmitRawText(sllvm::sancus::asm_protect);
+    OutStreamer->emitRawText("\t.text");
+    //OutStreamer->emitRawText(sllvm::sancus::asm_protect);
   }
 }
 

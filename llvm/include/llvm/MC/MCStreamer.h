@@ -399,7 +399,7 @@ public:
     --I;
     MCSectionSubPair NewSection = I->first;
 
-    if (OldSection != NewSection)
+    if (NewSection.first && OldSection != NewSection)
       ChangeSection(NewSection.first, NewSection.second);
     SectionStack.pop_back();
     return true;
@@ -802,12 +802,6 @@ public:
   /// \param Value - The value to use when filling bytes.
   virtual void emitValueToOffset(const MCExpr *Offset, unsigned char Value,
                                  SMLoc Loc);
-
-  virtual void
-  EmitCodePaddingBasicBlockStart(const MCCodePaddingContext &Context) {}
-
-  virtual void
-  EmitCodePaddingBasicBlockEnd(const MCCodePaddingContext &Context) {}
 
   /// @}
 

@@ -1948,7 +1948,7 @@ static ParseResult parseSelectOp(OpAsmParser &parser, OperationState &result) {
     return parser.emitError(parser.getNameLoc(),
                             "expected type with valid i1 shape");
 
-  SmallVector<Type, 3> types = {i1Type, type, type};
+  std::array<Type, 3> types = {i1Type, type, type};
   return failure(parser.resolveOperands(ops, types, parser.getNameLoc(),
                                         result.operands) ||
                  parser.addTypeToList(type, result.types));
@@ -2597,7 +2597,7 @@ static void print(OpAsmPrinter &p, SubViewOp op) {
   p << op.getOperationName() << ' ' << op.getOperand(0) << '[' << op.offsets()
     << "][" << op.sizes() << "][" << op.strides() << ']';
 
-  SmallVector<StringRef, 1> elidedAttrs = {
+  std::array<StringRef, 1> elidedAttrs = {
       SubViewOp::getOperandSegmentSizeAttr()};
   p.printOptionalAttrDict(op.getAttrs(), elidedAttrs);
   p << " : " << op.getOperand(0).getType() << " to " << op.getType();
@@ -2761,6 +2761,17 @@ SubViewOp::getStaticStrides(SmallVectorImpl<int64_t> &staticStrides) {
       return failure();
     staticStrides[resultStride.index()] = resultStride.value() / baseStride;
   }
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// AssumeAlignmentOp
+//===----------------------------------------------------------------------===//
+
+static LogicalResult verify(AssumeAlignmentOp op) {
+  unsigned alignment = op.alignment().getZExtValue();
+  if (!llvm::isPowerOf2_32(alignment))
+    return op.emitOpError("alignment must be power of 2");
   return success();
 }
 

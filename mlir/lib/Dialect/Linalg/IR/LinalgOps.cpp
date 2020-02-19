@@ -241,7 +241,8 @@ template <typename GenericOpType>
 static LogicalResult verifyFuncArgs(GenericOpType op, FunctionType funType);
 
 template <typename GenericOpType>
-LogicalResult verifyFuncArgsGeneric(GenericOpType op, FunctionType funType) {
+static LogicalResult verifyFuncArgsGeneric(GenericOpType op,
+                                           FunctionType funType) {
   auto res = verifyFuncArgs(op, funType);
   if (failed(res))
     return res;
@@ -360,11 +361,10 @@ static LogicalResult verifyGenericOp(GenericOpType op) {
       if (!cst || cst.getValue() != 0)
         return op.emitOpError("expected indexing_map #")
                << idx << " to be 0 to match 0-D view: " << view;
-    }
-
-    if (m.getNumResults() != view.getRank())
+    } else if (m.getNumResults() != view.getRank()) {
       return op.emitOpError("expected indexing_map #")
              << idx << " results to match view rank: " << view;
+    }
   }
 
   auto concatMap = concatAffineMaps(indexingMaps);

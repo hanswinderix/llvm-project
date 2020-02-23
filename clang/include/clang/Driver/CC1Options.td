@@ -284,8 +284,6 @@ def new_struct_path_tbaa : Flag<["-"], "new-struct-path-tbaa">,
   HelpText<"Enable enhanced struct-path aware Type Based Alias Analysis">;
 def masm_verbose : Flag<["-"], "masm-verbose">,
   HelpText<"Generate verbose assembly output">;
-def mcode_model : Separate<["-"], "mcode-model">,
-  HelpText<"The code model to use">, Values<"tiny,small,kernel,medium,large">;
 def mdebug_pass : Separate<["-"], "mdebug-pass">,
   HelpText<"Enable additional debug output">;
 def mframe_pointer_EQ : Joined<["-"], "mframe-pointer=">,
@@ -390,6 +388,8 @@ def flto_visibility_public_std:
 def flto_unit: Flag<["-"], "flto-unit">,
     HelpText<"Emit IR to support LTO unit features (CFI, whole program vtable opt)">;
 def fno_lto_unit: Flag<["-"], "fno-lto-unit">;
+def femit_debug_entry_values : Flag<["-"], "femit-debug-entry-values">,
+    HelpText<"Enables debug info about call site parameter's entry values">;
 def fdebug_pass_manager : Flag<["-"], "fdebug-pass-manager">,
     HelpText<"Prints debug information for the new pass manager">;
 def fno_debug_pass_manager : Flag<["-"], "fno-debug-pass-manager">,

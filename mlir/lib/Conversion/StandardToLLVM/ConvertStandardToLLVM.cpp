@@ -15,7 +15,7 @@
 #include "mlir/ADT/TypeSwitch.h"
 #include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVMPass.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
-#include "mlir/Dialect/StandardOps/Ops.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Module.h"
@@ -826,16 +826,11 @@ static void wrapExternalFunction(OpBuilder &builder, Location loc,
 
   builder.setInsertionPointToStart(newFuncOp.addEntryBlock());
 
-  // Get a ValueRange containing argument types. Note that ValueRange is
-  // currently not constructible from a pair of iterators pointing to
-  // BlockArgument.
+  // Get a ValueRange containing arguments.
   FunctionType type = funcOp.getType();
   SmallVector<Value, 8> args;
   args.reserve(type.getNumInputs());
-  auto wrapperArgIters = newFuncOp.getArguments();
-  SmallVector<Value, 8> wrapperArgs(wrapperArgIters.begin(),
-                                    wrapperArgIters.end());
-  ValueRange wrapperArgsRange(wrapperArgs);
+  ValueRange wrapperArgsRange(newFuncOp.getArguments());
 
   // Iterate over the inputs of the original function and pack values into
   // memref descriptors if the original type is a memref.

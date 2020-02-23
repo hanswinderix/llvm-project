@@ -874,6 +874,12 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
     }
     setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::i8, Custom);
     setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::i16, Custom);
+
+    for (MVT VT : MVT::fp_scalable_vector_valuetypes()) {
+      if (isTypeLegal(VT)) {
+        setOperationAction(ISD::SPLAT_VECTOR, VT, Custom);
+      }
+    }
   }
 
   PredictableSelectIsExpensive = Subtarget->predictableSelectIsExpensive();
@@ -2344,15 +2350,6 @@ SDValue AArch64TargetLowering::LowerF128Call(SDValue Op, SelectionDAG &DAG,
   return IsStrict ? DAG.getMergeValues({Result, Chain}, dl) : Result;
 }
 
-// Returns true if the given Op is the overflow flag result of an overflow
-// intrinsic operation.
-static bool isOverflowIntrOpRes(SDValue Op) {
-  unsigned Opc = Op.getOpcode();
-  return (Op.getResNo() == 1 &&
-          (Opc == ISD::SADDO || Opc == ISD::UADDO || Opc == ISD::SSUBO ||
-           Opc == ISD::USUBO || Opc == ISD::SMULO || Opc == ISD::UMULO));
-}
-
 static SDValue LowerXOR(SDValue Op, SelectionDAG &DAG) {
   SDValue Sel = Op.getOperand(0);
   SDValue Other = Op.getOperand(1);
@@ -2365,7 +2362,7 @@ static SDValue LowerXOR(SDValue Op, SelectionDAG &DAG) {
   // (csel 1, 0, invert(cc), overflow_op_bool)
   // ... which later gets transformed to just a cset instruction with an
   // inverted condition code, rather than a cset + eor sequence.
-  if (isOneConstant(Other) && isOverflowIntrOpRes(Sel)) {
+  if (isOneConstant(Other) && ISD::isOverflowIntrOpRes(Sel)) {
     // Only lower legal XALUO ops.
     if (!DAG.getTargetLoweringInfo().isTypeLegal(Sel->getValueType(0)))
       return SDValue();
@@ -4206,7 +4203,7 @@ AArch64TargetLowering::LowerCall(CallLoweringInfo &CLI,
         RegsToPass.emplace_back(VA.getLocReg(), Arg);
         RegsUsed.insert(VA.getLocReg());
         const TargetOptions &Options = DAG.getTarget().Options;
-        if (Options.SupportsDebugEntryValues)
+        if (Options.EnableDebugEntryValues)
           CSInfo.emplace_back(VA.getLocReg(), i);
       }
     } else {
@@ -5052,7 +5049,7 @@ SDValue AArch64TargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
 
   // Optimize {s|u}{add|sub|mul}.with.overflow feeding into a branch
   // instruction.
-  if (isOverflowIntrOpRes(LHS) && isOneConstant(RHS) &&
+  if (ISD::isOverflowIntrOpRes(LHS) && isOneConstant(RHS) &&
       (CC == ISD::SETEQ || CC == ISD::SETNE)) {
     // Only lower legal XALUO ops.
     if (!DAG.getTargetLoweringInfo().isTypeLegal(LHS->getValueType(0)))
@@ -5584,7 +5581,7 @@ SDValue AArch64TargetLowering::LowerSELECT(SDValue Op,
 
   // Optimize {s|u}{add|sub|mul}.with.overflow feeding into a select
   // instruction.
-  if (isOverflowIntrOpRes(CCVal)) {
+  if (ISD::isOverflowIntrOpRes(CCVal)) {
     // Only lower legal XALUO ops.
     if (!DAG.getTargetLoweringInfo().isTypeLegal(CCVal->getValueType(0)))
       return SDValue();
@@ -7483,14 +7480,6 @@ SDValue AArch64TargetLowering::LowerSPLAT_VECTOR(SDValue Op,
   // Extend input splat value where needed to fit into a GPR (32b or 64b only)
   // FPRs don't have this restriction.
   switch (ElemVT.getSimpleVT().SimpleTy) {
-  case MVT::i8:
-  case MVT::i16:
-  case MVT::i32:
-    SplatVal = DAG.getAnyExtOrTrunc(SplatVal, dl, MVT::i32);
-    return DAG.getNode(AArch64ISD::DUP, dl, VT, SplatVal);
-  case MVT::i64:
-    SplatVal = DAG.getAnyExtOrTrunc(SplatVal, dl, MVT::i64);
-    return DAG.getNode(AArch64ISD::DUP, dl, VT, SplatVal);
   case MVT::i1: {
     // The general case of i1.  There isn't any natural way to do this,
     // so we use some trickery with whilelo.
@@ -7503,13 +7492,24 @@ SDValue AArch64TargetLowering::LowerSPLAT_VECTOR(SDValue Op,
     return DAG.getNode(ISD::INTRINSIC_WO_CHAIN, dl, VT, ID,
                        DAG.getConstant(0, dl, MVT::i64), SplatVal);
   }
-  // TODO: we can support float types, but haven't added patterns yet.
+  case MVT::i8:
+  case MVT::i16:
+  case MVT::i32:
+    SplatVal = DAG.getAnyExtOrTrunc(SplatVal, dl, MVT::i32);
+    break;
+  case MVT::i64:
+    SplatVal = DAG.getAnyExtOrTrunc(SplatVal, dl, MVT::i64);
+    break;
   case MVT::f16:
   case MVT::f32:
   case MVT::f64:
+    // Fine as is
+    break;
   default:
     report_fatal_error("Unsupported SPLAT_VECTOR input operand type");
   }
+
+  return DAG.getNode(AArch64ISD::DUP, dl, VT, SplatVal);
 }
 
 static bool resolveBuildVector(BuildVectorSDNode *BVN, APInt &CnstBits,

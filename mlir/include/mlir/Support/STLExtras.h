@@ -233,6 +233,12 @@ public:
     return DerivedT::dereference_iterator(base, index);
   }
 
+  /// Compare this range with another.
+  template <typename OtherT> bool operator==(const OtherT &other) {
+    return size() == llvm::size(other) &&
+           std::equal(begin(), end(), other.begin());
+  }
+
   /// Return the size of this range.
   size_t size() const { return count; }
 
@@ -331,6 +337,26 @@ template <typename ContainerTy> auto make_second_range(ContainerTy &&c) {
       [](decltype((*std::begin(c))) elt) -> decltype((elt.second)) {
         return elt.second;
       });
+}
+
+/// A range class that repeats a specific value for a set number of times.
+template <typename T>
+class RepeatRange
+    : public detail::indexed_accessor_range_base<RepeatRange<T>, T, const T> {
+public:
+  using detail::indexed_accessor_range_base<
+      RepeatRange<T>, T, const T>::indexed_accessor_range_base;
+
+  /// Given that we are repeating a specific value, we can simply return that
+  /// value when offsetting the base or dereferencing the iterator.
+  static T offset_base(const T &val, ptrdiff_t) { return val; }
+  static const T &dereference_iterator(const T &val, ptrdiff_t) { return val; }
+};
+
+/// Make a range that repeats the given value 'n' times.
+template <typename ValueTy>
+RepeatRange<ValueTy> make_repeated_range(const ValueTy &value, size_t n) {
+  return RepeatRange<ValueTy>(value, n);
 }
 
 /// Returns true of the given range only contains a single element.

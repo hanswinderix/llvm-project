@@ -527,17 +527,6 @@ static void ParseCommentArgs(CommentOptions &Opts, ArgList &Args) {
   Opts.ParseAllComments = Args.hasArg(OPT_fparse_all_comments);
 }
 
-static StringRef getCodeModel(ArgList &Args, DiagnosticsEngine &Diags) {
-  if (Arg *A = Args.getLastArg(OPT_mcode_model)) {
-    StringRef Value = A->getValue();
-    if (Value == "small" || Value == "kernel" || Value == "medium" ||
-        Value == "large" || Value == "tiny")
-      return Value;
-    Diags.Report(diag::err_drv_invalid_value) << A->getAsString(Args) << Value;
-  }
-  return "default";
-}
-
 static llvm::Reloc::Model getRelocModel(ArgList &Args,
                                         DiagnosticsEngine &Diags) {
   if (Arg *A = Args.getLastArg(OPT_mrelocation_model)) {
@@ -792,6 +781,16 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
 
   Opts.DisableLLVMPasses = Args.hasArg(OPT_disable_llvm_passes);
   Opts.DisableLifetimeMarkers = Args.hasArg(OPT_disable_lifetimemarkers);
+
+  const llvm::Triple::ArchType DebugEntryValueArchs[] = {
+      llvm::Triple::x86, llvm::Triple::x86_64, llvm::Triple::aarch64,
+      llvm::Triple::arm, llvm::Triple::armeb};
+
+  llvm::Triple T(TargetOpts.Triple);
+  if (Opts.OptimizationLevel > 0 && Opts.hasReducedDebugInfo() &&
+      llvm::is_contained(DebugEntryValueArchs, T.getArch()))
+    Opts.EnableDebugEntryValues = Args.hasArg(OPT_femit_debug_entry_values);
+
   Opts.DisableO0ImplyOptNone = Args.hasArg(OPT_disable_O0_optnone);
   Opts.DisableRedZone = Args.hasArg(OPT_disable_red_zone);
   Opts.IndirectTlsSegRefs = Args.hasArg(OPT_mno_tls_direct_seg_refs);
@@ -3486,7 +3485,7 @@ static void ParsePreprocessorOutputArgs(PreprocessorOutputOptions &Opts,
 
 static void ParseTargetArgs(TargetOptions &Opts, ArgList &Args,
                             DiagnosticsEngine &Diags) {
-  Opts.CodeModel = std::string(getCodeModel(Args, Diags));
+  Opts.CodeModel = std::string(Args.getLastArgValue(OPT_mcmodel_EQ, "default"));
   Opts.ABI = std::string(Args.getLastArgValue(OPT_target_abi));
   if (Arg *A = Args.getLastArg(OPT_meabi)) {
     StringRef Value = A->getValue();

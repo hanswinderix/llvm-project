@@ -23,6 +23,7 @@
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/Vectorize.h"
 #include "llvm/Transforms/Utils/Local.h"
 
@@ -32,6 +33,10 @@ using namespace llvm::PatternMatch;
 #define DEBUG_TYPE "vector-combine"
 STATISTIC(NumVecCmp, "Number of vector compares formed");
 STATISTIC(NumVecBO, "Number of vector binops formed");
+
+static cl::opt<bool> DisableVectorCombine(
+    "disable-vector-combine", cl::init(false), cl::Hidden,
+    cl::desc("Disable all vector combine transforms"));
 
 /// Compare the relative costs of extracts followed by scalar operation vs.
 /// vector operation followed by extract:
@@ -88,10 +93,10 @@ static bool isExtractExtractCheap(Instruction *Ext0, Instruction *Ext1,
     NewCost = VectorOpCost + ExtractCost + !Ext0->hasOneUse() * ExtractCost +
               !Ext1->hasOneUse() * ExtractCost;
   }
-  // TODO: The cost comparison should not differ based on opcode. Either we
-  //       want to be uniformly more or less aggressive in deciding if a vector
-  //       operation should replace the scalar operation.
-  return IsBinOp ? OldCost <= NewCost : OldCost < NewCost;
+  // Aggressively form a vector op if the cost is equal because the transform
+  // may enable further optimization.
+  // Codegen can reverse this transform (scalarize) if it was not profitable.
+  return OldCost < NewCost;
 }
 
 /// Try to reduce extract element costs by converting scalar compares to vector
@@ -175,6 +180,9 @@ static bool foldExtractExtract(Instruction &I, const TargetTransformInfo &TTI) {
 /// handled in the callers of this function.
 static bool runImpl(Function &F, const TargetTransformInfo &TTI,
                     const DominatorTree &DT) {
+  if (DisableVectorCombine)
+    return false;
+
   bool MadeChange = false;
   for (BasicBlock &BB : F) {
     // Ignore unreachable basic blocks.

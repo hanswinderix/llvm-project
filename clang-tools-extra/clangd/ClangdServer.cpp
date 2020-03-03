@@ -194,10 +194,6 @@ void ClangdServer::addDocument(PathRef File, llvm::StringRef Contents,
 
 void ClangdServer::removeDocument(PathRef File) { WorkScheduler.remove(File); }
 
-llvm::StringRef ClangdServer::getDocument(PathRef File) const {
-  return WorkScheduler.getContents(File);
-}
-
 void ClangdServer::codeComplete(PathRef File, Position Pos,
                                 const clangd::CodeCompleteOptions &Opts,
                                 Callback<CodeCompleteResult> CB) {
@@ -392,14 +388,6 @@ void ClangdServer::rename(PathRef File, Position Pos, llvm::StringRef NewName,
     return CB(std::move(*Edits));
   };
   WorkScheduler.runWithAST("Rename", File, std::move(Action));
-}
-
-void ClangdServer::rename(PathRef File, Position Pos, llvm::StringRef NewName,
-                          bool WantFormat, Callback<FileEdits> CB) {
-  RenameOptions Opts;
-  Opts.WantFormat = WantFormat;
-  Opts.AllowCrossFile = false;
-  rename(File, Pos, NewName, Opts, std::move(CB));
 }
 
 // May generate several candidate selections, due to SelectionTree ambiguity.

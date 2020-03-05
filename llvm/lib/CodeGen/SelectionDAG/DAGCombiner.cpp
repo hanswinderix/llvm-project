@@ -12220,6 +12220,9 @@ SDValue DAGCombiner::visitFADD(SDNode *N) {
   const TargetOptions &Options = DAG.getTarget().Options;
   const SDNodeFlags Flags = N->getFlags();
 
+  if (SDValue R = DAG.simplifyFPBinop(N->getOpcode(), N0, N1, Flags))
+    return R;
+
   // fold vector ops
   if (VT.isVector())
     if (SDValue FoldedVOp = SimplifyVBinOp(N))
@@ -12401,6 +12404,9 @@ SDValue DAGCombiner::visitFSUB(SDNode *N) {
   const TargetOptions &Options = DAG.getTarget().Options;
   const SDNodeFlags Flags = N->getFlags();
 
+  if (SDValue R = DAG.simplifyFPBinop(N->getOpcode(), N0, N1, Flags))
+    return R;
+
   // fold vector ops
   if (VT.isVector())
     if (SDValue FoldedVOp = SimplifyVBinOp(N))
@@ -12498,6 +12504,9 @@ SDValue DAGCombiner::visitFMUL(SDNode *N) {
   SDLoc DL(N);
   const TargetOptions &Options = DAG.getTarget().Options;
   const SDNodeFlags Flags = N->getFlags();
+
+  if (SDValue R = DAG.simplifyFPBinop(N->getOpcode(), N0, N1, Flags))
+    return R;
 
   // fold vector ops
   if (VT.isVector()) {
@@ -12831,6 +12840,9 @@ SDValue DAGCombiner::visitFDIV(SDNode *N) {
   const TargetOptions &Options = DAG.getTarget().Options;
   SDNodeFlags Flags = N->getFlags();
 
+  if (SDValue R = DAG.simplifyFPBinop(N->getOpcode(), N0, N1, Flags))
+    return R;
+
   // fold vector ops
   if (VT.isVector())
     if (SDValue FoldedVOp = SimplifyVBinOp(N))
@@ -12931,6 +12943,10 @@ SDValue DAGCombiner::visitFREM(SDNode *N) {
   ConstantFPSDNode *N0CFP = dyn_cast<ConstantFPSDNode>(N0);
   ConstantFPSDNode *N1CFP = dyn_cast<ConstantFPSDNode>(N1);
   EVT VT = N->getValueType(0);
+  SDNodeFlags Flags = N->getFlags();
+
+  if (SDValue R = DAG.simplifyFPBinop(N->getOpcode(), N0, N1, Flags))
+    return R;
 
   // fold (frem c1, c2) -> fmod(c1,c2)
   if (N0CFP && N1CFP)
@@ -18662,10 +18678,23 @@ static SDValue narrowExtractedVectorLoad(SDNode *Extract, SelectionDAG &DAG) {
   // Allow targets to opt-out.
   EVT VT = Extract->getValueType(0);
 
-  // Only handle byte sized scalars otherwise the offset is incorrect.
-  // FIXME: We might be able to do better if the VT is byte sized and the index
-  // is aligned.
-  if (!VT.getScalarType().isByteSized())
+  // We can only create byte sized loads.
+  if (!VT.isByteSized())
+    return SDValue();
+
+  unsigned Index = ExtIdx->getZExtValue();
+  unsigned NumElts = VT.getVectorNumElements();
+
+  // If the index is a multiple of the extract element count, we can offset the
+  // address by the store size multiplied by the subvector index. Otherwise if
+  // the scalar type is byte sized, we can just use the index multiplied by
+  // the element size in bytes as the offset.
+  unsigned Offset;
+  if (Index % NumElts == 0)
+    Offset = (Index / NumElts) * VT.getStoreSize();
+  else if (VT.getScalarType().isByteSized())
+    Offset = Index * VT.getScalarType().getStoreSize();
+  else
     return SDValue();
 
   const TargetLowering &TLI = DAG.getTargetLoweringInfo();
@@ -18675,8 +18704,7 @@ static SDValue narrowExtractedVectorLoad(SDNode *Extract, SelectionDAG &DAG) {
   // The narrow load will be offset from the base address of the old load if
   // we are extracting from something besides index 0 (little-endian).
   SDLoc DL(Extract);
-  SDValue BaseAddr = Ld->getOperand(1);
-  unsigned Offset = ExtIdx->getZExtValue() * VT.getScalarType().getStoreSize();
+  SDValue BaseAddr = Ld->getBasePtr();
 
   // TODO: Use "BaseIndexOffset" to make this more effective.
   SDValue NewAddr = DAG.getMemBasePlusOffset(BaseAddr, Offset, DL);

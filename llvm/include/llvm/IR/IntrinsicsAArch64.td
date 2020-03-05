@@ -1273,9 +1273,9 @@ def int_aarch64_sve_stnt1 : AdvSIMD_1Vec_PredStore_Intrinsic;
 // Prefetch
 //
 
-def int_aarch64_sve_prf : Intrinsic<[], [llvm_anyvector_ty,
-                                         llvm_ptr_ty,
-                                         llvm_i32_ty], [IntrArgMemOnly]>;
+def int_aarch64_sve_prf
+  : Intrinsic<[], [llvm_anyvector_ty, llvm_ptr_ty, llvm_i32_ty],
+                  [IntrArgMemOnly, ImmArg<2>]>;
 
 //
 // Scalar to vector operations
@@ -2098,13 +2098,16 @@ def int_aarch64_sve_eortb       : AdvSIMD_3VectorArg_Intrinsic;
 def int_aarch64_sve_pmullb_pair : AdvSIMD_2VectorArg_Intrinsic;
 def int_aarch64_sve_pmullt_pair : AdvSIMD_2VectorArg_Intrinsic;
 
+//
 // SVE2 bitwise ternary operations.
+//
 def int_aarch64_sve_eor3   : AdvSIMD_3VectorArg_Intrinsic;
 def int_aarch64_sve_bcax   : AdvSIMD_3VectorArg_Intrinsic;
 def int_aarch64_sve_bsl    : AdvSIMD_3VectorArg_Intrinsic;
 def int_aarch64_sve_bsl1n  : AdvSIMD_3VectorArg_Intrinsic;
 def int_aarch64_sve_bsl2n  : AdvSIMD_3VectorArg_Intrinsic;
 def int_aarch64_sve_nbsl   : AdvSIMD_3VectorArg_Intrinsic;
+def int_aarch64_sve_xar    : AdvSIMD_2VectorArgIndexed_Intrinsic;
 
 //
 // SVE2 - Optional AES, SHA-3 and SM4

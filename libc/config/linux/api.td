@@ -27,6 +27,9 @@ def NullMacro : MacroDef<"NULL"> {
 
 def ErrnoMacro : MacroDef<"errno"> {
   let Defn = [{
+    #ifdef __cplusplus
+    extern "C"
+    #endif
     int *__errno_location();
     #define errno (*__errno_location())
   }];
@@ -81,6 +84,13 @@ def StdIOAPI : PublicAPI<"stdio.h"> {
 
   let Functions = [
     "snprintf",
+  ];
+}
+
+def StdlibAPI : PublicAPI<"stdlib.h"> {
+  let Functions = [
+    "_Exit",
+    "abort",
   ];
 }
 

@@ -379,13 +379,14 @@ public:
   FindPlugin(const ArchSpec &arch, const char *flavor, const char *plugin_name);
 
   // This version will use the value in the Target settings if flavor is NULL;
-  static lldb::DisassemblerSP
-  FindPluginForTarget(const lldb::TargetSP target_sp, const ArchSpec &arch,
-                      const char *flavor, const char *plugin_name);
+  static lldb::DisassemblerSP FindPluginForTarget(const Target &target,
+                                                  const ArchSpec &arch,
+                                                  const char *flavor,
+                                                  const char *plugin_name);
 
   static lldb::DisassemblerSP
   DisassembleRange(const ArchSpec &arch, const char *plugin_name,
-                   const char *flavor, const ExecutionContext &exe_ctx,
+                   const char *flavor, Target &target,
                    const AddressRange &disasm_range, bool prefer_file_cache);
 
   static lldb::DisassemblerSP
@@ -420,22 +421,17 @@ public:
   Disassembler(const ArchSpec &arch, const char *flavor);
   ~Disassembler() override;
 
-  typedef const char *(*SummaryCallback)(const Instruction &inst,
-                                         ExecutionContext *exe_context,
-                                         void *user_data);
+  void PrintInstructions(Debugger &debugger, const ArchSpec &arch,
+                         const ExecutionContext &exe_ctx,
+                         uint32_t num_instructions,
+                         bool mixed_source_and_assembly,
+                         uint32_t num_mixed_context_lines, uint32_t options,
+                         Stream &strm);
 
-  static bool PrintInstructions(Disassembler *disasm_ptr, Debugger &debugger,
-                                const ArchSpec &arch,
-                                const ExecutionContext &exe_ctx,
-                                uint32_t num_instructions,
-                                bool mixed_source_and_assembly,
-                                uint32_t num_mixed_context_lines,
-                                uint32_t options, Stream &strm);
-
-  size_t ParseInstructions(Target &target, const AddressRange &range,
+  size_t ParseInstructions(Target &target, AddressRange range,
                            Stream *error_strm_ptr, bool prefer_file_cache);
 
-  size_t ParseInstructions(Target &target, const Address &range,
+  size_t ParseInstructions(Target &target, Address address,
                            uint32_t num_instructions, bool prefer_file_cache);
 
   virtual size_t DecodeInstructions(const Address &base_addr,

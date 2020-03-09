@@ -3617,9 +3617,9 @@ static Value *SimplifyFCmpInst(unsigned Predicate, Value *LHS, Value *RHS,
     // Check comparison of [minnum/maxnum with constant] with other constant.
     const APFloat *C2;
     if ((match(LHS, m_Intrinsic<Intrinsic::minnum>(m_Value(), m_APFloat(C2))) &&
-         C2->compare(*C) == APFloat::cmpLessThan) ||
+         *C2 < *C) ||
         (match(LHS, m_Intrinsic<Intrinsic::maxnum>(m_Value(), m_APFloat(C2))) &&
-         C2->compare(*C) == APFloat::cmpGreaterThan)) {
+         *C2 > *C)) {
       bool IsMaxNum =
           cast<IntrinsicInst>(LHS)->getIntrinsicID() == Intrinsic::maxnum;
       // The ordered relationship and minnum/maxnum guarantee that we do not
@@ -5360,16 +5360,16 @@ Value *llvm::SimplifyCall(CallBase *Call, const SimplifyQuery &Q) {
 }
 
 /// Given operands for a Freeze, see if we can fold the result.
-static Value *SimplifyFreezeInst(Value *Op0) {
+static Value *SimplifyFreezeInst(Value *Op0, const SimplifyQuery &Q) {
   // Use a utility function defined in ValueTracking.
-  if (llvm::isGuaranteedNotToBeUndefOrPoison(Op0))
+  if (llvm::isGuaranteedNotToBeUndefOrPoison(Op0, Q.CxtI, Q.DT))
     return Op0;
   // We have room for improvement.
   return nullptr;
 }
 
 Value *llvm::SimplifyFreezeInst(Value *Op0, const SimplifyQuery &Q) {
-  return ::SimplifyFreezeInst(Op0);
+  return ::SimplifyFreezeInst(Op0, Q);
 }
 
 /// See if we can compute a simplified version of this instruction.

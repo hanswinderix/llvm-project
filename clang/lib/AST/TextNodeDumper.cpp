@@ -15,6 +15,7 @@
 #include "clang/AST/DeclOpenMP.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/LocInfoType.h"
+#include "clang/Basic/Module.h"
 #include "clang/Basic/SourceManager.h"
 
 using namespace clang;
@@ -121,9 +122,6 @@ void TextNodeDumper::Visit(const Stmt *Node) {
   }
   dumpPointer(Node);
   dumpSourceRange(Node->getSourceRange());
-
-  if (Node->isOMPStructuredBlock())
-    OS << " openmp_structured_block";
 
   if (const auto *E = dyn_cast<Expr>(Node)) {
     dumpType(E->getType());

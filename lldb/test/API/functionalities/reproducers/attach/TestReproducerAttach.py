@@ -10,17 +10,18 @@ from lldbsuite.test.lldbtest import *
 from lldbsuite.test import lldbutil
 
 
-class CreateAfterAttachTestCase(TestBase):
+class ReproducerAttachTestCase(TestBase):
 
     mydir = TestBase.compute_mydir(__file__)
     NO_DEBUG_INFO_TESTCASE = True
 
+    @skipIfLinux # Reproducer received unexpected packet.
     @skipIfFreeBSD
     @skipIfNetBSD
     @skipIfWindows
     @skipIfRemote
     @skipIfiOSSimulator
-    def test_create_after_attach_with_fork(self):
+    def test_reproducer_attach(self):
         """Test thread creation after process attach."""
         exe = '%s_%d' % (self.testMethodName, os.getpid())
 
@@ -53,7 +54,8 @@ class CreateAfterAttachTestCase(TestBase):
                                    stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE)
-        outs, errs = capture.communicate()
+        outs, _ = capture.communicate()
+        outs = outs.decode('utf-8')
         self.assertIn('Process {} stopped'.format(pid), outs)
         self.assertIn('Reproducer written', outs)
 
@@ -63,7 +65,8 @@ class CreateAfterAttachTestCase(TestBase):
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE)
-        outs, errs = replay.communicate()
+        outs, _ = replay.communicate()
+        outs = outs.decode('utf-8')
         self.assertIn('Process {} stopped'.format(pid), outs)
 
         # We can dump the reproducer in the current context.

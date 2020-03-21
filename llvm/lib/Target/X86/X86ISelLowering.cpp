@@ -7118,6 +7118,24 @@ static bool getTargetShuffleAndZeroables(SDValue N, SmallVectorImpl<int> &Mask,
       continue;
     }
 
+    // INSERT_SUBVECTOR - to widen vectors we often insert them into UNDEF
+    // base vectors.
+    if (V.getOpcode() == ISD::INSERT_SUBVECTOR) {
+      SDValue Vec = V.getOperand(0);
+      int NumVecElts = Vec.getValueType().getVectorNumElements();
+      if (Vec.isUndef() && Size == NumVecElts) {
+        auto *CIdx = dyn_cast<ConstantSDNode>(V.getOperand(2));
+        int NumSubElts = V.getOperand(1).getValueType().getVectorNumElements();
+        if (CIdx && CIdx->getAPIntValue().ule(NumVecElts - NumSubElts)) {
+          int Idx = CIdx->getZExtValue();
+          if (M < Idx || (Idx + NumSubElts) <= M) {
+            KnownUndef.setBit(i);
+          }
+        }
+      }
+      continue;
+    }
+
     // Attempt to extract from the source's constant bits.
     if (IsSrcConstant[SrcIdx]) {
       if (UndefSrcElts[SrcIdx][M])
@@ -15948,7 +15966,6 @@ static bool matchShuffleWithSHUFPD(MVT VT, SDValue &V1, SDValue &V2,
   // Mask for V8F64: 0/1,  8/9,  2/3,  10/11, 4/5, ..
   // Mask for V4F64; 0/1,  4/5,  2/3,  6/7..
   ShuffleImm = 0;
-  bool UnaryMask = isUndefOrZeroOrInRange(Mask, 0, NumElts);
   bool ShufpdMask = true;
   bool CommutableMask = true;
   for (int i = 0; i < NumElts; ++i) {
@@ -15956,7 +15973,7 @@ static bool matchShuffleWithSHUFPD(MVT VT, SDValue &V1, SDValue &V2,
       continue;
     if (Mask[i] < 0)
       return false;
-    int Val = (i & 6) + (UnaryMask ? 0 : (NumElts * (i & 1)));
+    int Val = (i & 6) + NumElts * (i & 1);
     int CommutVal = (i & 0xe) + NumElts * ((i & 1) ^ 1);
     if (Mask[i] < Val || Mask[i] > Val + 1)
       ShufpdMask = false;
@@ -15968,9 +15985,7 @@ static bool matchShuffleWithSHUFPD(MVT VT, SDValue &V1, SDValue &V2,
   if (!ShufpdMask && !CommutableMask)
     return false;
 
-  if (UnaryMask)
-    V2 = V1;
-  else if (!ShufpdMask && CommutableMask)
+  if (!ShufpdMask && CommutableMask)
     std::swap(V1, V2);
 
   ForceV1Zero = ZeroLane[0];
@@ -37385,19 +37400,22 @@ static SDValue combineBitcast(SDNode *N, SelectionDAG &DAG,
     auto *BCast = cast<MemIntrinsicSDNode>(N0);
     unsigned SrcVTSize = SrcVT.getScalarSizeInBits();
     unsigned MemSize = BCast->getMemoryVT().getScalarSizeInBits();
-    MVT MemVT = VT.isFloatingPoint() ? MVT::getFloatingPointVT(MemSize)
-                                     : MVT::getIntegerVT(MemSize);
-    MVT LoadVT = VT.isFloatingPoint() ? MVT::getFloatingPointVT(SrcVTSize)
-                                      : MVT::getIntegerVT(SrcVTSize);
-    LoadVT = MVT::getVectorVT(LoadVT, SrcVT.getVectorNumElements());
+    // Don't swap i8/i16 since don't have fp types that size.
+    if (MemSize >= 32) {
+      MVT MemVT = VT.isFloatingPoint() ? MVT::getFloatingPointVT(MemSize)
+                                       : MVT::getIntegerVT(MemSize);
+      MVT LoadVT = VT.isFloatingPoint() ? MVT::getFloatingPointVT(SrcVTSize)
+                                        : MVT::getIntegerVT(SrcVTSize);
+      LoadVT = MVT::getVectorVT(LoadVT, SrcVT.getVectorNumElements());
 
-    SDVTList Tys = DAG.getVTList(LoadVT, MVT::Other);
-    SDValue Ops[] = { BCast->getChain(), BCast->getBasePtr() };
-    SDValue ResNode =
-        DAG.getMemIntrinsicNode(X86ISD::VBROADCAST_LOAD, SDLoc(N), Tys, Ops,
-                                MemVT, BCast->getMemOperand());
-    DAG.ReplaceAllUsesOfValueWith(SDValue(BCast, 1), ResNode.getValue(1));
-    return DAG.getBitcast(VT, ResNode);
+      SDVTList Tys = DAG.getVTList(LoadVT, MVT::Other);
+      SDValue Ops[] = { BCast->getChain(), BCast->getBasePtr() };
+      SDValue ResNode =
+          DAG.getMemIntrinsicNode(X86ISD::VBROADCAST_LOAD, SDLoc(N), Tys, Ops,
+                                  MemVT, BCast->getMemOperand());
+      DAG.ReplaceAllUsesOfValueWith(SDValue(BCast, 1), ResNode.getValue(1));
+      return DAG.getBitcast(VT, ResNode);
+    }
   }
 
   // Since MMX types are special and don't usually play with other vector types,
@@ -46402,6 +46420,24 @@ static SDValue combineConcatVectorOps(const SDLoc &DL, MVT VT,
       })) {
     unsigned NumOps = Ops.size();
     switch (Op0.getOpcode()) {
+    case X86ISD::SHUFP: {
+      // Add SHUFPD support if/when necessary.
+      if (!IsSplat && VT.getScalarType() == MVT::f32 &&
+          llvm::all_of(Ops, [Op0](SDValue Op) {
+            return Op.getOperand(2) == Op0.getOperand(2);
+          })) {
+        SmallVector<SDValue, 2> LHS, RHS;
+        for (unsigned i = 0; i != NumOps; ++i) {
+          LHS.push_back(Ops[i].getOperand(0));
+          RHS.push_back(Ops[i].getOperand(1));
+        }
+        return DAG.getNode(Op0.getOpcode(), DL, VT,
+                           DAG.getNode(ISD::CONCAT_VECTORS, DL, VT, LHS),
+                           DAG.getNode(ISD::CONCAT_VECTORS, DL, VT, RHS),
+                           Op0.getOperand(2));
+      }
+      break;
+    }
     case X86ISD::PSHUFHW:
     case X86ISD::PSHUFLW:
     case X86ISD::PSHUFD:

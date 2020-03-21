@@ -8325,13 +8325,15 @@ SDValue DAGCombiner::visitFunnelShift(SDNode *N) {
     // fold (fshr ld1, ld0, c) -> (ld0[ofs]) iff ld0 and ld1 are consecutive.
     // TODO - bigendian support once we have test coverage.
     // TODO - can we merge this with CombineConseutiveLoads/MatchLoadCombine?
+    // TODO - permit LHS EXTLOAD if extensions are shifted out.
     if ((BitWidth % 8) == 0 && (ShAmt % 8) == 0 && !VT.isVector() &&
         !DAG.getDataLayout().isBigEndian()) {
       auto *LHS = dyn_cast<LoadSDNode>(N0);
       auto *RHS = dyn_cast<LoadSDNode>(N1);
       if (LHS && RHS && LHS->isSimple() && RHS->isSimple() &&
           LHS->getAddressSpace() == RHS->getAddressSpace() &&
-          (LHS->hasOneUse() || RHS->hasOneUse()) && ISD::isNON_EXTLoad(RHS)) {
+          (LHS->hasOneUse() || RHS->hasOneUse()) && ISD::isNON_EXTLoad(RHS) &&
+          ISD::isNON_EXTLoad(LHS)) {
         if (DAG.areNonVolatileConsecutiveLoads(LHS, RHS, BitWidth / 8, 1)) {
           SDLoc DL(RHS);
           uint64_t PtrOff =
@@ -11023,7 +11025,9 @@ SDValue DAGCombiner::visitTRUNCATE(SDNode *N) {
 
   // Attempt to pre-truncate BUILD_VECTOR sources.
   if (N0.getOpcode() == ISD::BUILD_VECTOR && !LegalOperations &&
-      TLI.isTruncateFree(SrcVT.getScalarType(), VT.getScalarType())) {
+      TLI.isTruncateFree(SrcVT.getScalarType(), VT.getScalarType()) &&
+      // Avoid creating illegal types if running after type legalizer.
+      (!LegalTypes || TLI.isTypeLegal(VT.getScalarType()))) {
     SDLoc DL(N);
     EVT SVT = VT.getScalarType();
     SmallVector<SDValue, 8> TruncOps;
@@ -13054,11 +13058,13 @@ SDValue DAGCombiner::visitFDIV(SDNode *N) {
   }
 
   // (fdiv (fneg X), (fneg Y)) -> (fdiv X, Y)
-  if (isCheaperToUseNegatedFPOps(N0, N1))
-    return DAG.getNode(
-        ISD::FDIV, SDLoc(N), VT,
-        TLI.getNegatedExpression(N0, DAG, LegalOperations, ForCodeSize),
-        TLI.getNegatedExpression(N1, DAG, LegalOperations, ForCodeSize), Flags);
+  if (isCheaperToUseNegatedFPOps(N0, N1)) {
+    SDValue Neg0 =
+        TLI.getNegatedExpression(N0, DAG, LegalOperations, ForCodeSize);
+    SDValue Neg1 =
+        TLI.getNegatedExpression(N1, DAG, LegalOperations, ForCodeSize);
+    return DAG.getNode(ISD::FDIV, SDLoc(N), VT, Neg0, Neg1, Flags);
+  }
 
   return SDValue();
 }

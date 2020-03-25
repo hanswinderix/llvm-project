@@ -452,10 +452,6 @@ class Configuration(object):
 
         if self.cxx.hasCompileFlag('-faligned-allocation'):
             self.config.available_features.add('-faligned-allocation')
-        else:
-            # FIXME remove this once more than just clang-4.0 support
-            # C++17 aligned allocation.
-            self.config.available_features.add('no-aligned-allocation')
 
         if self.cxx.hasCompileFlag('-fdelayed-template-parsing'):
             self.config.available_features.add('fdelayed-template-parsing')
@@ -1084,10 +1080,12 @@ class Configuration(object):
         codesign_ident = self.get_lit_conf('llvm_codesign_identity', '')
         run_py = os.path.join(self.libcxx_src_root, 'utils', 'run.py')
         env_vars = ' '.join('%s=%s' % (k, pipes.quote(v)) for (k, v) in self.exec_env.items())
-        run_str = '%s %s --codesign_identity "%s" --working_directory "%%S" ' \
-                  '--dependencies %%file_dependencies --env %s -- %%t.exe' %  \
+        exec_str = '%s %s --codesign_identity "%s" --working_directory "%%S" ' \
+                  '--dependencies %%file_dependencies --env %s -- ' %  \
             (pipes.quote(sys.executable), pipes.quote(run_py),
              codesign_ident, env_vars)
+        run_str = exec_str + '%t.exe'
+        sub.append(('%exec', exec_str))
         sub.append(('%run', run_str))
         # Configure not program substitutions
         not_py = os.path.join(self.libcxx_src_root, 'utils', 'not.py')

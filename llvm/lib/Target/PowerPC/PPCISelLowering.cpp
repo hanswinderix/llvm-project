@@ -764,7 +764,7 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
     else
       setOperationAction(ISD::MUL, MVT::v4i32, Custom);
 
-    setOperationAction(ISD::MUL, MVT::v8i16, Custom);
+    setOperationAction(ISD::MUL, MVT::v8i16, Legal);
     setOperationAction(ISD::MUL, MVT::v16i8, Custom);
 
     setOperationAction(ISD::SCALAR_TO_VECTOR, MVT::v4f32, Custom);
@@ -3447,10 +3447,7 @@ static bool CalculateStackSlotUsed(EVT ArgVT, EVT OrigVT,
 /// ensure minimum alignment required for target.
 static unsigned EnsureStackAlignment(const PPCFrameLowering *Lowering,
                                      unsigned NumBytes) {
-  unsigned TargetAlign = Lowering->getStackAlignment();
-  unsigned AlignMask = TargetAlign - 1;
-  NumBytes = (NumBytes + AlignMask) & ~AlignMask;
-  return NumBytes;
+  return alignTo(NumBytes, Lowering->getStackAlign());
 }
 
 SDValue PPCTargetLowering::LowerFormalArguments(
@@ -10454,13 +10451,6 @@ SDValue PPCTargetLowering::LowerMUL(SDValue Op, SelectionDAG &DAG) const {
     HiProd = BuildIntrinsicOp(Intrinsic::ppc_altivec_vslw, HiProd,
                               Neg16, DAG, dl);
     return DAG.getNode(ISD::ADD, dl, MVT::v4i32, LoProd, HiProd);
-  } else if (Op.getValueType() == MVT::v8i16) {
-    SDValue LHS = Op.getOperand(0), RHS = Op.getOperand(1);
-
-    SDValue Zero = BuildSplatI(0, 1, MVT::v8i16, DAG, dl);
-
-    return BuildIntrinsicOp(Intrinsic::ppc_altivec_vmladduhm,
-                            LHS, RHS, Zero, DAG, dl);
   } else if (Op.getValueType() == MVT::v16i8) {
     SDValue LHS = Op.getOperand(0), RHS = Op.getOperand(1);
     bool isLittleEndian = Subtarget.isLittleEndian();
@@ -13660,8 +13650,8 @@ SDValue PPCTargetLowering::expandVSXLoadForLE(SDNode *N,
 
   // Do not expand to PPCISD::LXVD2X + PPCISD::XXSWAPD when the load is
   // aligned and the type is a vector with elements up to 4 bytes
-  if (Subtarget.needsSwapsForVSXMemOps() && !(MMO->getAlignment()%16)
-      && VecTy.getScalarSizeInBits() <= 32 ) {
+  if (Subtarget.needsSwapsForVSXMemOps() && MMO->getAlign() >= Align(16) &&
+      VecTy.getScalarSizeInBits() <= 32) {
     return SDValue();
   }
 
@@ -13731,8 +13721,8 @@ SDValue PPCTargetLowering::expandVSXStoreForLE(SDNode *N,
 
   // Do not expand to PPCISD::XXSWAPD and PPCISD::STXVD2X when the load is
   // aligned and the type is a vector with elements up to 4 bytes
-  if (Subtarget.needsSwapsForVSXMemOps() && !(MMO->getAlignment()%16)
-      && VecTy.getScalarSizeInBits() <= 32 ) {
+  if (Subtarget.needsSwapsForVSXMemOps() && MMO->getAlign() >= Align(16) &&
+      VecTy.getScalarSizeInBits() <= 32) {
     return SDValue();
   }
 

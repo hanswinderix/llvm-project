@@ -5794,6 +5794,10 @@ ExprResult Sema::ActOnCallExpr(Scope *Scope, Expr *Fn, SourceLocation LParenLoc,
     }
   }
 
+  if (LangOpts.OpenMP)
+    Call = ActOnOpenMPCall(*this, Call, Scope, LParenLoc, ArgExprs, RParenLoc,
+                           ExecConfig);
+
   return Call;
 }
 
@@ -16111,9 +16115,6 @@ void Sema::MarkFunctionReferenced(SourceLocation Loc, FunctionDecl *Func,
 
     Func->markUsed(Context);
   }
-
-  if (LangOpts.OpenMP)
-    markOpenMPDeclareVariantFuncsReferenced(Loc, Func, MightBeOdrUse);
 }
 
 /// Directly mark a variable odr-used. Given a choice, prefer to use
@@ -18512,8 +18513,8 @@ bool Sema::IsDependentFunctionNameExpr(Expr *E) {
 
 ExprResult Sema::CreateRecoveryExpr(SourceLocation Begin, SourceLocation End,
                                     ArrayRef<Expr *> SubExprs) {
-  // RecoveryExpr is type-dependent to suppress bogus diagnostics and this trick
-  // does not work in C.
+  // FIXME: enable it for C++, RecoveryExpr is type-dependent to suppress
+  // bogus diagnostics and this trick does not work in C.
   // FIXME: use containsErrors() to suppress unwanted diags in C.
   if (!Context.getLangOpts().RecoveryAST)
     return ExprError();

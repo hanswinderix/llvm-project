@@ -23,6 +23,7 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/TargetParser.h"
+#include "llvm/Support/Threading.h"
 #include "llvm/Support/VirtualFileSystem.h"
 #include <cstdlib> // ::getenv
 
@@ -542,6 +543,12 @@ void darwin::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(Args.MakeArgString("-lto-stats-file=" + StatsFile.str()));
   }
 
+  // Forward -fno-unroll-loops to the linker in LTO.
+  if (Args.hasArg(options::OPT_fno_unroll_loops)) {
+    CmdArgs.push_back("-mllvm");
+    CmdArgs.push_back(Args.MakeArgString("-lto-no-unroll-loops"));
+  }
+
   // It seems that the 'e' option is completely ignored for dynamic executables
   // (the default), and with static executables, the last one wins, as expected.
   Args.AddAllArgs(CmdArgs, {options::OPT_d_Flag, options::OPT_s, options::OPT_t,
@@ -605,10 +612,12 @@ void darwin::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   getMachOToolChain().addProfileRTLibs(Args, CmdArgs);
 
-  if (unsigned Parallelism =
-          getLTOParallelism(Args, getToolChain().getDriver())) {
+  StringRef Parallelism = getLTOParallelism(Args, getToolChain().getDriver());
+  if (!Parallelism.empty()) {
     CmdArgs.push_back("-mllvm");
-    CmdArgs.push_back(Args.MakeArgString("-threads=" + Twine(Parallelism)));
+    unsigned NumThreads =
+        llvm::get_threadpool_strategy(Parallelism)->compute_thread_count();
+    CmdArgs.push_back(Args.MakeArgString("-threads=" + Twine(NumThreads)));
   }
 
   if (getToolChain().ShouldLinkCXXStdlib(Args))

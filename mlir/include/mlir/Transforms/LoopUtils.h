@@ -24,10 +24,12 @@ class AffineForOp;
 class FuncOp;
 class OpBuilder;
 class Value;
+class ValueRange;
 struct MemRefRegion;
 
 namespace loop {
 class ForOp;
+class ParallelOp;
 } // end namespace loop
 
 /// Unrolls this for operation completely if the trip count is known to be
@@ -89,10 +91,12 @@ LogicalResult affineForOpBodySkew(AffineForOp forOp, ArrayRef<uint64_t> shifts,
                                   bool unrollPrologueEpilogue = false);
 
 /// Tiles the specified band of perfectly nested loops creating tile-space loops
-/// and intra-tile loops. A band is a contiguous set of loops.
+/// and intra-tile loops. A band is a contiguous set of loops. `tiledNest` when
+/// non-null is set to the loops of the tiled nest from outermost to innermost.
 LLVM_NODISCARD
 LogicalResult tileCodeGen(MutableArrayRef<AffineForOp> band,
-                          ArrayRef<unsigned> tileSizes);
+                          ArrayRef<unsigned> tileSizes,
+                          SmallVectorImpl<AffineForOp> *tiledNest = nullptr);
 
 /// Performs loop interchange on 'forOpA' and 'forOpB'. Requires that 'forOpA'
 /// and 'forOpB' are part of a perfectly nested sequence of loops.
@@ -226,6 +230,12 @@ TileLoops extractFixedOuterLoops(loop::ForOp rootFOrOp,
 /// independent of any loop induction variable involved in the nest.
 void coalesceLoops(MutableArrayRef<loop::ForOp> loops);
 
+/// Take the ParallelLoop and for each set of dimension indices, combine them
+/// into a single dimension. combinedDimensions must contain each index into
+/// loops exactly once.
+void collapsePLoops(loop::ParallelOp loops,
+                    ArrayRef<std::vector<unsigned>> combinedDimensions);
+
 /// Maps `forOp` for execution on a parallel grid of virtual `processorIds` of
 /// size given by `numProcessors`. This is achieved by embedding the SSA values
 /// corresponding to `processorIds` and `numProcessors` into the bounds and step
@@ -263,6 +273,29 @@ void mapLoopToProcessorIds(loop::ForOp forOp, ArrayRef<Value> processorId,
 /// Gathers all AffineForOps in 'func' grouped by loop depth.
 void gatherLoops(FuncOp func,
                  std::vector<SmallVector<AffineForOp, 2>> &depthToLoops);
+
+/// Creates an AffineForOp while ensuring that the lower and upper bounds are
+/// canonicalized, i.e., unused and duplicate operands are removed, and any
+/// constant operands propagated/folded in.
+AffineForOp createCanonicalizedAffineForOp(OpBuilder b, Location loc,
+                                           ValueRange lbOperands,
+                                           AffineMap lbMap,
+                                           ValueRange ubOperands,
+                                           AffineMap ubMap, int64_t step = 1);
+
+/// Separates full tiles from partial tiles for a perfect nest `nest` by
+/// generating a conditional guard that selects between the full tile version
+/// and the partial tile version using an AffineIfOp. The original loop nest
+/// is replaced by this guarded two version form.
+///
+///    affine.if (cond)
+///      // full_tile
+///    else
+///      // partial tile
+///
+LogicalResult
+separateFullTiles(MutableArrayRef<AffineForOp> nest,
+                  SmallVectorImpl<AffineForOp> *fullTileNest = nullptr);
 
 } // end namespace mlir
 

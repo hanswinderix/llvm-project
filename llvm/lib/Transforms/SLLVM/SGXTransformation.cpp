@@ -69,7 +69,7 @@ void SGXTransformation::generateDynEntryTable(Module &M) {
   assert(GV != nullptr);
 
   GV->setDSOLocal(true);
-  GV->setAlignment(8);
+  GV->setAlignment(MaybeAlign(8));
 }
 
 void SGXTransformation::generateECallTable(Module &M) {
@@ -105,7 +105,7 @@ void SGXTransformation::generateECallTable(Module &M) {
   auto GV = new GlobalVariable(
       M, ETTy, true, GlobalValue::ExternalLinkage, Init, "g_ecall_table");
   GV->setDSOLocal(true);
-  GV->setAlignment(8);
+  GV->setAlignment(MaybeAlign(8));
 }
 
 Type * SGXTransformation::getStubParamType(const Function *F) {

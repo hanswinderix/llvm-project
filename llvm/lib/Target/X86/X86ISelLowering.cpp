@@ -23647,19 +23647,18 @@ SDValue X86TargetLowering::LowerVAARG(SDValue Op, SelectionDAG &DAG) const {
   EVT ArgVT = Op.getNode()->getValueType(0);
   Type *ArgTy = ArgVT.getTypeForEVT(*DAG.getContext());
   uint32_t ArgSize = DAG.getDataLayout().getTypeAllocSize(ArgTy);
-  uint8_t ArgMode = 0;
+  uint8_t ArgMode;
 
   // Decide which area this value should be read from.
   // TODO: Implement the AMD64 ABI in its entirety. This simple
   // selection mechanism works only for the basic types.
-  if (ArgVT == MVT::f80) {
-    llvm_unreachable("va_arg for f80 not yet implemented");
-  } else if (ArgVT.isFloatingPoint() && ArgSize <= 16 /*bytes*/) {
+  assert(ArgVT != MVT::f80 && "va_arg for f80 not yet implemented");
+  if (ArgVT.isFloatingPoint() && ArgSize <= 16 /*bytes*/) {
     ArgMode = 2;  // Argument passed in XMM register. Use fp_offset.
-  } else if (ArgVT.isInteger() && ArgSize <= 32 /*bytes*/) {
-    ArgMode = 1;  // Argument passed in GPR64 register(s). Use gp_offset.
   } else {
-    llvm_unreachable("Unhandled argument type in LowerVAARG");
+    assert(ArgVT.isInteger() && ArgSize <= 32 /*bytes*/ &&
+           "Unhandled argument type in LowerVAARG");
+    ArgMode = 1;  // Argument passed in GPR64 register(s). Use gp_offset.
   }
 
   if (ArgMode == 2) {
@@ -34750,6 +34749,7 @@ static SDValue combineX86ShufflesConstants(ArrayRef<SDValue> Ops,
     return SDValue();
 
   // Shuffle the constant bits according to the mask.
+  SDLoc DL(Root);
   APInt UndefElts(NumMaskElts, 0);
   APInt ZeroElts(NumMaskElts, 0);
   APInt ConstantElts(NumMaskElts, 0);
@@ -34787,6 +34787,10 @@ static SDValue combineX86ShufflesConstants(ArrayRef<SDValue> Ops,
   }
   assert((UndefElts | ZeroElts | ConstantElts).isAllOnesValue());
 
+  // Attempt to create a zero vector.
+  if ((UndefElts | ZeroElts).isAllOnesValue())
+    return getZeroVector(Root.getSimpleValueType(), Subtarget, DAG, DL);
+
   // Create the constant data.
   MVT MaskSVT;
   if (VT.isFloatingPoint() && (MaskSizeInBits == 32 || MaskSizeInBits == 64))
@@ -34795,8 +34799,9 @@ static SDValue combineX86ShufflesConstants(ArrayRef<SDValue> Ops,
     MaskSVT = MVT::getIntegerVT(MaskSizeInBits);
 
   MVT MaskVT = MVT::getVectorVT(MaskSVT, NumMaskElts);
+  if (!DAG.getTargetLoweringInfo().isTypeLegal(MaskVT))
+    return SDValue();
 
-  SDLoc DL(Root);
   SDValue CstOp = getConstVector(ConstantBitData, UndefElts, MaskVT, DAG, DL);
   return DAG.getBitcast(VT, CstOp);
 }
@@ -41254,7 +41259,7 @@ static SDValue PromoteMaskArithmetic(SDNode *N, SelectionDAG &DAG,
   case ISD::ANY_EXTEND:
     return Op;
   case ISD::ZERO_EXTEND:
-    return DAG.getZeroExtendInReg(Op, DL, NarrowVT.getScalarType());
+    return DAG.getZeroExtendInReg(Op, DL, NarrowVT);
   case ISD::SIGN_EXTEND:
     return DAG.getNode(ISD::SIGN_EXTEND_INREG, DL, VT,
                        Op, DAG.getValueType(NarrowVT));
@@ -43489,11 +43494,15 @@ static SDValue combineVectorSignBitsTruncation(SDNode *N, const SDLoc &DL,
   MVT InSVT = InVT.getScalarType();
 
   // Check we have a truncation suited for PACKSS/PACKUS.
-  if (!VT.is128BitVector() && !VT.is256BitVector())
+  if (!isPowerOf2_32(VT.getVectorNumElements()))
     return SDValue();
   if (SVT != MVT::i8 && SVT != MVT::i16 && SVT != MVT::i32)
     return SDValue();
   if (InSVT != MVT::i16 && InSVT != MVT::i32 && InSVT != MVT::i64)
+    return SDValue();
+
+  // Truncation to sub-128bit vXi32 can be better handled with shuffles.
+  if (SVT == MVT::i32 && VT.getSizeInBits() < 128)
     return SDValue();
 
   // AVX512 has fast truncate, but if the input is already going to be split,
@@ -44861,7 +44870,7 @@ static SDValue combineExtSetcc(SDNode *N, SelectionDAG &DAG,
   SDValue Res = DAG.getSetCC(dl, VT, N0.getOperand(0), N0.getOperand(1), CC);
 
   if (N->getOpcode() == ISD::ZERO_EXTEND)
-    Res = DAG.getZeroExtendInReg(Res, dl, N0.getValueType().getScalarType());
+    Res = DAG.getZeroExtendInReg(Res, dl, N0.getValueType());
 
   return Res;
 }

@@ -405,7 +405,7 @@ void SancusTransformation::handleCalls(Module &M) {
           SmallVector<Value *, 6> A {IRB.CreateLoad(ID)};
           A.insert(std::end(A), CS.arg_begin(), CS.arg_end());
 
-          CallInst * CI = IRB.CreateCall(EF, A);
+          CallInst * CI = IRB.CreateCall(cast<FunctionType>(EF->getType()->getPointerElementType()), EF, A);
           CI->setCallingConv(CallingConv::SANCUS_ENTRY);
           I.replaceAllUsesWith(CI);
         }

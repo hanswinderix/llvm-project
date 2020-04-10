@@ -50,6 +50,7 @@
 #include "llvm/Support/SaveAndRestore.h"
 using namespace clang;
 using namespace sema;
+using llvm::RoundingMode;
 
 /// Determine whether the use of this declaration is valid, without
 /// emitting diagnostics.
@@ -13630,8 +13631,16 @@ ExprResult Sema::CreateBuiltinBinOp(SourceLocation OpLoc,
   if (ResultTy.isNull() || LHS.isInvalid() || RHS.isInvalid())
     return ExprError();
 
+  // The LHS is not converted to the result type for fixed-point compound
+  // assignment as the common type is computed on demand. Reset the CompLHSTy
+  // to the LHS type we would have gotten after unary conversions.
+  if (!CompLHSTy.isNull() &&
+      (LHS.get()->getType()->isFixedPointType() ||
+       RHS.get()->getType()->isFixedPointType()))
+    CompLHSTy = UsualUnaryConversions(LHS.get()).get()->getType();
+
   if (ResultTy->isRealFloatingType() &&
-      (getLangOpts().getFPRoundingMode() != LangOptions::FPR_ToNearest ||
+      (getLangOpts().getFPRoundingMode() != RoundingMode::NearestTiesToEven ||
        getLangOpts().getFPExceptionMode() != LangOptions::FPE_Ignore))
     // Mark the current function as usng floating point constrained intrinsics
     if (FunctionDecl *F = dyn_cast<FunctionDecl>(CurContext)) {
@@ -16478,6 +16487,20 @@ void Sema::MarkFunctionReferenced(SourceLocation Loc, FunctionDecl *Func,
     // parameter types to be complete. Check that now.
     if (funcHasParameterSizeMangling(*this, Func))
       CheckCompleteParameterTypesForMangler(*this, Func, Loc);
+
+    // In the MS C++ ABI, the compiler emits destructor variants where they are
+    // used. If the destructor is used here but defined elsewhere, mark the
+    // virtual base destructors referenced. If those virtual base destructors
+    // are inline, this will ensure they are defined when emitting the complete
+    // destructor variant. This checking may be redundant if the destructor is
+    // provided later in this TU.
+    if (Context.getTargetInfo().getCXXABI().isMicrosoft()) {
+      if (auto *Dtor = dyn_cast<CXXDestructorDecl>(Func)) {
+        CXXRecordDecl *Parent = Dtor->getParent();
+        if (Parent->getNumVBases() > 0 && !Dtor->getBody())
+          CheckCompleteDestructorVariant(Loc, Dtor);
+      }
+    }
 
     Func->markUsed(Context);
   }

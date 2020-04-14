@@ -874,12 +874,12 @@ SDValue MSP430TargetLowering::pushOnStack(SDValue Chain,
 //   - Move (part of it) to SLLVM.h?
 //   - Make it part of the CC ? 
 static bool isOCall(TargetLowering::CallLoweringInfo &CLI) {
-  if (CLI.CS.getInstruction() == nullptr)
+  if (CLI.CB == nullptr)
     return false;
 
-  auto F = CLI.CS.getCaller();
-  if (sllvm::isProtected(CLI.CS.getCaller())) {
-    const Function *CF = CLI.CS.getCalledFunction();
+  auto F = CLI.CB->getCaller();
+  if (sllvm::isProtected(CLI.CB->getCaller())) {
+    const Function *CF = CLI.CB->getCalledFunction();
     assert (CF != nullptr && "Indirect calls are not allowed in enclaves");
     return (! sllvm::shareProtectionDomains(F, CF));
   }
@@ -901,10 +901,10 @@ SDValue MSP430TargetLowering::lowerSancusCall(
     const SDLoc &dl,
     SelectionDAG &DAG) const {
 
-  if (CLI.CS.getInstruction() == nullptr)
+  if (CLI.CB == nullptr)
     return Chain;
 
-  const Function * C = CLI.CS.getCaller();
+  const Function * C = CLI.CB->getCaller();
 
   if ((! sllvm::isProtected(C)) && (CLI.CallConv != CallingConv::SANCUS_ENTRY))
     return Chain;
@@ -918,7 +918,7 @@ SDValue MSP430TargetLowering::lowerSancusCall(
   const Module * M = C->getParent();
 
   if (sllvm::isProtected(C) ) {
-    const Function *CF = CLI.CS.getCalledFunction();
+    const Function *CF = CLI.CB->getCalledFunction();
     assert(CF != nullptr && "Indirect calls are not allowed in enclaves");
 
     // Retrieve the dispatcher's address
@@ -980,12 +980,12 @@ SDValue MSP430TargetLowering::LowerSancusCallResult(
     const SDLoc &dl,
     SelectionDAG &DAG) const {
 
-  if (CLI.CS.getInstruction() == nullptr)
+  if (CLI.CB == nullptr)
     return Chain;
 
-  const Function * F = CLI.CS.getCaller();
+  const Function * F = CLI.CB->getCaller();
   const Module * M = F->getParent();
-  const Function *CF = CLI.CS.getCalledFunction();
+  const Function *CF = CLI.CB->getCalledFunction();
 
   if ( (CLI.CallConv == CallingConv::SANCUS_ENTRY)
       || ( sllvm::isProtected(F) && (CF != nullptr) && !(sllvm::shareProtectionDomains(F, CF))) ) {
@@ -994,7 +994,7 @@ SDValue MSP430TargetLowering::LowerSancusCallResult(
     MCSymbol *ACL = MF.getMMI().getContext().getDirectionalLocalSymbol(0, true);
     Chain = DAG.getLabelNode(ISD::ANNOTATION_LABEL, dl, Chain, ACL);
 
-    if (! (sllvm::isProtected(CLI.CS.getCaller())) ) { 
+    if (! (sllvm::isProtected(CLI.CB->getCaller())) ) { 
       Chain = 
         restoreStack(Chain, dl, DAG, M, sllvm::sancus::getGLobalStackName());
     }
@@ -1099,7 +1099,7 @@ SDValue MSP430TargetLowering::LowerCCCCallTo(
   }
 
   if (isOCall(CLI)) {
-    const Function * C = CLI.CS.getCaller();
+    const Function * C = CLI.CB->getCaller();
     // TODO: Get rid of strdup
     Callee = DAG.getTargetExternalSymbol(
         strdup(sllvm::sancus::getOCallHandlerName(C).c_str()), PtrVT);

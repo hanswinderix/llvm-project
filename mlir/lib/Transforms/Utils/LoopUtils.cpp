@@ -23,6 +23,7 @@
 #include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/Function.h"
 #include "mlir/IR/IntegerSet.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/Transforms/RegionUtils.h"
 #include "mlir/Transforms/Utils.h"
 #include "llvm/ADT/DenseMap.h"
@@ -312,9 +313,19 @@ LogicalResult mlir::affineForOpBodySkew(AffineForOp forOp,
                                   opGroupQueue, /*offset=*/0, forOp, b);
         lbShift = d * step;
       }
-      if (!prologue && res)
-        prologue = res;
-      epilogue = res;
+
+      if (res) {
+        // Simplify/canonicalize the affine.for.
+        OwningRewritePatternList patterns;
+        AffineForOp::getCanonicalizationPatterns(patterns, res.getContext());
+        bool erased;
+        applyOpPatternsAndFold(res, std::move(patterns), &erased);
+
+        if (!erased && !prologue)
+          prologue = res;
+        if (!erased)
+          epilogue = res;
+      }
     } else {
       // Start of first interval.
       lbShift = d * step;
@@ -414,7 +425,7 @@ LogicalResult mlir::loopUnrollByFactor(AffineForOp forOp,
     return promoteIfSingleIteration(forOp);
 
   // Nothing in the loop body other than the terminator.
-  if (has_single_element(forOp.getBody()->getOperations()))
+  if (llvm::hasSingleElement(forOp.getBody()->getOperations()))
     return success();
 
   // Loops where the lower bound is a max expression isn't supported for
@@ -538,7 +549,7 @@ LogicalResult mlir::loopUnrollJamByFactor(AffineForOp forOp,
     return promoteIfSingleIteration(forOp);
 
   // Nothing in the loop body other than the terminator.
-  if (has_single_element(forOp.getBody()->getOperations()))
+  if (llvm::hasSingleElement(forOp.getBody()->getOperations()))
     return success();
 
   // Loops where both lower and upper bounds are multi-result maps won't be
@@ -694,7 +705,8 @@ bool mlir::isValidLoopInterchangePermutation(ArrayRef<AffineForOp> loops,
 }
 
 /// Return true if `loops` is a perfect nest.
-static bool LLVM_ATTRIBUTE_UNUSED isPerfectlyNested(ArrayRef<AffineForOp> loops) {
+static bool LLVM_ATTRIBUTE_UNUSED
+isPerfectlyNested(ArrayRef<AffineForOp> loops) {
   auto outerLoop = loops.front();
   for (auto loop : loops.drop_front()) {
     auto parentForOp = dyn_cast<AffineForOp>(loop.getParentOp());

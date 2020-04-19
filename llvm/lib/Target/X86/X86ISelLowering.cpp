@@ -13,6 +13,7 @@
 
 #include "X86ISelLowering.h"
 #include "MCTargetDesc/X86ShuffleDecode.h"
+#include "X86.h"
 #include "X86CallingConv.h"
 #include "X86FrameLowering.h"
 #include "X86InstrBuilder.h"
@@ -73,13 +74,6 @@ static cl::opt<int> ExperimentalPrefLoopAlignment(
         "Sets the preferable loop alignment for experiments (as log2 bytes)"
         "(the last x86-experimental-pref-loop-alignment bits"
         " of the loop header PC will be 0)."),
-    cl::Hidden);
-
-// Added in 10.0.
-static cl::opt<bool> EnableOldKNLABI(
-    "x86-enable-old-knl-abi", cl::init(false),
-    cl::desc("Enables passing v32i16 and v64i8 in 2 YMM registers instead of "
-             "one ZMM register on AVX512F, but not AVX512BW targets."),
     cl::Hidden);
 
 static cl::opt<bool> MulConstantOptimization(
@@ -1457,10 +1451,14 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
   // elements. 512-bits can be disabled based on prefer-vector-width and
   // required-vector-width function attributes.
   if (!Subtarget.useSoftFloat() && Subtarget.useAVX512Regs()) {
+    bool HasBWI = Subtarget.hasBWI();
+
     addRegisterClass(MVT::v16i32, &X86::VR512RegClass);
     addRegisterClass(MVT::v16f32, &X86::VR512RegClass);
     addRegisterClass(MVT::v8i64,  &X86::VR512RegClass);
     addRegisterClass(MVT::v8f64,  &X86::VR512RegClass);
+    addRegisterClass(MVT::v32i16, &X86::VR512RegClass);
+    addRegisterClass(MVT::v64i8,  &X86::VR512RegClass);
 
     for (auto ExtType : {ISD::ZEXTLOAD, ISD::SEXTLOAD}) {
       setLoadExtAction(ExtType, MVT::v16i32, MVT::v16i8,  Legal);
@@ -1525,17 +1523,16 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
 
     setOperationAction(ISD::TRUNCATE,           MVT::v8i32, Custom);
     setOperationAction(ISD::TRUNCATE,           MVT::v16i16, Custom);
+    setOperationAction(ISD::TRUNCATE,           MVT::v32i8, Custom);
+    setOperationAction(ISD::ZERO_EXTEND,        MVT::v32i16, Custom);
     setOperationAction(ISD::ZERO_EXTEND,        MVT::v16i32, Custom);
     setOperationAction(ISD::ZERO_EXTEND,        MVT::v8i64, Custom);
+    setOperationAction(ISD::ANY_EXTEND,         MVT::v32i16, Custom);
     setOperationAction(ISD::ANY_EXTEND,         MVT::v16i32, Custom);
     setOperationAction(ISD::ANY_EXTEND,         MVT::v8i64, Custom);
+    setOperationAction(ISD::SIGN_EXTEND,        MVT::v32i16, Custom);
     setOperationAction(ISD::SIGN_EXTEND,        MVT::v16i32, Custom);
     setOperationAction(ISD::SIGN_EXTEND,        MVT::v8i64, Custom);
-
-    // Need to custom widen this if we don't have AVX512BW.
-    setOperationAction(ISD::ANY_EXTEND,         MVT::v8i8, Custom);
-    setOperationAction(ISD::ZERO_EXTEND,        MVT::v8i8, Custom);
-    setOperationAction(ISD::SIGN_EXTEND,        MVT::v8i8, Custom);
 
     for (auto VT : { MVT::v16f32, MVT::v8f64 }) {
       setOperationAction(ISD::FFLOOR,            VT, Legal);
@@ -1550,48 +1547,68 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
       setOperationAction(ISD::STRICT_FNEARBYINT, VT, Legal);
 
       setOperationAction(ISD::FROUND,            VT, Custom);
-
-      setOperationAction(ISD::SELECT,           VT, Custom);
     }
 
-    // Without BWI we need to use custom lowering to handle MVT::v64i8 input.
-    for (auto VT : {MVT::v16i32, MVT::v8i64, MVT::v64i8}) {
+    for (auto VT : {MVT::v32i16, MVT::v16i32, MVT::v8i64}) {
       setOperationAction(ISD::SIGN_EXTEND_VECTOR_INREG, VT, Custom);
       setOperationAction(ISD::ZERO_EXTEND_VECTOR_INREG, VT, Custom);
     }
 
-    setOperationAction(ISD::CONCAT_VECTORS,     MVT::v8f64,  Custom);
-    setOperationAction(ISD::CONCAT_VECTORS,     MVT::v8i64,  Custom);
-    setOperationAction(ISD::CONCAT_VECTORS,     MVT::v16f32,  Custom);
-    setOperationAction(ISD::CONCAT_VECTORS,     MVT::v16i32,  Custom);
+    setOperationAction(ISD::ADD, MVT::v32i16, HasBWI ? Legal : Custom);
+    setOperationAction(ISD::SUB, MVT::v32i16, HasBWI ? Legal : Custom);
+    setOperationAction(ISD::ADD, MVT::v64i8,  HasBWI ? Legal : Custom);
+    setOperationAction(ISD::SUB, MVT::v64i8,  HasBWI ? Legal : Custom);
 
-    setOperationAction(ISD::MUL,                MVT::v8i64, Custom);
-    setOperationAction(ISD::MUL,                MVT::v16i32, Legal);
+    setOperationAction(ISD::MUL, MVT::v8i64,  Custom);
+    setOperationAction(ISD::MUL, MVT::v16i32, Legal);
+    setOperationAction(ISD::MUL, MVT::v32i16, HasBWI ? Legal : Custom);
+    setOperationAction(ISD::MUL, MVT::v64i8,  Custom);
 
-    setOperationAction(ISD::MULHU,              MVT::v16i32,  Custom);
-    setOperationAction(ISD::MULHS,              MVT::v16i32,  Custom);
+    setOperationAction(ISD::MULHU, MVT::v16i32, Custom);
+    setOperationAction(ISD::MULHS, MVT::v16i32, Custom);
+    setOperationAction(ISD::MULHS, MVT::v32i16, HasBWI ? Legal : Custom);
+    setOperationAction(ISD::MULHU, MVT::v32i16, HasBWI ? Legal : Custom);
+    setOperationAction(ISD::MULHS, MVT::v64i8,  Custom);
+    setOperationAction(ISD::MULHU, MVT::v64i8,  Custom);
 
+    setOperationAction(ISD::BITREVERSE, MVT::v64i8,  Custom);
+
+    for (auto VT : { MVT::v64i8, MVT::v32i16, MVT::v16i32, MVT::v8i64 }) {
+      setOperationAction(ISD::SRL,              VT, Custom);
+      setOperationAction(ISD::SHL,              VT, Custom);
+      setOperationAction(ISD::SRA,              VT, Custom);
+      setOperationAction(ISD::SETCC,            VT, Custom);
+
+      // The condition codes aren't legal in SSE/AVX and under AVX512 we use
+      // setcc all the way to isel and prefer SETGT in some isel patterns.
+      setCondCodeAction(ISD::SETLT, VT, Custom);
+      setCondCodeAction(ISD::SETLE, VT, Custom);
+    }
     for (auto VT : { MVT::v16i32, MVT::v8i64 }) {
       setOperationAction(ISD::SMAX,             VT, Legal);
       setOperationAction(ISD::UMAX,             VT, Legal);
       setOperationAction(ISD::SMIN,             VT, Legal);
       setOperationAction(ISD::UMIN,             VT, Legal);
       setOperationAction(ISD::ABS,              VT, Legal);
-      setOperationAction(ISD::SRL,              VT, Custom);
-      setOperationAction(ISD::SHL,              VT, Custom);
-      setOperationAction(ISD::SRA,              VT, Custom);
       setOperationAction(ISD::CTPOP,            VT, Custom);
       setOperationAction(ISD::ROTL,             VT, Custom);
       setOperationAction(ISD::ROTR,             VT, Custom);
-      setOperationAction(ISD::SETCC,            VT, Custom);
       setOperationAction(ISD::STRICT_FSETCC,    VT, Custom);
       setOperationAction(ISD::STRICT_FSETCCS,   VT, Custom);
-      setOperationAction(ISD::SELECT,           VT, Custom);
+    }
 
-      // The condition codes aren't legal in SSE/AVX and under AVX512 we use
-      // setcc all the way to isel and prefer SETGT in some isel patterns.
-      setCondCodeAction(ISD::SETLT, VT, Custom);
-      setCondCodeAction(ISD::SETLE, VT, Custom);
+    for (auto VT : { MVT::v64i8, MVT::v32i16 }) {
+      setOperationAction(ISD::ABS,     VT, HasBWI ? Legal : Custom);
+      setOperationAction(ISD::CTPOP,   VT, Subtarget.hasBITALG() ? Legal : Custom);
+      setOperationAction(ISD::CTLZ,    VT, Custom);
+      setOperationAction(ISD::SMAX,    VT, HasBWI ? Legal : Custom);
+      setOperationAction(ISD::UMAX,    VT, HasBWI ? Legal : Custom);
+      setOperationAction(ISD::SMIN,    VT, HasBWI ? Legal : Custom);
+      setOperationAction(ISD::UMIN,    VT, HasBWI ? Legal : Custom);
+      setOperationAction(ISD::UADDSAT, VT, HasBWI ? Legal : Custom);
+      setOperationAction(ISD::SADDSAT, VT, HasBWI ? Legal : Custom);
+      setOperationAction(ISD::USUBSAT, VT, HasBWI ? Legal : Custom);
+      setOperationAction(ISD::SSUBSAT, VT, HasBWI ? Legal : Custom);
     }
 
     if (Subtarget.hasDQI()) {
@@ -1626,27 +1643,28 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
                      MVT::v8f32, MVT::v4f64 })
       setOperationAction(ISD::EXTRACT_SUBVECTOR, VT, Legal);
 
+    for (auto VT : { MVT::v64i8, MVT::v32i16, MVT::v16i32, MVT::v8i64,
+                     MVT::v16f32, MVT::v8f64 }) {
+      setOperationAction(ISD::CONCAT_VECTORS,     VT, Custom);
+      setOperationAction(ISD::INSERT_SUBVECTOR,   VT, Legal);
+      setOperationAction(ISD::SELECT,             VT, Custom);
+      setOperationAction(ISD::VSELECT,            VT, Custom);
+      setOperationAction(ISD::BUILD_VECTOR,       VT, Custom);
+      setOperationAction(ISD::EXTRACT_VECTOR_ELT, VT, Custom);
+      setOperationAction(ISD::VECTOR_SHUFFLE,     VT, Custom);
+      setOperationAction(ISD::SCALAR_TO_VECTOR,   VT, Custom);
+      setOperationAction(ISD::INSERT_VECTOR_ELT,  VT, Custom);
+    }
+
     for (auto VT : { MVT::v16i32, MVT::v8i64, MVT::v16f32, MVT::v8f64 }) {
-      setOperationAction(ISD::VECTOR_SHUFFLE,      VT, Custom);
-      setOperationAction(ISD::INSERT_VECTOR_ELT,   VT, Custom);
-      setOperationAction(ISD::BUILD_VECTOR,        VT, Custom);
-      setOperationAction(ISD::VSELECT,             VT, Custom);
-      setOperationAction(ISD::EXTRACT_VECTOR_ELT,  VT, Custom);
-      setOperationAction(ISD::SCALAR_TO_VECTOR,    VT, Custom);
-      setOperationAction(ISD::INSERT_SUBVECTOR,    VT, Legal);
       setOperationAction(ISD::MLOAD,               VT, Legal);
       setOperationAction(ISD::MSTORE,              VT, Legal);
       setOperationAction(ISD::MGATHER,             VT, Custom);
       setOperationAction(ISD::MSCATTER,            VT, Custom);
     }
     if (!Subtarget.hasBWI()) {
-      // Need to custom split v32i16/v64i8 bitcasts.
-      setOperationAction(ISD::BITCAST, MVT::v32i16, Custom);
-      setOperationAction(ISD::BITCAST, MVT::v64i8,  Custom);
-
-      // Better to split these into two 256-bit ops.
-      setOperationAction(ISD::BITREVERSE, MVT::v8i64, Custom);
-      setOperationAction(ISD::BITREVERSE, MVT::v16i32, Custom);
+      setOperationAction(ISD::STORE, MVT::v32i16, Custom);
+      setOperationAction(ISD::STORE, MVT::v64i8,  Custom);
     }
 
     if (Subtarget.hasVBMI2()) {
@@ -1781,78 +1799,20 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
   // disabled based on prefer-vector-width and required-vector-width function
   // attributes.
   if (!Subtarget.useSoftFloat() && Subtarget.useBWIRegs()) {
-    addRegisterClass(MVT::v32i16, &X86::VR512RegClass);
-    addRegisterClass(MVT::v64i8,  &X86::VR512RegClass);
-
     // Extends from v64i1 masks to 512-bit vectors.
     setOperationAction(ISD::SIGN_EXTEND,        MVT::v64i8, Custom);
     setOperationAction(ISD::ZERO_EXTEND,        MVT::v64i8, Custom);
     setOperationAction(ISD::ANY_EXTEND,         MVT::v64i8, Custom);
 
-    setOperationAction(ISD::MUL,                MVT::v32i16, Legal);
-    setOperationAction(ISD::MUL,                MVT::v64i8, Custom);
-    setOperationAction(ISD::MULHS,              MVT::v32i16, Legal);
-    setOperationAction(ISD::MULHU,              MVT::v32i16, Legal);
-    setOperationAction(ISD::MULHS,              MVT::v64i8, Custom);
-    setOperationAction(ISD::MULHU,              MVT::v64i8, Custom);
-    setOperationAction(ISD::CONCAT_VECTORS,     MVT::v32i16, Custom);
-    setOperationAction(ISD::CONCAT_VECTORS,     MVT::v64i8, Custom);
-    setOperationAction(ISD::INSERT_SUBVECTOR,   MVT::v32i16, Legal);
-    setOperationAction(ISD::INSERT_SUBVECTOR,   MVT::v64i8, Legal);
-    setOperationAction(ISD::EXTRACT_VECTOR_ELT, MVT::v32i16, Custom);
-    setOperationAction(ISD::EXTRACT_VECTOR_ELT, MVT::v64i8, Custom);
-    setOperationAction(ISD::SCALAR_TO_VECTOR,   MVT::v32i16, Custom);
-    setOperationAction(ISD::SCALAR_TO_VECTOR,   MVT::v64i8, Custom);
-    setOperationAction(ISD::SIGN_EXTEND,        MVT::v32i16, Custom);
-    setOperationAction(ISD::ZERO_EXTEND,        MVT::v32i16, Custom);
-    setOperationAction(ISD::ANY_EXTEND,         MVT::v32i16, Custom);
-    setOperationAction(ISD::VECTOR_SHUFFLE,     MVT::v32i16, Custom);
-    setOperationAction(ISD::VECTOR_SHUFFLE,     MVT::v64i8, Custom);
-    setOperationAction(ISD::INSERT_VECTOR_ELT,  MVT::v32i16, Custom);
-    setOperationAction(ISD::INSERT_VECTOR_ELT,  MVT::v64i8, Custom);
-    setOperationAction(ISD::TRUNCATE,           MVT::v32i8, Custom);
-    setOperationAction(ISD::BITREVERSE,         MVT::v64i8, Custom);
-
-    setOperationAction(ISD::SIGN_EXTEND_VECTOR_INREG, MVT::v32i16, Custom);
-    setOperationAction(ISD::ZERO_EXTEND_VECTOR_INREG, MVT::v32i16, Custom);
-
     setTruncStoreAction(MVT::v32i16,  MVT::v32i8, Legal);
 
     for (auto VT : { MVT::v64i8, MVT::v32i16 }) {
-      setOperationAction(ISD::BUILD_VECTOR, VT, Custom);
-      setOperationAction(ISD::VSELECT,      VT, Custom);
-      setOperationAction(ISD::ABS,          VT, Legal);
-      setOperationAction(ISD::SRL,          VT, Custom);
-      setOperationAction(ISD::SHL,          VT, Custom);
-      setOperationAction(ISD::SRA,          VT, Custom);
       setOperationAction(ISD::MLOAD,        VT, Legal);
       setOperationAction(ISD::MSTORE,       VT, Legal);
-      setOperationAction(ISD::CTPOP,        VT, Custom);
-      setOperationAction(ISD::CTLZ,         VT, Custom);
-      setOperationAction(ISD::SMAX,         VT, Legal);
-      setOperationAction(ISD::UMAX,         VT, Legal);
-      setOperationAction(ISD::SMIN,         VT, Legal);
-      setOperationAction(ISD::UMIN,         VT, Legal);
-      setOperationAction(ISD::SETCC,        VT, Custom);
-      setOperationAction(ISD::UADDSAT,      VT, Legal);
-      setOperationAction(ISD::SADDSAT,      VT, Legal);
-      setOperationAction(ISD::USUBSAT,      VT, Legal);
-      setOperationAction(ISD::SSUBSAT,      VT, Legal);
-      setOperationAction(ISD::SELECT,       VT, Custom);
-
-      // The condition codes aren't legal in SSE/AVX and under AVX512 we use
-      // setcc all the way to isel and prefer SETGT in some isel patterns.
-      setCondCodeAction(ISD::SETLT, VT, Custom);
-      setCondCodeAction(ISD::SETLE, VT, Custom);
     }
 
     for (auto ExtType : {ISD::ZEXTLOAD, ISD::SEXTLOAD}) {
       setLoadExtAction(ExtType, MVT::v32i16, MVT::v32i8, Legal);
-    }
-
-    if (Subtarget.hasBITALG()) {
-      for (auto VT : { MVT::v64i8, MVT::v32i16 })
-        setOperationAction(ISD::CTPOP, VT, Legal);
     }
 
     if (Subtarget.hasVBMI2()) {
@@ -2097,7 +2057,8 @@ SDValue X86TargetLowering::emitStackGuardXorFP(SelectionDAG &DAG, SDValue Val,
 
 TargetLoweringBase::LegalizeTypeAction
 X86TargetLowering::getPreferredVectorAction(MVT VT) const {
-  if (VT == MVT::v32i1 && Subtarget.hasAVX512() && !Subtarget.hasBWI())
+  if ((VT == MVT::v32i1 || VT == MVT::v64i1) && Subtarget.hasAVX512() &&
+      !Subtarget.hasBWI())
     return TypeSplitVector;
 
   if (VT.getVectorNumElements() != 1 &&
@@ -2156,11 +2117,6 @@ MVT X86TargetLowering::getRegisterTypeForCallingConv(LLVMContext &Context,
       return RegisterVT;
   }
 
-  // FIXME: Should we just make these types legal and custom split operations?
-  if ((VT == MVT::v32i16 || VT == MVT::v64i8) && !EnableOldKNLABI &&
-      Subtarget.useAVX512Regs() && !Subtarget.hasBWI())
-    return MVT::v16i32;
-
   return TargetLowering::getRegisterTypeForCallingConv(Context, CC, VT);
 }
 
@@ -2178,11 +2134,6 @@ unsigned X86TargetLowering::getNumRegistersForCallingConv(LLVMContext &Context,
     if (RegisterVT != MVT::INVALID_SIMPLE_VALUE_TYPE)
       return NumRegisters;
   }
-
-  // FIXME: Should we just make these types legal and custom split operations?
-  if ((VT == MVT::v32i16 || VT == MVT::v64i8) && !EnableOldKNLABI &&
-      Subtarget.useAVX512Regs() && !Subtarget.hasBWI())
-    return 1;
 
   return TargetLowering::getNumRegistersForCallingConv(Context, CC, VT);
 }
@@ -2252,7 +2203,7 @@ static void getMaxByValAlign(Type *Ty, unsigned &MaxAlign) {
   if (MaxAlign == 16)
     return;
   if (VectorType *VTy = dyn_cast<VectorType>(Ty)) {
-    if (VTy->getBitWidth() == 128)
+    if (VTy->getPrimitiveSizeInBits().getFixedSize() == 128)
       MaxAlign = 16;
   } else if (ArrayType *ATy = dyn_cast<ArrayType>(Ty)) {
     unsigned EltAlign = 0;
@@ -7511,12 +7462,16 @@ static bool getFauxShuffleMask(SDValue N, const APInt &DemandedElts,
     }
 
     // Peek through trunc/aext/zext.
+    // TODO: handle elements smaller than VT.
     // TODO: aext shouldn't require SM_SentinelZero padding.
     // TODO: handle shift of scalars.
     while (Scl.getOpcode() == ISD::TRUNCATE ||
            Scl.getOpcode() == ISD::ANY_EXTEND ||
-           Scl.getOpcode() == ISD::ZERO_EXTEND)
+           Scl.getOpcode() == ISD::ZERO_EXTEND) {
       Scl = Scl.getOperand(0);
+      if (Scl.getScalarValueSizeInBits() < NumBitsPerElt)
+        return false;
+    }
 
     // Attempt to find the source vector the scalar was extracted from.
     SDValue SrcExtract;
@@ -17506,6 +17461,9 @@ static SDValue lower512BitShuffle(const SDLoc &DL, ArrayRef<int> Mask,
                                                   Subtarget, DAG))
     return Broadcast;
 
+  if ((VT == MVT::v32i16 || VT == MVT::v64i8) && !Subtarget.hasBWI())
+    return splitAndLowerShuffle(DL, VT, V1, V2, Mask, DAG);
+
   // Dispatch to each element type for lowering. If we don't have support for
   // specific element type shuffles at 512 bits, immediately split them and
   // lower them. Each lowering routine of a given type is allowed to assume that
@@ -17987,6 +17945,10 @@ SDValue X86TargetLowering::LowerVSELECT(SDValue Op, SelectionDAG &DAG) const {
   MVT VT = Op.getSimpleValueType();
   unsigned EltSize = VT.getScalarSizeInBits();
   unsigned NumElts = VT.getVectorNumElements();
+
+  // Expand v32i16/v64i8 without BWI.
+  if ((VT == MVT::v32i16 || VT == MVT::v64i8) && !Subtarget.hasBWI())
+    return SDValue();
 
   // If the VSELECT is on a 512-bit type, we have to convert a non-i1 condition
   // into an i1 condition so that we can use the mask-based 512-bit blend
@@ -19220,16 +19182,24 @@ static SDValue lowerFPToIntToFP(SDValue CastToFP, SelectionDAG &DAG,
   MVT IntVT = CastToInt.getSimpleValueType();
   SDValue X = CastToInt.getOperand(0);
   // TODO: Allow size-changing from source to dest (double -> i32 -> float)
-  if (X.getSimpleValueType() != VT ||
-      VT.getSizeInBits() != IntVT.getSizeInBits())
+  if (X.getSimpleValueType() != VT)
     return SDValue();
 
-  // See if we have a 128-bit vector cast op for this type of cast.
-  unsigned NumEltsInXMM = 128 / VT.getScalarSizeInBits();
-  MVT Vec128VT = MVT::getVectorVT(VT, NumEltsInXMM);
-  MVT Int128VT = MVT::getVectorVT(IntVT, NumEltsInXMM);
-  if (!useVectorCast(CastToFP.getOpcode(), Int128VT, Vec128VT, Subtarget))
+  // See if we have 128-bit vector cast instructions for this type of cast.
+  // We need cvttps2dq + cvtdq2ps or cvttpd2dq + cvtdq2pd.
+  if (!Subtarget.hasSSE2() || (VT != MVT::f32 && VT != MVT::f64) ||
+      IntVT != MVT::i32)
     return SDValue();
+
+  unsigned NumFPEltsInXMM = 128 / VT.getScalarSizeInBits();
+  unsigned NumIntEltsInXMM = 128 / IntVT.getScalarSizeInBits();
+  MVT VecFPVT = MVT::getVectorVT(VT, NumFPEltsInXMM);
+  MVT VecIntVT = MVT::getVectorVT(IntVT, NumIntEltsInXMM);
+
+  // We need target-specific opcodes if this is v2f64 -> v4i32 -> v2f64.
+  bool NeedX86Opcodes = VT.getSizeInBits() != IntVT.getSizeInBits();
+  unsigned ToIntOpcode = NeedX86Opcodes ? X86ISD::CVTTP2SI : ISD::FP_TO_SINT;
+  unsigned ToFPOpcode = NeedX86Opcodes ? X86ISD::CVTSI2P : ISD::SINT_TO_FP;
 
   // sint_to_fp (fp_to_sint X) --> extelt (sint_to_fp (fp_to_sint (s2v X))), 0
   //
@@ -19239,9 +19209,9 @@ static SDValue lowerFPToIntToFP(SDValue CastToFP, SelectionDAG &DAG,
   // penalties) with cast ops.
   SDLoc DL(CastToFP);
   SDValue ZeroIdx = DAG.getIntPtrConstant(0, DL);
-  SDValue VecX = DAG.getNode(ISD::SCALAR_TO_VECTOR, DL, Vec128VT, X);
-  SDValue VCastToInt = DAG.getNode(ISD::FP_TO_SINT, DL, Int128VT, VecX);
-  SDValue VCastToFP = DAG.getNode(ISD::SINT_TO_FP, DL, Vec128VT, VCastToInt);
+  SDValue VecX = DAG.getNode(ISD::SCALAR_TO_VECTOR, DL, VecFPVT, X);
+  SDValue VCastToInt = DAG.getNode(ToIntOpcode, DL, VecIntVT, VecX);
+  SDValue VCastToFP = DAG.getNode(ToFPOpcode, DL, VecFPVT, VCastToInt);
   return DAG.getNode(ISD::EXTRACT_VECTOR_ELT, DL, VT, VCastToFP, ZeroIdx);
 }
 
@@ -20139,14 +20109,9 @@ static SDValue LowerAVXExtend(SDValue Op, SelectionDAG &DAG,
 
   unsigned ExtendInVecOpc = getOpcode_EXTEND_VECTOR_INREG(Opc);
 
-  // Custom legalize v8i8->v8i64 on CPUs without avx512bw.
-  if (InVT == MVT::v8i8) {
-    if (VT != MVT::v8i64)
-      return SDValue();
-
-    In = DAG.getNode(ISD::CONCAT_VECTORS, SDLoc(Op),
-                     MVT::v16i8, In, DAG.getUNDEF(MVT::v8i8));
-    return DAG.getNode(ExtendInVecOpc, dl, VT, In);
+  if (VT == MVT::v32i16 && !Subtarget.hasBWI()) {
+    assert(InVT == MVT::v32i8 && "Unexpected VT!");
+    return splitVectorIntUnary(Op, DAG);
   }
 
   if (Subtarget.hasInt256())
@@ -20491,6 +20456,11 @@ SDValue X86TargetLowering::LowerTRUNCATE(SDValue Op, SelectionDAG &DAG) const {
 
   // vpmovqb/w/d, vpmovdb/w, vpmovwb
   if (Subtarget.hasAVX512()) {
+    if (InVT == MVT::v32i16 && !Subtarget.hasBWI()) {
+      assert(VT == MVT::v32i8 && "Unexpected VT!");
+      return splitVectorIntUnary(Op, DAG);
+    }
+
     // word to byte only under BWI. Otherwise we have to promoted to v16i32
     // and then truncate that. But we should only do that if we haven't been
     // asked to avoid 512-bit vectors. The actual promotion to v16i32 will be
@@ -22252,6 +22222,9 @@ static SDValue LowerVSETCC(SDValue Op, const X86Subtarget &Subtarget,
   if (VT.is256BitVector() && !Subtarget.hasInt256())
     return splitIntVSETCC(Op, DAG);
 
+  if (VT == MVT::v32i16 || VT == MVT::v64i8)
+    return splitIntVSETCC(Op, DAG);
+
   // If this is a SETNE against the signed minimum value, change it to SETGT.
   // If this is a SETNE against the signed maximum value, change it to SETLT.
   // which will be swapped to SETGT.
@@ -23224,14 +23197,9 @@ static SDValue LowerSIGN_EXTEND(SDValue Op, const X86Subtarget &Subtarget,
           InVT.getVectorElementType() == MVT::i32) &&
          "Unexpected element type");
 
-  // Custom legalize v8i8->v8i64 on CPUs without avx512bw.
-  if (InVT == MVT::v8i8) {
-    if (VT != MVT::v8i64)
-      return SDValue();
-
-    In = DAG.getNode(ISD::CONCAT_VECTORS, SDLoc(Op),
-                     MVT::v16i8, In, DAG.getUNDEF(MVT::v8i8));
-    return DAG.getNode(ISD::SIGN_EXTEND_VECTOR_INREG, dl, VT, In);
+  if (VT == MVT::v32i16 && !Subtarget.hasBWI()) {
+    assert(InVT == MVT::v32i8 && "Unexpected VT!");
+    return splitVectorIntUnary(Op, DAG);
   }
 
   if (Subtarget.hasInt256())
@@ -23365,7 +23333,9 @@ static SDValue LowerStore(SDValue Op, const X86Subtarget &Subtarget,
   // and each half can execute independently. Some cores would split the op into
   // halves anyway, so the concat (vinsertf128) is purely an extra op.
   MVT StoreVT = StoredVal.getSimpleValueType();
-  if (StoreVT.is256BitVector()) {
+  if (StoreVT.is256BitVector() ||
+      ((StoreVT == MVT::v32i16 || StoreVT == MVT::v64i8) &&
+       !Subtarget.hasBWI())) {
     SmallVector<SDValue, 4> CatOps;
     if (StoredVal.hasOneUse() && collectConcatOps(StoredVal.getNode(), CatOps))
       return splitVectorStore(St, DAG);
@@ -26195,6 +26165,9 @@ static SDValue lowerAddSub(SDValue Op, SelectionDAG &DAG,
     return DAG.getNode(ISD::XOR, SDLoc(Op), VT,
                        Op.getOperand(0), Op.getOperand(1));
 
+  if (VT == MVT::v32i16 || VT == MVT::v64i8)
+    return splitVectorIntBinary(Op, DAG);
+
   assert(Op.getSimpleValueType().is256BitVector() &&
          Op.getSimpleValueType().isInteger() &&
          "Only handle AVX 256-bit vector integer operation");
@@ -26243,6 +26216,9 @@ static SDValue LowerADDSAT_SUBSAT(SDValue Op, SelectionDAG &DAG,
     return SDValue();
   }
 
+  if (VT == MVT::v32i16 || VT == MVT::v64i8)
+    return splitVectorIntBinary(Op, DAG);
+
   assert(Op.getSimpleValueType().is256BitVector() &&
          Op.getSimpleValueType().isInteger() &&
          "Only handle AVX 256-bit vector integer operation");
@@ -26279,6 +26255,9 @@ static SDValue LowerABS(SDValue Op, const X86Subtarget &Subtarget,
     return splitVectorIntUnary(Op, DAG);
   }
 
+  if ((VT == MVT::v32i16 || VT == MVT::v64i8) && !Subtarget.hasBWI())
+    return splitVectorIntUnary(Op, DAG);
+
   // Default to expand.
   return SDValue();
 }
@@ -26288,6 +26267,9 @@ static SDValue LowerMINMAX(SDValue Op, SelectionDAG &DAG) {
 
   // For AVX1 cases, split to use legal ops (everything but v4i64).
   if (VT.getScalarType() != MVT::i64 && VT.is256BitVector())
+    return splitVectorIntBinary(Op, DAG);
+
+  if (VT == MVT::v32i16 || VT == MVT::v64i8)
     return splitVectorIntBinary(Op, DAG);
 
   SDLoc DL(Op);
@@ -26332,6 +26314,9 @@ static SDValue LowerMUL(SDValue Op, const X86Subtarget &Subtarget,
 
   // Decompose 256-bit ops into 128-bit ops.
   if (VT.is256BitVector() && !Subtarget.hasInt256())
+    return splitVectorIntBinary(Op, DAG);
+
+  if ((VT == MVT::v32i16 || VT == MVT::v64i8) && !Subtarget.hasBWI())
     return splitVectorIntBinary(Op, DAG);
 
   SDValue A = Op.getOperand(0);
@@ -26478,6 +26463,9 @@ static SDValue LowerMULH(SDValue Op, const X86Subtarget &Subtarget,
 
   // Decompose 256-bit ops into 128-bit ops.
   if (VT.is256BitVector() && !Subtarget.hasInt256())
+    return splitVectorIntBinary(Op, DAG);
+
+  if ((VT == MVT::v32i16 || VT == MVT::v64i8) && !Subtarget.hasBWI())
     return splitVectorIntBinary(Op, DAG);
 
   if (VT == MVT::v4i32 || VT == MVT::v8i32 || VT == MVT::v16i32) {
@@ -26861,7 +26849,7 @@ static SDValue LowerScalarImmediateShift(SDValue Op, SelectionDAG &DAG,
     return ArithmeticShiftRight64(ShiftAmt);
 
   if (VT == MVT::v16i8 || (Subtarget.hasInt256() && VT == MVT::v32i8) ||
-      VT == MVT::v64i8) {
+      (Subtarget.hasBWI() && VT == MVT::v64i8)) {
     unsigned NumElts = VT.getVectorNumElements();
     MVT ShiftVT = MVT::getVectorVT(MVT::i16, NumElts / 2);
 
@@ -27307,8 +27295,8 @@ static SDValue LowerShift(SDValue Op, const X86Subtarget &Subtarget,
   // Constant ISD::SRA/SRL can be performed efficiently on vXi8 vectors as we
   // extend to vXi16 to perform a MUL scale effectively as a MUL_LOHI.
   if (ConstantAmt && (Opc == ISD::SRA || Opc == ISD::SRL) &&
-      (VT == MVT::v16i8 || VT == MVT::v64i8 ||
-       (VT == MVT::v32i8 && Subtarget.hasInt256())) &&
+      (VT == MVT::v16i8 || (VT == MVT::v32i8 && Subtarget.hasInt256()) ||
+       (VT == MVT::v64i8 && Subtarget.hasBWI())) &&
       !Subtarget.hasXOP()) {
     int NumElts = VT.getVectorNumElements();
     SDValue Cst8 = DAG.getTargetConstant(8, dl, MVT::i8);
@@ -27544,6 +27532,9 @@ static SDValue LowerShift(SDValue Op, const X86Subtarget &Subtarget,
 
   // Decompose 256-bit shifts into 128-bit shifts.
   if (VT.is256BitVector())
+    return splitVectorIntBinary(Op, DAG);
+
+  if (VT == MVT::v32i16 || VT == MVT::v64i8)
     return splitVectorIntBinary(Op, DAG);
 
   return SDValue();
@@ -28076,18 +28067,6 @@ static SDValue LowerBITCAST(SDValue Op, const X86Subtarget &Subtarget,
     return DAG.getNode(ISD::CONCAT_VECTORS, dl, MVT::v64i1, Lo, Hi);
   }
 
-  // Custom splitting for BWI types when AVX512F is available but BWI isn't.
-  if ((SrcVT == MVT::v32i16 || SrcVT == MVT::v64i8) && DstVT.isVector() &&
-    DAG.getTargetLoweringInfo().isTypeLegal(DstVT)) {
-    SDLoc dl(Op);
-    SDValue Lo, Hi;
-    std::tie(Lo, Hi) = DAG.SplitVector(Op.getOperand(0), dl);
-    MVT CastVT = DstVT.getHalfNumVectorElementsVT();
-    Lo = DAG.getBitcast(CastVT, Lo);
-    Hi = DAG.getBitcast(CastVT, Hi);
-    return DAG.getNode(ISD::CONCAT_VECTORS, dl, DstVT, Lo, Hi);
-  }
-
   // Use MOVMSK for vector to scalar conversion to prevent scalarization.
   if ((SrcVT == MVT::v16i1 || SrcVT == MVT::v32i1) && DstVT.isScalarInteger()) {
     assert(!Subtarget.hasAVX512() && "Should use K-registers with AVX512");
@@ -28356,12 +28335,9 @@ static SDValue LowerBITREVERSE(SDValue Op, const X86Subtarget &Subtarget,
   SDValue In = Op.getOperand(0);
   SDLoc DL(Op);
 
-  // Split v8i64/v16i32 without BWI so that we can still use the PSHUFB
-  // lowering.
-  if (VT == MVT::v8i64 || VT == MVT::v16i32) {
-    assert(!Subtarget.hasBWI() && "BWI should Expand BITREVERSE");
+  // Split v64i8 without BWI so that we can still use the PSHUFB lowering.
+  if (VT == MVT::v64i8 && !Subtarget.hasBWI())
     return splitVectorIntUnary(Op, DAG);
-  }
 
   unsigned NumElts = VT.getVectorNumElements();
   assert(VT.getScalarType() == MVT::i8 &&
@@ -30001,19 +29977,6 @@ void X86TargetLowering::ReplaceNodeResults(SDNode *N,
       Lo = DAG.getBitcast(MVT::i32, Lo);
       Hi = DAG.getBitcast(MVT::i32, Hi);
       SDValue Res = DAG.getNode(ISD::BUILD_PAIR, dl, MVT::i64, Lo, Hi);
-      Results.push_back(Res);
-      return;
-    }
-
-    // Custom splitting for BWI types when AVX512F is available but BWI isn't.
-    if ((DstVT == MVT::v32i16 || DstVT == MVT::v64i8) &&
-        SrcVT.isVector() && isTypeLegal(SrcVT)) {
-      SDValue Lo, Hi;
-      std::tie(Lo, Hi) = DAG.SplitVectorOperand(N, 0);
-      MVT CastVT = (DstVT == MVT::v32i16) ? MVT::v16i16 : MVT::v32i8;
-      Lo = DAG.getBitcast(CastVT, Lo);
-      Hi = DAG.getBitcast(CastVT, Hi);
-      SDValue Res = DAG.getNode(ISD::CONCAT_VECTORS, dl, DstVT, Lo, Hi);
       Results.push_back(Res);
       return;
     }
@@ -40532,10 +40495,14 @@ static SDValue combineMulToPMADDWD(SDNode *N, SelectionDAG &DAG,
   if (!VT.isVector() || VT.getVectorElementType() != MVT::i32)
     return SDValue();
 
-  // Make sure the vXi16 type is legal. This covers the AVX512 without BWI case.
-  // Also allow v2i32 if it will be widened.
+  // Make sure the type is legal or will be widened to a legal type.
+  if (VT != MVT::v2i32 && !DAG.getTargetLoweringInfo().isTypeLegal(VT))
+    return SDValue();
+
   MVT WVT = MVT::getVectorVT(MVT::i16, 2 * VT.getVectorNumElements());
-  if (VT != MVT::v2i32 && !DAG.getTargetLoweringInfo().isTypeLegal(WVT))
+
+  // Without BWI, we would need to split v32i16.
+  if (WVT == MVT::v32i16 && !Subtarget.hasBWI())
     return SDValue();
 
   SDValue N0 = N->getOperand(0);

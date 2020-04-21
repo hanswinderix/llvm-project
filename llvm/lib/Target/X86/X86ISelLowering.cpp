@@ -19198,8 +19198,10 @@ static SDValue lowerFPToIntToFP(SDValue CastToFP, SelectionDAG &DAG,
 
   // We need target-specific opcodes if this is v2f64 -> v4i32 -> v2f64.
   bool NeedX86Opcodes = VT.getSizeInBits() != IntVT.getSizeInBits();
-  unsigned ToIntOpcode = NeedX86Opcodes ? X86ISD::CVTTP2SI : ISD::FP_TO_SINT;
-  unsigned ToFPOpcode = NeedX86Opcodes ? X86ISD::CVTSI2P : ISD::SINT_TO_FP;
+  unsigned ToIntOpcode =
+      NeedX86Opcodes ? X86ISD::CVTTP2SI : (unsigned)ISD::FP_TO_SINT;
+  unsigned ToFPOpcode =
+      NeedX86Opcodes ? X86ISD::CVTSI2P : (unsigned)ISD::SINT_TO_FP;
 
   // sint_to_fp (fp_to_sint X) --> extelt (sint_to_fp (fp_to_sint (s2v X))), 0
   //
@@ -30232,6 +30234,8 @@ const char *X86TargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(AND)
   NODE_NAME_CASE(BEXTR)
   NODE_NAME_CASE(BZHI)
+  NODE_NAME_CASE(PDEP)
+  NODE_NAME_CASE(PEXT)
   NODE_NAME_CASE(MUL_IMM)
   NODE_NAME_CASE(MOVMSK)
   NODE_NAME_CASE(PTEST)

@@ -4586,7 +4586,7 @@ SDValue ARMTargetLowering::LowerUnsignedALUO(SDValue Op,
 static SDValue LowerSADDSUBSAT(SDValue Op, SelectionDAG &DAG,
                                const ARMSubtarget *Subtarget) {
   EVT VT = Op.getValueType();
-  if (!Subtarget->hasDSP())
+  if (!Subtarget->hasV6Ops() || !Subtarget->hasDSP())
     return SDValue();
   if (!VT.isSimple())
     return SDValue();
@@ -16518,7 +16518,7 @@ bool ARMTargetLowering::ExpandInlineAsm(CallInst *CI) const {
   if (!Subtarget->hasV6Ops())
     return false;
 
-  InlineAsm *IA = cast<InlineAsm>(CI->getCalledValue());
+  InlineAsm *IA = cast<InlineAsm>(CI->getCalledOperand());
   std::string AsmStr = IA->getAsmString();
   SmallVector<StringRef, 4> AsmPieces;
   SplitString(AsmStr, AsmPieces, ";\n");

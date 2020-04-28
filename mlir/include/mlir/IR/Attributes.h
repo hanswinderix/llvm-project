@@ -278,8 +278,17 @@ public:
   using Base::Base;
   using ValueType = ArrayRef<NamedAttribute>;
 
+  /// Construct a dictionary attribute with the provided list of named
+  /// attributes. This method assumes that the provided list is unordered. If
+  /// the caller can guarantee that the attributes are ordered by name,
+  /// getWithSorted should be used instead.
   static DictionaryAttr get(ArrayRef<NamedAttribute> value,
                             MLIRContext *context);
+
+  /// Construct a dictionary with an array of values that is known to already be
+  /// sorted by name and uniqued.
+  static DictionaryAttr getWithSorted(ArrayRef<NamedAttribute> value,
+                                      MLIRContext *context);
 
   ArrayRef<NamedAttribute> getValue() const;
 
@@ -887,6 +896,8 @@ public:
             ElementIterator<T>(rawData, splat, getNumElements())};
   }
 
+  template <typename T, typename = typename std::enable_if<
+                            std::is_same<T, StringRef>::value>::type>
   llvm::iterator_range<ElementIterator<StringRef>> getValues() const {
     auto stringRefs = getRawStringData();
     const char *ptr = reinterpret_cast<const char *>(stringRefs.data());
@@ -1265,6 +1276,14 @@ private:
   getZeroValue() const {
     return getZeroAPFloat();
   }
+
+  /// Get a zero for a StringRef.
+  template <typename T>
+  typename std::enable_if<std::is_same<StringRef, T>::value, T>::type
+  getZeroValue() const {
+    return StringRef();
+  }
+
   /// Get a zero for an C++ integer or float type.
   template <typename T>
   typename std::enable_if<std::numeric_limits<T>::is_integer ||
@@ -1455,8 +1474,8 @@ inline ::llvm::hash_code hash_value(Attribute arg) {
 // NamedAttributeList
 //===----------------------------------------------------------------------===//
 
-/// A NamedAttributeList is used to manage a list of named attributes. This
-/// provides simple interfaces for adding/removing/finding attributes from
+/// A NamedAttributeList is a mutable wrapper around a DictionaryAttr. It
+/// provides additional interfaces for adding, removing, replacing attributes
 /// within a DictionaryAttr.
 ///
 /// We assume there will be relatively few attributes on a given operation

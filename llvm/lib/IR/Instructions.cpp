@@ -18,7 +18,6 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
@@ -60,14 +59,6 @@ AllocaInst::getAllocationSizeInBits(const DataLayout &DL) const {
     Size *= C->getZExtValue();
   }
   return Size;
-}
-
-//===----------------------------------------------------------------------===//
-//                            CallSite Class
-//===----------------------------------------------------------------------===//
-
-User::op_iterator CallSite::getCallee() const {
-  return cast<CallBase>(getInstruction())->op_end() - 1;
 }
 
 //===----------------------------------------------------------------------===//
@@ -264,7 +255,7 @@ unsigned CallBase::getNumSubclassExtraOperandsDynamic() const {
 }
 
 bool CallBase::isIndirectCall() const {
-  const Value *V = getCalledValue();
+  const Value *V = getCalledOperand();
   if (isa<Function>(V) || isa<Constant>(V))
     return false;
   return !isInlineAsm();
@@ -500,7 +491,7 @@ CallInst *CallInst::Create(CallInst *CI, ArrayRef<OperandBundleDef> OpB,
                            Instruction *InsertPt) {
   std::vector<Value *> Args(CI->arg_begin(), CI->arg_end());
 
-  auto *NewCI = CallInst::Create(CI->getFunctionType(), CI->getCalledValue(),
+  auto *NewCI = CallInst::Create(CI->getFunctionType(), CI->getCalledOperand(),
                                  Args, OpB, CI->getName(), InsertPt);
   NewCI->setTailCallKind(CI->getTailCallKind());
   NewCI->setCallingConv(CI->getCallingConv());
@@ -811,9 +802,9 @@ InvokeInst *InvokeInst::Create(InvokeInst *II, ArrayRef<OperandBundleDef> OpB,
                                Instruction *InsertPt) {
   std::vector<Value *> Args(II->arg_begin(), II->arg_end());
 
-  auto *NewII = InvokeInst::Create(II->getFunctionType(), II->getCalledValue(),
-                                   II->getNormalDest(), II->getUnwindDest(),
-                                   Args, OpB, II->getName(), InsertPt);
+  auto *NewII = InvokeInst::Create(
+      II->getFunctionType(), II->getCalledOperand(), II->getNormalDest(),
+      II->getUnwindDest(), Args, OpB, II->getName(), InsertPt);
   NewII->setCallingConv(II->getCallingConv());
   NewII->SubclassOptionalData = II->SubclassOptionalData;
   NewII->setAttributes(II->getAttributes());
@@ -894,11 +885,9 @@ CallBrInst *CallBrInst::Create(CallBrInst *CBI, ArrayRef<OperandBundleDef> OpB,
                                Instruction *InsertPt) {
   std::vector<Value *> Args(CBI->arg_begin(), CBI->arg_end());
 
-  auto *NewCBI = CallBrInst::Create(CBI->getFunctionType(),
-                                    CBI->getCalledValue(),
-                                    CBI->getDefaultDest(),
-                                    CBI->getIndirectDests(),
-                                    Args, OpB, CBI->getName(), InsertPt);
+  auto *NewCBI = CallBrInst::Create(
+      CBI->getFunctionType(), CBI->getCalledOperand(), CBI->getDefaultDest(),
+      CBI->getIndirectDests(), Args, OpB, CBI->getName(), InsertPt);
   NewCBI->setCallingConv(CBI->getCallingConv());
   NewCBI->SubclassOptionalData = CBI->SubclassOptionalData;
   NewCBI->setAttributes(CBI->getAttributes());

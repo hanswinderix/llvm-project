@@ -17,6 +17,7 @@ include "mlir/IR/OpAsmInterface.td"
 include "mlir/Interfaces/CallInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/SideEffects.td"
+include "mlir/Interfaces/ViewLikeInterface.td"
 
 def StandardOps_Dialect : Dialect {
   let name = "std";
@@ -128,12 +129,14 @@ class FloatArithmeticOp<string mnemonic, list<OpTrait> traits = []> :
 //
 //   %0 = alloclike(%m)[%s] : memref<8x?xf32, (d0, d1)[s0] -> ((d0 + s0), d1)>
 //
-class AllocLikeOp<string mnemonic, list<OpTrait> traits = []> :
+class AllocLikeOp<string mnemonic,
+                  list<OpVariableDecorator> resultDecorators = [],
+                  list<OpTrait> traits = []> :
     Std_Op<mnemonic, traits> {
 
   let arguments = (ins Variadic<Index>:$value,
                    Confined<OptionalAttr<I64Attr>, [IntMinValue<0>]>:$alignment);
-  let results = (outs AnyMemRef);
+  let results = (outs Arg<AnyMemRef, "", resultDecorators>);
 
   let builders = [OpBuilder<
     "Builder *builder, OperationState &result, MemRefType memrefType", [{
@@ -275,7 +278,7 @@ def AddIOp : IntArithmeticOp<"addi", [Commutative]> {
 // AllocOp
 //===----------------------------------------------------------------------===//
 
-def AllocOp : AllocLikeOp<"alloc"> {
+def AllocOp : AllocLikeOp<"alloc", [MemAlloc], [MemoryEffects<[MemAlloc]>]> {
   let summary = "memory allocation operation";
   let description = [{
     The `alloc` operation allocates a region of memory, as specified by its
@@ -530,11 +533,6 @@ def GenericAtomicRMWOp : Std_Op<"generic_atomic_rmw", [
   ];
 
   let extraClassDeclaration = [{
-    OpBuilder getBodyBuilder() {
-      assert(!body().empty() && "Unexpected empty 'body' region.");
-      Block &block = body().front();
-      return OpBuilder(&block, block.end());
-    }
     // The value stored in memref[ivs].
     Value getCurrentValue() {
       return body().front().getArgument(0);
@@ -1252,7 +1250,7 @@ def CosOp : FloatUnaryOp<"cos"> {
 // DeallocOp
 //===----------------------------------------------------------------------===//
 
-def DeallocOp : Std_Op<"dealloc"> {
+def DeallocOp : Std_Op<"dealloc", [MemoryEffects<[MemFree]>]> {
   let summary = "memory deallocation operation";
   let description = [{
     The `dealloc` operation frees the region of memory referenced by a memref
@@ -1268,7 +1266,7 @@ def DeallocOp : Std_Op<"dealloc"> {
     ```
   }];
 
-  let arguments = (ins AnyMemRef:$memref);
+  let arguments = (ins Arg<AnyMemRef, "", [MemFree]>:$memref);
 
   let hasCanonicalizer = 1;
   let hasFolder = 1;
@@ -2315,7 +2313,11 @@ def SubIOp : IntArithmeticOp<"subi"> {
 // SubViewOp
 //===----------------------------------------------------------------------===//
 
-def SubViewOp : Std_Op<"subview", [AttrSizedOperandSegments, NoSideEffect]> {
+def SubViewOp : Std_Op<"subview", [
+    AttrSizedOperandSegments, 
+    DeclareOpInterfaceMethods<ViewLikeOpInterface>,
+    NoSideEffect,
+  ]> {
   let summary = "memref subview operation";
   let description = [{
     The "subview" operation converts a memref type to another memref type
@@ -2785,7 +2787,8 @@ def UnsignedShiftRightOp : IntArithmeticOp<"shift_right_unsigned"> {
 // ViewOp
 //===----------------------------------------------------------------------===//
 
-def ViewOp : Std_Op<"view", [NoSideEffect]> {
+def ViewOp : Std_Op<"view", [
+    DeclareOpInterfaceMethods<ViewLikeOpInterface>, NoSideEffect]> {
   let summary = "memref view operation";
   let description = [{
     The "view" operation converts a 1-D memref with i8 element type,

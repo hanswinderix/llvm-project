@@ -1181,7 +1181,7 @@ void PPCLinuxAsmPrinter::emitInstruction(const MachineInstr *MI) {
                            OutContext)));
     EmitToStreamer(*OutStreamer, MCInstBuilder(PPC::MTLR8).addReg(PPC::X0));
     OutStreamer->emitLabel(EndOfSled);
-    recordSled(BeginOfSled, *MI, SledKind::FUNCTION_ENTER);
+    recordSled(BeginOfSled, *MI, SledKind::FUNCTION_ENTER, 2);
     break;
   }
   case TargetOpcode::PATCHABLE_RET: {
@@ -1269,7 +1269,7 @@ void PPCLinuxAsmPrinter::emitInstruction(const MachineInstr *MI) {
     EmitToStreamer(*OutStreamer, RetInst);
     if (IsConditional)
       OutStreamer->emitLabel(FallthroughLabel);
-    recordSled(BeginOfSled, *MI, SledKind::FUNCTION_EXIT);
+    recordSled(BeginOfSled, *MI, SledKind::FUNCTION_EXIT, 2);
     break;
   }
   case TargetOpcode::PATCHABLE_FUNCTION_EXIT:
@@ -1537,13 +1537,14 @@ void PPCLinuxAsmPrinter::emitFunctionBodyStart() {
     // 3) A function does not use the TOC pointer R2 but does have calls.
     //    In this case st_other=1 since we do not know whether or not any
     //    of the callees clobber R2. This case is dealt with in this else if
-    //    block.
+    //    block. Tail calls are considered calls and the st_other should also
+    //    be set to 1 in that case as well.
     // 4) The function does not use the TOC pointer but R2 is used inside
     //    the function. In this case st_other=1 once again.
     // 5) This function uses inline asm. We mark R2 as reserved if the function
-    //    has inline asm so we have to assume that it may be used.
-    if (MF->getFrameInfo().hasCalls() || MF->hasInlineAsm() ||
-        (!PPCFI->usesTOCBasePtr() && UsesX2OrR2)) {
+    //    has inline asm as we have to assume that it may be used.
+    if (MF->getFrameInfo().hasCalls() || MF->getFrameInfo().hasTailCall() ||
+        MF->hasInlineAsm() || (!PPCFI->usesTOCBasePtr() && UsesX2OrR2)) {
       PPCTargetStreamer *TS =
           static_cast<PPCTargetStreamer *>(OutStreamer->getTargetStreamer());
       if (TS)

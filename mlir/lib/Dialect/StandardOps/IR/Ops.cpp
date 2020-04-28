@@ -2009,6 +2009,16 @@ OpFoldResult SignedDivIOp::fold(ArrayRef<Attribute> operands) {
     }
     return a.sdiv_ov(b, overflowOrDiv0);
   });
+
+  // Fold out division by one. Assumes all tensors of all ones are splats.
+  if (auto rhs = operands[1].dyn_cast_or_null<IntegerAttr>()) {
+    if (rhs.getValue() == 1)
+      return lhs();
+  } else if (auto rhs = operands[1].dyn_cast_or_null<SplatElementsAttr>()) {
+    if (rhs.getSplatValue<IntegerAttr>().getValue() == 1)
+      return lhs();
+  }
+
   return overflowOrDiv0 ? Attribute() : result;
 }
 
@@ -2324,6 +2334,8 @@ SubViewOp::getStaticStrides(SmallVectorImpl<int64_t> &staticStrides) {
   return success();
 }
 
+Value SubViewOp::getViewSource() { return source(); }
+
 namespace {
 
 /// Pattern to rewrite a subview op with constant size arguments.
@@ -2535,6 +2547,16 @@ OpFoldResult UnsignedDivIOp::fold(ArrayRef<Attribute> operands) {
     }
     return a.udiv(b);
   });
+
+  // Fold out division by one. Assumes all tensors of all ones are splats.
+  if (auto rhs = operands[1].dyn_cast_or_null<IntegerAttr>()) {
+    if (rhs.getValue() == 1)
+      return lhs();
+  } else if (auto rhs = operands[1].dyn_cast_or_null<SplatElementsAttr>()) {
+    if (rhs.getSplatValue<IntegerAttr>().getValue() == 1)
+      return lhs();
+  }
+
   return div0 ? Attribute() : result;
 }
 
@@ -2668,6 +2690,8 @@ static LogicalResult verify(ViewOp op) {
            << viewType;
   return success();
 }
+
+Value ViewOp::getViewSource() { return source(); }
 
 namespace {
 

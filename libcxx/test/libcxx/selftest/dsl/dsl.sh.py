@@ -5,11 +5,15 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
 #===----------------------------------------------------------------------===##
-# RUN: "%{python}" '%s' '%S' '%T' '%{escaped_exec}' \
-# RUN:                            '%{escaped_cxx}' \
-# RUN:                            '%{escaped_flags}' \
-# RUN:                            '%{escaped_compile_flags}' \
-# RUN:                            '%{escaped_link_flags}'
+
+# TODO: Unbreak this on Windows
+# UNSUPPORTED: host-windows
+
+# RUN: %{python} %s %S %T %{escaped_exec} \
+# RUN:                    %{escaped_cxx} \
+# RUN:                    %{escaped_flags} \
+# RUN:                    %{escaped_compile_flags} \
+# RUN:                    %{escaped_link_flags}
 # END.
 
 import base64
@@ -28,11 +32,12 @@ sys.path = [os.path.join(monorepoRoot, 'libcxx', 'utils'),
             os.path.join(monorepoRoot, 'llvm', 'utils', 'lit')] + sys.path
 import libcxx.test.dsl as dsl
 import lit.LitConfig
+import lit.util
 
 # Steal some parameters from the config running this test so that we can
 # bootstrap our own TestingConfig.
-SOURCE_ROOT, EXEC_PATH, EXEC, CXX, FLAGS, COMPILE_FLAGS, LINK_FLAGS = sys.argv[1:]
-sys.argv = sys.argv[:1]
+SOURCE_ROOT, EXEC_PATH, EXEC, CXX, FLAGS, COMPILE_FLAGS, LINK_FLAGS = sys.argv[1:8]
+sys.argv[1:8] = []
 
 class SetupConfigs(unittest.TestCase):
     """
@@ -59,12 +64,13 @@ class SetupConfigs(unittest.TestCase):
         self.config = lit.TestingConfig.TestingConfig.fromdefaults(self.litConfig)
         self.config.test_source_root = SOURCE_ROOT
         self.config.test_exec_root = EXEC_PATH
+        base64Decode = lambda s: lit.util.to_string(base64.b64decode(s))
         self.config.substitutions = [
-            ('%{cxx}', base64.b64decode(CXX)),
-            ('%{flags}', base64.b64decode(FLAGS)),
-            ('%{compile_flags}', base64.b64decode(COMPILE_FLAGS)),
-            ('%{link_flags}', base64.b64decode(LINK_FLAGS)),
-            ('%{exec}', base64.b64decode(EXEC))
+            ('%{cxx}', base64Decode(CXX)),
+            ('%{flags}', base64Decode(FLAGS)),
+            ('%{compile_flags}', base64Decode(COMPILE_FLAGS)),
+            ('%{link_flags}', base64Decode(LINK_FLAGS)),
+            ('%{exec}', base64Decode(EXEC))
         ]
 
     def getSubstitution(self, substitution):

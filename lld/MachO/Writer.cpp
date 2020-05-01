@@ -162,7 +162,7 @@ class LCMain : public LoadCommand {
     auto *c = reinterpret_cast<entry_point_command *>(buf);
     c->cmd = LC_MAIN;
     c->cmdsize = getSize();
-    c->entryoff = config->entry->getVA();
+    c->entryoff = config->entry->getVA() - ImageBase;
     c->stacksize = 0;
   }
 };
@@ -421,6 +421,9 @@ void Writer::assignAddresses(OutputSegment *seg) {
     ArrayRef<InputSection *> sections = p.second;
     for (InputSection *isec : sections) {
       addr = alignTo(addr, isec->align);
+      // We must align the file offsets too to avoid misaligned writes of
+      // structs.
+      fileOff = alignTo(fileOff, isec->align);
       isec->addr = addr;
       addr += isec->getSize();
       fileOff += isec->getFileSize();
@@ -446,6 +449,7 @@ void Writer::writeSections() {
     uint64_t fileOff = seg->fileOff;
     for (auto &sect : seg->getSections()) {
       for (InputSection *isec : sect.second) {
+        fileOff = alignTo(fileOff, isec->align);
         isec->writeTo(buf + fileOff);
         fileOff += isec->getFileSize();
       }

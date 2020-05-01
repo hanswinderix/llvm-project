@@ -167,12 +167,11 @@ TestDialect::verifyRegionResultAttribute(Operation *op, unsigned regionIndex,
 // TestBranchOp
 //===----------------------------------------------------------------------===//
 
-Optional<OperandRange> TestBranchOp::getSuccessorOperands(unsigned index) {
+Optional<MutableOperandRange>
+TestBranchOp::getMutableSuccessorOperands(unsigned index) {
   assert(index == 0 && "invalid successor index");
-  return getOperands();
+  return targetOperandsMutable();
 }
-
-bool TestBranchOp::canEraseSuccessorOperand() { return true; }
 
 //===----------------------------------------------------------------------===//
 // Test IsolatedRegionOp - parse passthrough region arguments.
@@ -496,6 +495,7 @@ void StringAttrPrettyNameOp::getAsmResultNames(
 static mlir::DialectRegistration<mlir::TestDialect> testDialect;
 
 #include "TestOpEnums.cpp.inc"
+#include "TestOpStructs.cpp.inc"
 
 #define GET_OP_CLASSES
 #include "TestOps.cpp.inc"

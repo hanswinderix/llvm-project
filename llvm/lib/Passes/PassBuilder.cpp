@@ -259,6 +259,7 @@ extern cl::opt<bool> EnableOrderFileInstrumentation;
 extern cl::opt<bool> FlattenedProfileUsed;
 
 extern cl::opt<AttributorRunOption> AttributorRun;
+extern cl::opt<bool> EnableKnowledgeRetention;
 
 const PassBuilder::OptimizationLevel PassBuilder::OptimizationLevel::O0 = {
     /*SpeedLevel*/ 0,
@@ -425,6 +426,8 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
 
   // Catch trivial redundancies
   FPM.addPass(EarlyCSEPass(true /* Enable mem-ssa. */));
+  if (EnableKnowledgeRetention)
+    FPM.addPass(AssumeSimplifyPass());
 
   // Hoisting of scalars and load expressions.
   if (Level.getSpeedupLevel() > 1) {
@@ -695,6 +698,14 @@ ModulePassManager PassBuilder::buildInlinerPipeline(OptimizationLevel Level,
                                                     bool DebugLogging) {
   ModulePassManager MPM(DebugLogging);
 
+  // Require the GlobalsAA analysis for the module so we can query it within
+  // the CGSCC pipeline.
+  MPM.addPass(RequireAnalysisPass<GlobalsAA, Module>());
+
+  // Require the ProfileSummaryAnalysis for the module so we can query it within
+  // the inliner pass.
+  MPM.addPass(RequireAnalysisPass<ProfileSummaryAnalysis, Module>());
+
   // Now begin the main postorder CGSCC pipeline.
   // FIXME: The current CGSCC pipeline has its origins in the legacy pass
   // manager and trying to emulate its precise behavior. Much of this doesn't
@@ -854,7 +865,7 @@ ModulePassManager PassBuilder::buildModuleSimplificationPipeline(
   // constants.
   MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));
 
-  // Remove any dead arguments exposed by cleanups and constand folding
+  // Remove any dead arguments exposed by cleanups and constant folding
   // globals.
   MPM.addPass(DeadArgumentEliminationPass());
 
@@ -884,14 +895,6 @@ ModulePassManager PassBuilder::buildModuleSimplificationPipeline(
   // Synthesize function entry counts for non-PGO compilation.
   if (EnableSyntheticCounts && !PGOOpt)
     MPM.addPass(SyntheticCountsPropagation());
-
-  // Require the GlobalsAA analysis for the module so we can query it within
-  // the CGSCC pipeline.
-  MPM.addPass(RequireAnalysisPass<GlobalsAA, Module>());
-
-  // Require the ProfileSummaryAnalysis for the module so we can query it within
-  // the inliner pass.
-  MPM.addPass(RequireAnalysisPass<ProfileSummaryAnalysis, Module>());
 
   MPM.addPass(buildInlinerPipeline(Level, Phase, DebugLogging));
   return MPM;

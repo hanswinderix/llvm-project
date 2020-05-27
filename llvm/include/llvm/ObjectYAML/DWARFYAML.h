@@ -210,7 +210,15 @@ template <> struct MappingTraits<DWARFYAML::ARangeDescriptor> {
 };
 
 template <> struct MappingTraits<DWARFYAML::ARange> {
-  static void mapping(IO &IO, DWARFYAML::ARange &Range);
+  static void mapping(IO &IO, DWARFYAML::ARange &ARange);
+};
+
+template <> struct MappingTraits<DWARFYAML::RangeEntry> {
+  static void mapping(IO &IO, DWARFYAML::RangeEntry &Entry);
+};
+
+template <> struct MappingTraits<DWARFYAML::Ranges> {
+  static void mapping(IO &IO, DWARFYAML::Ranges &Ranges);
 };
 
 template <> struct MappingTraits<DWARFYAML::RangeEntry> {

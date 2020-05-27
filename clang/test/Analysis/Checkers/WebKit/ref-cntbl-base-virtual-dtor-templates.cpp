@@ -1,4 +1,4 @@
-// RUN: %clang_analyze_cc1 -analyzer-checker=webkit.WebKitRefCntblBaseVirtualDtor -verify %s
+// RUN: %clang_analyze_cc1 -analyzer-checker=webkit.RefCntblBaseVirtualDtor -verify %s
 
 struct RefCntblBase {
   void ref() {}

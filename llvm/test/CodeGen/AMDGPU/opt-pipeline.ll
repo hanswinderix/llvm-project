@@ -101,6 +101,7 @@
 ; GCN-O1-NEXT:         Infer address spaces
 ; GCN-O1-NEXT:     AMDGPU Kernel Attributes
 ; GCN-O1-NEXT:     FunctionPass Manager
+; GCN-O1-NEXT:       AMDGPU Promote Alloca to vector
 ; GCN-O1-NEXT:       Dominator Tree Construction
 ; GCN-O1-NEXT:       SROA
 ; GCN-O1-NEXT:       Basic Alias Analysis (stateless AA impl)
@@ -229,8 +230,6 @@
 ; GCN-O1-NEXT:       Optimization Remark Emitter
 ; GCN-O1-NEXT:       Inject TLI Mappings
 ; GCN-O1-NEXT:       Loop Vectorization
-; GCN-O1-NEXT:       Optimize scalar/vector ops
-; GCN-O1-NEXT:       Early CSE
 ; GCN-O1-NEXT:       Canonicalize natural loops
 ; GCN-O1-NEXT:       Scalar Evolution Analysis
 ; GCN-O1-NEXT:       Function Alias Analysis Results
@@ -246,6 +245,7 @@
 ; GCN-O1-NEXT:       Combine redundant instructions
 ; GCN-O1-NEXT:       Simplify the CFG
 ; GCN-O1-NEXT:       Dominator Tree Construction
+; GCN-O1-NEXT:       Optimize scalar/vector ops
 ; GCN-O1-NEXT:       Basic Alias Analysis (stateless AA impl)
 ; GCN-O1-NEXT:       Function Alias Analysis Results
 ; GCN-O1-NEXT:       Natural Loop Information
@@ -401,6 +401,7 @@
 ; GCN-O2-NEXT:         Infer address spaces
 ; GCN-O2-NEXT:     AMDGPU Kernel Attributes
 ; GCN-O2-NEXT:     FunctionPass Manager
+; GCN-O2-NEXT:       AMDGPU Promote Alloca to vector
 ; GCN-O2-NEXT:       Dominator Tree Construction
 ; GCN-O2-NEXT:       SROA
 ; GCN-O2-NEXT:       Basic Alias Analysis (stateless AA impl)
@@ -569,8 +570,6 @@
 ; GCN-O2-NEXT:       Optimization Remark Emitter
 ; GCN-O2-NEXT:       Inject TLI Mappings
 ; GCN-O2-NEXT:       Loop Vectorization
-; GCN-O2-NEXT:       Optimize scalar/vector ops
-; GCN-O2-NEXT:       Early CSE
 ; GCN-O2-NEXT:       Canonicalize natural loops
 ; GCN-O2-NEXT:       Scalar Evolution Analysis
 ; GCN-O2-NEXT:       Function Alias Analysis Results
@@ -596,6 +595,7 @@
 ; GCN-O2-NEXT:       Optimization Remark Emitter
 ; GCN-O2-NEXT:       Inject TLI Mappings
 ; GCN-O2-NEXT:       SLP Vectorizer
+; GCN-O2-NEXT:       Optimize scalar/vector ops
 ; GCN-O2-NEXT:       Optimization Remark Emitter
 ; GCN-O2-NEXT:       Combine redundant instructions
 ; GCN-O2-NEXT:       Canonicalize natural loops
@@ -752,6 +752,7 @@
 ; GCN-O3-NEXT:         Infer address spaces
 ; GCN-O3-NEXT:     AMDGPU Kernel Attributes
 ; GCN-O3-NEXT:     FunctionPass Manager
+; GCN-O3-NEXT:       AMDGPU Promote Alloca to vector
 ; GCN-O3-NEXT:       Dominator Tree Construction
 ; GCN-O3-NEXT:       SROA
 ; GCN-O3-NEXT:       Basic Alias Analysis (stateless AA impl)
@@ -921,8 +922,6 @@
 ; GCN-O3-NEXT:       Optimization Remark Emitter
 ; GCN-O3-NEXT:       Inject TLI Mappings
 ; GCN-O3-NEXT:       Loop Vectorization
-; GCN-O3-NEXT:       Optimize scalar/vector ops
-; GCN-O3-NEXT:       Early CSE
 ; GCN-O3-NEXT:       Canonicalize natural loops
 ; GCN-O3-NEXT:       Scalar Evolution Analysis
 ; GCN-O3-NEXT:       Function Alias Analysis Results
@@ -948,6 +947,7 @@
 ; GCN-O3-NEXT:       Optimization Remark Emitter
 ; GCN-O3-NEXT:       Inject TLI Mappings
 ; GCN-O3-NEXT:       SLP Vectorizer
+; GCN-O3-NEXT:       Optimize scalar/vector ops
 ; GCN-O3-NEXT:       Optimization Remark Emitter
 ; GCN-O3-NEXT:       Combine redundant instructions
 ; GCN-O3-NEXT:       Canonicalize natural loops

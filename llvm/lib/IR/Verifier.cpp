@@ -2988,9 +2988,13 @@ void Verifier::visitCallBase(CallBase &Call) {
 
     if (Call.paramHasAttr(i, Attribute::Preallocated)) {
       Value *ArgVal = Call.getArgOperand(i);
-      Assert(Call.countOperandBundlesOfType(LLVMContext::OB_preallocated) != 0,
-             "preallocated operand requires a preallocated bundle", ArgVal,
-             Call);
+      bool hasOB =
+          Call.countOperandBundlesOfType(LLVMContext::OB_preallocated) != 0;
+      bool isMustTail = Call.isMustTailCall();
+      Assert(hasOB != isMustTail,
+             "preallocated operand either requires a preallocated bundle or "
+             "the call to be musttail (but not both)",
+             ArgVal, Call);
     }
   }
 
@@ -4533,6 +4537,9 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
             ++NumPreallocatedArgs;
           }
         }
+        Assert(NumPreallocatedArgs != 0,
+               "cannot use preallocated intrinsics on a call without "
+               "preallocated arguments");
         Assert(NumArgs->equalsInt(NumPreallocatedArgs),
                "llvm.call.preallocated.setup arg size must be equal to number "
                "of preallocated arguments "

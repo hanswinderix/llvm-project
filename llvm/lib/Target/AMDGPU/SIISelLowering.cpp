@@ -842,6 +842,9 @@ SITargetLowering::SITargetLowering(const TargetMachine &TM,
   setTargetDAGCombine(ISD::ATOMIC_LOAD_UMAX);
   setTargetDAGCombine(ISD::ATOMIC_LOAD_FADD);
 
+  // FIXME: In other contexts we pretend this is a per-function property.
+  setStackPointerRegisterToSaveRestore(AMDGPU::SGPR32);
+
   setSchedulingPreference(Sched::RegPressure);
 }
 
@@ -3086,6 +3089,67 @@ SDValue SITargetLowering::LowerCall(CallLoweringInfo &CLI,
                          IsThisReturn ? OutVals[0] : SDValue());
 }
 
+// This is identical to the default implementation in ExpandDYNAMIC_STACKALLOC,
+// except for applying the wave size scale to the increment amount.
+SDValue SITargetLowering::lowerDYNAMIC_STACKALLOCImpl(
+    SDValue Op, SelectionDAG &DAG) const {
+  const MachineFunction &MF = DAG.getMachineFunction();
+  const SIMachineFunctionInfo *Info = MF.getInfo<SIMachineFunctionInfo>();
+
+  SDLoc dl(Op);
+  EVT VT = Op.getValueType();
+  SDValue Tmp1 = Op;
+  SDValue Tmp2 = Op.getValue(1);
+  SDValue Tmp3 = Op.getOperand(2);
+  SDValue Chain = Tmp1.getOperand(0);
+
+  Register SPReg = Info->getStackPtrOffsetReg();
+
+  // Chain the dynamic stack allocation so that it doesn't modify the stack
+  // pointer when other instructions are using the stack.
+  Chain = DAG.getCALLSEQ_START(Chain, 0, 0, dl);
+
+  SDValue Size  = Tmp2.getOperand(1);
+  SDValue SP = DAG.getCopyFromReg(Chain, dl, SPReg, VT);
+  Chain = SP.getValue(1);
+  unsigned Align = cast<ConstantSDNode>(Tmp3)->getZExtValue();
+  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
+  const TargetFrameLowering *TFL = ST.getFrameLowering();
+  unsigned Opc =
+    TFL->getStackGrowthDirection() == TargetFrameLowering::StackGrowsUp ?
+    ISD::ADD : ISD::SUB;
+
+  SDValue ScaledSize = DAG.getNode(
+      ISD::SHL, dl, VT, Size,
+      DAG.getConstant(ST.getWavefrontSizeLog2(), dl, MVT::i32));
+
+  unsigned StackAlign = TFL->getStackAlignment();
+  Tmp1 = DAG.getNode(Opc, dl, VT, SP, ScaledSize); // Value
+  if (Align > StackAlign)
+    Tmp1 = DAG.getNode(ISD::AND, dl, VT, Tmp1,
+                       DAG.getConstant(-(uint64_t)Align, dl, VT));
+  Chain = DAG.getCopyToReg(Chain, dl, SPReg, Tmp1);    // Output chain
+  Tmp2 = DAG.getCALLSEQ_END(
+      Chain, DAG.getIntPtrConstant(0, dl, true),
+      DAG.getIntPtrConstant(0, dl, true), SDValue(), dl);
+
+  return DAG.getMergeValues({Tmp1, Tmp2}, dl);
+}
+
+SDValue SITargetLowering::LowerDYNAMIC_STACKALLOC(SDValue Op,
+                                                  SelectionDAG &DAG) const {
+  // We only handle constant sizes here to allow non-entry block, static sized
+  // allocas. A truly dynamic value is more difficult to support because we
+  // don't know if the size value is uniform or not. If the size isn't uniform,
+  // we would need to do a wave reduction to get the maximum size to know how
+  // much to increment the uniform stack pointer.
+  SDValue Size = Op.getOperand(1);
+  if (isa<ConstantSDNode>(Size))
+      return lowerDYNAMIC_STACKALLOCImpl(Op, DAG); // Use "generic" expansion.
+
+  return AMDGPUTargetLowering::LowerDYNAMIC_STACKALLOC(Op, DAG);
+}
+
 Register SITargetLowering::getRegisterByName(const char* RegName, LLT VT,
                                              const MachineFunction &MF) const {
   Register Reg = StringSwitch<Register>(RegName)
@@ -4302,6 +4366,8 @@ SDValue SITargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   case ISD::FMINNUM_IEEE:
   case ISD::FMAXNUM_IEEE:
     return splitBinaryVectorOp(Op, DAG);
+  case ISD::DYNAMIC_STACKALLOC:
+    return LowerDYNAMIC_STACKALLOC(Op, DAG);
   }
   return SDValue();
 }
@@ -7911,32 +7977,32 @@ SDValue SITargetLowering::LowerFDIV32(SDValue Op, SelectionDAG &DAG) const {
   const unsigned Denorm32Reg = AMDGPU::Hwreg::ID_MODE |
                                (4 << AMDGPU::Hwreg::OFFSET_SHIFT_) |
                                (1 << AMDGPU::Hwreg::WIDTH_M1_SHIFT_);
-  const SDValue BitField = DAG.getTargetConstant(Denorm32Reg, SL, MVT::i16);
+  const SDValue BitField = DAG.getTargetConstant(Denorm32Reg, SL, MVT::i32);
 
   const bool HasFP32Denormals = hasFP32Denormals(DAG.getMachineFunction());
 
   if (!HasFP32Denormals) {
     SDVTList BindParamVTs = DAG.getVTList(MVT::Other, MVT::Glue);
 
-    SDValue EnableDenorm;
+    SDNode *EnableDenorm;
     if (Subtarget->hasDenormModeInst()) {
       const SDValue EnableDenormValue =
           getSPDenormModeValue(FP_DENORM_FLUSH_NONE, DAG, SL, Subtarget);
 
       EnableDenorm = DAG.getNode(AMDGPUISD::DENORM_MODE, SL, BindParamVTs,
-                                 DAG.getEntryNode(), EnableDenormValue);
+                                 DAG.getEntryNode(), EnableDenormValue).getNode();
     } else {
       const SDValue EnableDenormValue = DAG.getConstant(FP_DENORM_FLUSH_NONE,
                                                         SL, MVT::i32);
-      EnableDenorm = DAG.getNode(AMDGPUISD::SETREG, SL, BindParamVTs,
-                                 DAG.getEntryNode(), EnableDenormValue,
-                                 BitField);
+      EnableDenorm =
+          DAG.getMachineNode(AMDGPU::S_SETREG_B32, SL, BindParamVTs,
+                             {EnableDenormValue, BitField, DAG.getEntryNode()});
     }
 
     SDValue Ops[3] = {
       NegDivScale0,
-      EnableDenorm.getValue(0),
-      EnableDenorm.getValue(1)
+      SDValue(EnableDenorm, 0),
+      SDValue(EnableDenorm, 1)
     };
 
     NegDivScale0 = DAG.getMergeValues(Ops, SL);
@@ -7960,25 +8026,25 @@ SDValue SITargetLowering::LowerFDIV32(SDValue Op, SelectionDAG &DAG) const {
                              NumeratorScaled, Fma3);
 
   if (!HasFP32Denormals) {
-    SDValue DisableDenorm;
+    SDNode *DisableDenorm;
     if (Subtarget->hasDenormModeInst()) {
       const SDValue DisableDenormValue =
           getSPDenormModeValue(FP_DENORM_FLUSH_IN_FLUSH_OUT, DAG, SL, Subtarget);
 
       DisableDenorm = DAG.getNode(AMDGPUISD::DENORM_MODE, SL, MVT::Other,
                                   Fma4.getValue(1), DisableDenormValue,
-                                  Fma4.getValue(2));
+                                  Fma4.getValue(2)).getNode();
     } else {
       const SDValue DisableDenormValue =
           DAG.getConstant(FP_DENORM_FLUSH_IN_FLUSH_OUT, SL, MVT::i32);
 
-      DisableDenorm = DAG.getNode(AMDGPUISD::SETREG, SL, MVT::Other,
-                                  Fma4.getValue(1), DisableDenormValue,
-                                  BitField, Fma4.getValue(2));
+      DisableDenorm = DAG.getMachineNode(
+          AMDGPU::S_SETREG_B32, SL, MVT::Other,
+          {DisableDenormValue, BitField, Fma4.getValue(1), Fma4.getValue(2)});
     }
 
     SDValue OutputChain = DAG.getNode(ISD::TokenFactor, SL, MVT::Other,
-                                      DisableDenorm, DAG.getRoot());
+                                      SDValue(DisableDenorm, 0), DAG.getRoot());
     DAG.setRoot(OutputChain);
   }
 

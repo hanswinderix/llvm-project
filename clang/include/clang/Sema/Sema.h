@@ -3371,7 +3371,8 @@ public:
 
   /// Check the enable_if expressions on the given function. Returns the first
   /// failing attribute, or NULL if they were all successful.
-  EnableIfAttr *CheckEnableIf(FunctionDecl *Function, ArrayRef<Expr *> Args,
+  EnableIfAttr *CheckEnableIf(FunctionDecl *Function, SourceLocation CallLoc,
+                              ArrayRef<Expr *> Args,
                               bool MissingImplicitThis = false);
 
   /// Find the failed Boolean condition within a given Boolean
@@ -10776,6 +10777,9 @@ public:
   /// Called on well-formed 'use_device_ptr' clause.
   OMPClause *ActOnOpenMPUseDevicePtrClause(ArrayRef<Expr *> VarList,
                                            const OMPVarListLocTy &Locs);
+  /// Called on well-formed 'use_device_addr' clause.
+  OMPClause *ActOnOpenMPUseDeviceAddrClause(ArrayRef<Expr *> VarList,
+                                            const OMPVarListLocTy &Locs);
   /// Called on well-formed 'is_device_ptr' clause.
   OMPClause *ActOnOpenMPIsDevicePtrClause(ArrayRef<Expr *> VarList,
                                           const OMPVarListLocTy &Locs);

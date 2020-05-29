@@ -265,51 +265,41 @@ bool PPCTargetInfo::initFeatureMap(
                             .Case("pwr7", true)
                             .Case("pwr8", true)
                             .Case("pwr9", true)
-                            .Case("pwr10", true)
                             .Case("ppc64", true)
                             .Case("ppc64le", true)
                             .Default(false);
 
   Features["qpx"] = (CPU == "a2q");
-  Features["power9-vector"] = llvm::StringSwitch<bool>(CPU)
-                                  .Case("pwr10", true)
-                                  .Case("pwr9", true)
-                                  .Default(false);
+  Features["power9-vector"] = (CPU == "pwr9");
   Features["crypto"] = llvm::StringSwitch<bool>(CPU)
                            .Case("ppc64le", true)
-                           .Case("pwr10", true)
                            .Case("pwr9", true)
                            .Case("pwr8", true)
                            .Default(false);
   Features["power8-vector"] = llvm::StringSwitch<bool>(CPU)
                                   .Case("ppc64le", true)
-                                  .Case("pwr10", true)
                                   .Case("pwr9", true)
                                   .Case("pwr8", true)
                                   .Default(false);
   Features["bpermd"] = llvm::StringSwitch<bool>(CPU)
                            .Case("ppc64le", true)
-                           .Case("pwr10", true)
                            .Case("pwr9", true)
                            .Case("pwr8", true)
                            .Case("pwr7", true)
                            .Default(false);
   Features["extdiv"] = llvm::StringSwitch<bool>(CPU)
                            .Case("ppc64le", true)
-                           .Case("pwr10", true)
                            .Case("pwr9", true)
                            .Case("pwr8", true)
                            .Case("pwr7", true)
                            .Default(false);
   Features["direct-move"] = llvm::StringSwitch<bool>(CPU)
                                 .Case("ppc64le", true)
-                                .Case("pwr10", true)
                                 .Case("pwr9", true)
                                 .Case("pwr8", true)
                                 .Default(false);
   Features["vsx"] = llvm::StringSwitch<bool>(CPU)
                         .Case("ppc64le", true)
-                        .Case("pwr10", true)
                         .Case("pwr9", true)
                         .Case("pwr8", true)
                         .Case("pwr7", true)
@@ -324,6 +314,13 @@ bool PPCTargetInfo::initFeatureMap(
                         .Case("8548", true)
                         .Case("e500", true)
                         .Default(false);
+
+  // Power10 includes all the same features as Power9 plus any features specific
+  // to the Power10 core.
+  if (CPU == "pwr10" || CPU == "power10") {
+    initFeatureMap(Features, Diags, "pwr9", FeaturesVec);
+    addP10SpecificFeatures(Features);
+  }
 
   // Future CPU should include all of the features of Power 10 as well as any
   // additional features (yet to be determined) specific to it.
@@ -343,6 +340,13 @@ bool PPCTargetInfo::initFeatureMap(
   }
 
   return TargetInfo::initFeatureMap(Features, Diags, CPU, FeaturesVec);
+}
+
+// Add any Power10 specific features.
+void PPCTargetInfo::addP10SpecificFeatures(
+    llvm::StringMap<bool> &Features) const {
+  Features["htm"] = false; // HTM was removed for P10.
+  return;
 }
 
 // Add features specific to the "Future" CPU.

@@ -356,11 +356,10 @@ for.cond.cleanup:
   ret i8 %add
 }
 
-; FIXME: we don't understand that %sz in the memset call is limited to 128 by the preceding check.
 define dso_local void @SizeCheck(i32 %sz) {
 ; CHECK-LABEL: @SizeCheck{{$}}
 ; CHECK-NEXT: args uses:
-; CHECK-NEXT: sz[]: [0,1){{$}}
+; CHECK-NEXT: sz[]: empty-set{{$}}
 ; CHECK-NEXT: allocas uses:
 ; CHECK-NEXT: x1[128]: [0,4294967295){{$}}
 ; CHECK-NOT: ]:
@@ -411,5 +410,17 @@ entry:
   store %zerosize_type undef, %zerosize_type* %x, align 4
   store %zerosize_type undef, %zerosize_type* undef, align 4
   %val = load %zerosize_type, %zerosize_type* %p, align 4
+  ret void
+}
+
+define void @OperandBundle() {
+; CHECK-LABEL: @OperandBundle dso_preemptable{{$}}
+; CHECK-NEXT: args uses:
+; CHECK-NEXT: allocas uses:
+; CHECK-NEXT:   a[4]: full-set
+; CHECK-NOT: ]:
+entry:
+  %a = alloca i32, align 4
+  call void @LeakAddress() ["unknown"(i32* %a)]
   ret void
 }

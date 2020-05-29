@@ -176,6 +176,7 @@ public:
                  StringRef CPU,
                  const std::vector<std::string> &FeaturesVec) const override;
 
+  void addP10SpecificFeatures(llvm::StringMap<bool> &Features) const;
   void addFutureSpecificFeatures(llvm::StringMap<bool> &Features) const;
 
   bool handleTargetFeatures(std::vector<std::string> &Features,

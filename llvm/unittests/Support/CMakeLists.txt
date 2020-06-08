@@ -75,6 +75,7 @@ add_llvm_unittest(SupportTests
   ThreadPool.cpp
   Threading.cpp
   TimerTest.cpp
+  ToolOutputFileTest.cpp
   TypeNameTest.cpp
   TypeTraitsTest.cpp
   TrailingObjectsTest.cpp
@@ -82,6 +83,7 @@ add_llvm_unittest(SupportTests
   UnicodeTest.cpp
   VersionTupleTest.cpp
   VirtualFileSystemTest.cpp
+  WithColorTest.cpp
   YAMLIOTest.cpp
   YAMLParserTest.cpp
   formatted_raw_ostream_test.cpp

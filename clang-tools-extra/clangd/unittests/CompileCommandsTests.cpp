@@ -139,6 +139,8 @@ TEST(CommandMangler, ClangPathResolve) {
   llvm::SmallString<256> TempDir;
   ASSERT_THAT(llvm::sys::fs::createUniqueDirectory("ClangPathResolve", TempDir),
               Ok());
+  // /var/tmp is a symlink on Mac. Resolve it so we're asserting the right path.
+  ASSERT_THAT(llvm::sys::fs::real_path(TempDir.str(), TempDir), Ok());
   auto CleanDir = llvm::make_scope_exit(
       [&] { llvm::sys::fs::remove_directories(TempDir); });
   ASSERT_THAT(llvm::sys::fs::create_directory(TempDir + "/bin"), Ok());

@@ -101,19 +101,6 @@ void MappingTraits<DWARFYAML::Ranges>::mapping(IO &IO,
   IO.mapRequired("Entries", DebugRanges.Entries);
 }
 
-void MappingTraits<DWARFYAML::RangeEntry>::mapping(
-    IO &IO, DWARFYAML::RangeEntry &Descriptor) {
-  IO.mapRequired("LowOffset", Descriptor.LowOffset);
-  IO.mapRequired("HighOffset", Descriptor.HighOffset);
-}
-
-void MappingTraits<DWARFYAML::Ranges>::mapping(IO &IO,
-                                               DWARFYAML::Ranges &DebugRanges) {
-  IO.mapRequired("Offset", DebugRanges.Offset);
-  IO.mapRequired("AddrSize", DebugRanges.AddrSize);
-  IO.mapRequired("Entries", DebugRanges.Entries);
-}
-
 void MappingTraits<DWARFYAML::PubEntry>::mapping(IO &IO,
                                                  DWARFYAML::PubEntry &Entry) {
   IO.mapRequired("DieOffset", Entry.DieOffset);

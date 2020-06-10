@@ -228,14 +228,6 @@ template <> struct MappingTraits<DWARFYAML::Ranges> {
   static void mapping(IO &IO, DWARFYAML::Ranges &Ranges);
 };
 
-template <> struct MappingTraits<DWARFYAML::RangeEntry> {
-  static void mapping(IO &IO, DWARFYAML::RangeEntry &Entry);
-};
-
-template <> struct MappingTraits<DWARFYAML::Ranges> {
-  static void mapping(IO &IO, DWARFYAML::Ranges &Ranges);
-};
-
 template <> struct MappingTraits<DWARFYAML::PubEntry> {
   static void mapping(IO &IO, DWARFYAML::PubEntry &Entry);
 };

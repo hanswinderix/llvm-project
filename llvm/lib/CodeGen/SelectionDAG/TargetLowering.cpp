@@ -6086,7 +6086,6 @@ bool TargetLowering::expandFunnelShift(SDNode *Node, SDValue &Result,
     ShAmt = DAG.getNode(ISD::UREM, DL, ShVT, Z, BitWidthC);
     InvShAmt = DAG.getNode(ISD::SUB, DL, ShVT, Mask, ShAmt);
   }
-  SDValue InvShAmt = DAG.getNode(ISD::SUB, DL, ShVT, Mask, ShAmt);
 
   SDValue One = DAG.getConstant(1, DL, ShVT);
   SDValue ShX, ShY;

@@ -11698,7 +11698,7 @@ public:
     return IdentifyCUDATarget(dyn_cast<FunctionDecl>(CurContext));
   }
 
-  static bool IsCUDAImplicitHostDeviceFunction(const FunctionDecl *D);
+  static bool isCUDAImplicitHostDeviceFunction(const FunctionDecl *D);
 
   // CUDA function call preference. Must be ordered numerically from
   // worst to best.

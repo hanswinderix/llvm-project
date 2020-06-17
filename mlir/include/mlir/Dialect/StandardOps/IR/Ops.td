@@ -42,7 +42,8 @@ class Std_Op<string mnemonic, list<OpTrait> traits = []> :
 // Base class for standard cast operations. Requires single operand and result,
 // but does not constrain them to specific types.
 class CastOp<string mnemonic, list<OpTrait> traits = []> :
-    Std_Op<mnemonic, !listconcat(traits, [NoSideEffect])> {
+    Std_Op<mnemonic,
+           !listconcat(traits, [NoSideEffect, SameOperandsAndResultShape])> {
 
   let results = (outs AnyType);
 
@@ -1375,6 +1376,7 @@ def DimOp : Std_Op<"dim", [NoSideEffect]> {
     The `dim` operation takes a memref/tensor and a dimension operand of type
     `index`.
     It returns the size of the requested dimension of the given memref/tensor.
+    If the dimension index is out of bounds the behavior is undefined.
 
     The specified memref or tensor type is that of the first operand.
 

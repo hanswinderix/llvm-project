@@ -13,6 +13,7 @@
 #include "support/FSProvider.h"
 #include "support/Logger.h"
 #include "support/Trace.h"
+#include "clang/AST/DeclTemplate.h"
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/LangOptions.h"
 #include "clang/Basic/SourceLocation.h"
@@ -96,6 +97,19 @@ public:
   CommentHandler *getCommentHandler() override {
     IWYUHandler = collectIWYUHeaderMaps(&CanonIncludes);
     return IWYUHandler.get();
+  }
+
+  bool shouldSkipFunctionBody(Decl *D) override {
+    // Generally we skip function bodies in preambles for speed.
+    // We can make exceptions for functions that are cheap to parse and
+    // instantiate, widely used, and valuable (e.g. commonly produce errors).
+    if (const auto *FT = llvm::dyn_cast<clang::FunctionTemplateDecl>(D)) {
+      if (const auto *II = FT->getDeclName().getAsIdentifierInfo())
+        // std::make_unique is trivial, and we diagnose bad constructor calls.
+        if (II->isStr("make_unique") && FT->isInStdNamespace())
+          return false;
+    }
+    return true;
   }
 
 private:
@@ -203,6 +217,7 @@ private:
 struct ScannedPreamble {
   std::vector<Inclusion> Includes;
   std::vector<TextualPPDirective> TextualDirectives;
+  PreambleBounds Bounds = {0, false};
 };
 
 /// Scans the preprocessor directives in the preamble section of the file by
@@ -270,6 +285,7 @@ scanPreamble(llvm::StringRef Contents,
   IncludeStructure Includes;
   PP.addPPCallbacks(collectIncludeStructureCallback(SM, &Includes));
   ScannedPreamble SP;
+  SP.Bounds = Bounds;
   PP.addPPCallbacks(
       std::make_unique<DirectiveCollector>(PP, SP.TextualDirectives));
   if (llvm::Error Err = Action.Execute())
@@ -383,10 +399,12 @@ bool isPreambleCompatible(const PreambleData &Preamble,
       llvm::MemoryBuffer::getMemBuffer(Inputs.Contents, FileName);
   auto Bounds =
       ComputePreambleBounds(*CI.getLangOpts(), ContentsBuffer.get(), 0);
+  auto VFS = Inputs.FSProvider->getFileSystem();
+  VFS->setCurrentWorkingDirectory(Inputs.CompileCommand.Directory);
   return compileCommandsAreEqual(Inputs.CompileCommand,
                                  Preamble.CompileCommand) &&
          Preamble.Preamble.CanReuse(CI, ContentsBuffer.get(), Bounds,
-                                    Inputs.FSProvider->getFileSystem().get());
+                                    VFS.get());
 }
 
 void escapeBackslashAndQuotes(llvm::StringRef Text, llvm::raw_ostream &OS) {
@@ -447,6 +465,7 @@ PreamblePatch PreamblePatch::create(llvm::StringRef FileName,
   llvm::sys::path::append(PatchName, llvm::sys::path::parent_path(FileName),
                           PreamblePatchHeaderName);
   PP.PatchFileName = PatchName.str().str();
+  PP.ModifiedBounds = ModifiedScan->Bounds;
 
   llvm::raw_string_ostream Patch(PP.PatchContents);
   // Set default filename for subsequent #line directives
@@ -532,6 +551,7 @@ std::vector<Inclusion> PreamblePatch::preambleIncludes() const {
 PreamblePatch PreamblePatch::unmodified(const PreambleData &Preamble) {
   PreamblePatch PP;
   PP.PreambleIncludes = Preamble.Includes.MainFileIncludes;
+  PP.ModifiedBounds = Preamble.Preamble.getBounds();
   return PP;
 }
 

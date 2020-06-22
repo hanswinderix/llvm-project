@@ -17,6 +17,7 @@
 #include "Writer.h"
 
 #include "lld/Common/ErrorHandler.h"
+#include "lld/Common/Memory.h"
 #include "llvm/Support/EndianStream.h"
 #include "llvm/Support/LEB128.h"
 
@@ -29,10 +30,8 @@ namespace lld {
 namespace macho {
 
 SyntheticSection::SyntheticSection(const char *segname, const char *name)
-    : OutputSection(SyntheticKind, name) {
-  // Synthetic sections always know which segment they belong to so hook
-  // them up when they're made
-  getOrCreateOutputSegment(segname)->addOutputSection(this);
+    : OutputSection(SyntheticKind, name), segname(segname) {
+  syntheticSections.push_back(this);
 }
 
 // dyld3's MachOLoaded::getSlide() assumes that the __TEXT segment starts
@@ -80,10 +79,16 @@ GotSection::GotSection()
   // table, which we do not currently emit
 }
 
-void GotSection::addEntry(DylibSymbol &sym) {
+void GotSection::addEntry(Symbol &sym) {
   if (entries.insert(&sym)) {
     sym.gotIndex = entries.size() - 1;
   }
+}
+
+void GotSection::writeTo(uint8_t *buf) const {
+  for (size_t i = 0, n = entries.size(); i < n; ++i)
+    if (auto *defined = dyn_cast<Defined>(entries[i]))
+      write64le(&buf[i * WordSize], defined->getVA());
 }
 
 BindingSection::BindingSection()
@@ -112,20 +117,32 @@ void BindingSection::finalizeContents() {
   os << static_cast<uint8_t>(BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB |
                              in.got->parent->index);
   encodeULEB128(in.got->getSegmentOffset(), os);
-  for (const DylibSymbol *sym : in.got->getEntries()) {
-    // TODO: Implement compact encoding -- we only need to encode the
-    // differences between consecutive symbol entries.
-    if (sym->file->ordinal <= BIND_IMMEDIATE_MASK) {
-      os << static_cast<uint8_t>(BIND_OPCODE_SET_DYLIB_ORDINAL_IMM |
-                                 sym->file->ordinal);
+  uint32_t entries_to_skip = 0;
+  for (const Symbol *sym : in.got->getEntries()) {
+    if (const auto *dysym = dyn_cast<DylibSymbol>(sym)) {
+      if (entries_to_skip != 0) {
+        os << static_cast<uint8_t>(BIND_OPCODE_ADD_ADDR_ULEB);
+        encodeULEB128(WordSize * entries_to_skip, os);
+        entries_to_skip = 0;
+      }
+
+      // TODO: Implement compact encoding -- we only need to encode the
+      // differences between consecutive symbol entries.
+      if (dysym->file->ordinal <= BIND_IMMEDIATE_MASK) {
+        os << static_cast<uint8_t>(BIND_OPCODE_SET_DYLIB_ORDINAL_IMM |
+                                   dysym->file->ordinal);
+      } else {
+        error("TODO: Support larger dylib symbol ordinals");
+        continue;
+      }
+      os << static_cast<uint8_t>(BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM)
+         << dysym->getName() << '\0'
+         << static_cast<uint8_t>(BIND_OPCODE_SET_TYPE_IMM | BIND_TYPE_POINTER)
+         << static_cast<uint8_t>(BIND_OPCODE_DO_BIND);
     } else {
-      error("TODO: Support larger dylib symbol ordinals");
-      continue;
+      // We have a defined symbol with a pre-populated address; skip over it.
+      ++entries_to_skip;
     }
-    os << static_cast<uint8_t>(BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM)
-       << sym->getName() << '\0'
-       << static_cast<uint8_t>(BIND_OPCODE_SET_TYPE_IMM | BIND_TYPE_POINTER)
-       << static_cast<uint8_t>(BIND_OPCODE_DO_BIND);
   }
 
   os << static_cast<uint8_t>(BIND_OPCODE_DONE);
@@ -192,6 +209,9 @@ void StubHelperSection::setup() {
 ImageLoaderCacheSection::ImageLoaderCacheSection() {
   segname = segment_names::data;
   name = "__data";
+  uint8_t *arr = bAlloc.Allocate<uint8_t>(WordSize);
+  memset(arr, 0, WordSize);
+  data = {arr, WordSize};
 }
 
 LazyPointerSection::LazyPointerSection()
@@ -327,6 +347,7 @@ void StringTableSection::writeTo(uint8_t *buf) const {
 }
 
 InStruct in;
+std::vector<SyntheticSection *> syntheticSections;
 
 } // namespace macho
 } // namespace lld

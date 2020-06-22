@@ -6446,6 +6446,12 @@ def err_typecheck_ordered_comparison_of_pointer_and_zero : Error<
   "ordered comparison between pointer and zero (%0 and %1)">;
 def err_typecheck_three_way_comparison_of_pointer_and_zero : Error<
   "three-way comparison between pointer and zero">;
+def ext_typecheck_compare_complete_incomplete_pointers : Extension<
+  "pointer comparisons before C11 "
+  "need to be between two complete or two incomplete types; "
+  "%0 is %select{|in}2complete and "
+  "%1 is %select{|in}3complete">,
+  InGroup<C11>;
 def ext_typecheck_ordered_comparison_of_function_pointers : ExtWarn<
   "ordered comparison of function pointers (%0 and %1)">,
   InGroup<DiagGroup<"ordered-compare-function-pointers">>;
@@ -10783,8 +10789,25 @@ def warn_import_on_definition : Warning<
   "import %select{module|name}0 cannot be applied to a function with a definition">,
   InGroup<IgnoredAttributes>;
 
-def err_builtin_matrix_arg: Error<
-  "%select{first|second}0 argument must be a matrix">;
+def err_builtin_matrix_arg: Error<"first argument must be a matrix">;
+
+def err_builtin_matrix_scalar_unsigned_arg: Error<
+  "%0 argument must be a constant unsigned integer expression">;
+
+def err_builtin_matrix_pointer_arg: Error<
+  "%0 argument must be a pointer to a valid matrix element type">;
+
+def err_builtin_matrix_pointer_arg_mismatch: Error<
+  "the pointee of the second argument must match the element type of the first argument (%0 != %1)">;
+
+def err_builtin_matrix_store_to_const: Error<
+  "cannot store matrix to read-only pointer">;
+
+def err_builtin_matrix_stride_too_small: Error<
+  "stride must be greater or equal to the number of rows">;
+
+def err_builtin_matrix_invalid_dimension: Error<
+  "%0 dimension is outside the allowed range [1, %1]">;
 
 def err_preserve_field_info_not_field : Error<
   "__builtin_preserve_field_info argument %0 not a field access">;

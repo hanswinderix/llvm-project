@@ -23,14 +23,14 @@ namespace macho {
 
 namespace section_names {
 
-constexpr const char *pageZero = "__pagezero";
-constexpr const char *header = "__mach_header";
-constexpr const char *binding = "__binding";
-constexpr const char *lazyBinding = "__lazy_binding";
-constexpr const char *export_ = "__export";
-constexpr const char *symbolTable = "__symbol_table";
-constexpr const char *stringTable = "__string_table";
-constexpr const char *got = "__got";
+constexpr const char pageZero[] = "__pagezero";
+constexpr const char header[] = "__mach_header";
+constexpr const char binding[] = "__binding";
+constexpr const char lazyBinding[] = "__lazy_binding";
+constexpr const char export_[] = "__export";
+constexpr const char symbolTable[] = "__symbol_table";
+constexpr const char stringTable[] = "__string_table";
+constexpr const char got[] = "__got";
 
 } // namespace section_names
 
@@ -45,6 +45,8 @@ public:
   static bool classof(const OutputSection *sec) {
     return sec->kind() == SyntheticKind;
   }
+
+  const StringRef segname;
 };
 
 // The header of the Mach-O file, which must have a file offset of zero.
@@ -78,23 +80,18 @@ class GotSection : public SyntheticSection {
 public:
   GotSection();
 
-  const llvm::SetVector<const DylibSymbol *> &getEntries() const {
-    return entries;
-  }
+  const llvm::SetVector<const Symbol *> &getEntries() const { return entries; }
 
   bool isNeeded() const override { return !entries.empty(); }
 
   uint64_t getSize() const override { return entries.size() * WordSize; }
 
-  void writeTo(uint8_t *buf) const override {
-    // Nothing to write, GOT contains all zeros at link time; it's populated at
-    // runtime by dyld.
-  }
+  void writeTo(uint8_t *buf) const override;
 
-  void addEntry(DylibSymbol &sym);
+  void addEntry(Symbol &sym);
 
 private:
-  llvm::SetVector<const DylibSymbol *> entries;
+  llvm::SetVector<const Symbol *> entries;
 };
 
 // Stores bind opcodes for telling dyld which symbols to load non-lazily.
@@ -267,6 +264,7 @@ struct InStruct {
 };
 
 extern InStruct in;
+extern std::vector<SyntheticSection *> syntheticSections;
 
 } // namespace macho
 } // namespace lld

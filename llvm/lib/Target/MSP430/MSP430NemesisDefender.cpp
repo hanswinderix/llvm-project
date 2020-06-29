@@ -1080,7 +1080,7 @@ static void BuildNOP4(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
   // BIC  #0, 0(R4)    ; 4 cycles, 2 words
-  BuildMI(MBB, I, DL, TII->get(MSP430::BIC16mi), MSP430::FP)
+  BuildMI(MBB, I, DL, TII->get(MSP430::BIC16mi), MSP430::R4)
       .addImm(0)
       .addImm(0);
 }
@@ -1090,9 +1090,9 @@ static void BuildNOP5(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
   // MOV  @R4, 0(R4)   ; 5 cycles, 2 words
-  BuildMI(MBB, I, DL, TII->get(MSP430::MOV16mn), MSP430::FP)
+  BuildMI(MBB, I, DL, TII->get(MSP430::MOV16mn), MSP430::R4)
       .addImm(0)
-      .addReg(MSP430::FP);
+      .addReg(MSP430::R4);
 }
 
 static void BuildNOP6(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
@@ -1100,9 +1100,9 @@ static void BuildNOP6(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
   // MOV  0(R4), 0(R4) ; 6 cycles, 3 words
-  BuildMI(MBB, I, DL, TII->get(MSP430::MOV16mm), MSP430::FP)
+  BuildMI(MBB, I, DL, TII->get(MSP430::MOV16mm), MSP430::R4)
       .addImm(0)
-      .addReg(MSP430::FP)
+      .addReg(MSP430::R4)
       .addImm(0);
 }
 

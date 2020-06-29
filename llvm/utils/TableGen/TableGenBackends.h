@@ -91,6 +91,7 @@ void EmitRegisterBank(RecordKeeper &RK, raw_ostream &OS);
 void EmitMSP430InstrLatencyInfo(RecordKeeper &RK, raw_ostream &OS);
 void EmitExegesis(RecordKeeper &RK, raw_ostream &OS);
 void EmitAutomata(RecordKeeper &RK, raw_ostream &OS);
+void EmitDirectivesEnums(RecordKeeper &RK, raw_ostream &OS);
 
 } // End llvm namespace
 

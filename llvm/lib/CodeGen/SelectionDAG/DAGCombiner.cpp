@@ -4875,11 +4875,16 @@ bool DAGCombiner::isLegalNarrowLdSt(LSBaseSDNode *LDST,
     return false;
 
   // Ensure that this isn't going to produce an unsupported memory access.
-  if (ShAmt &&
-      !TLI.allowsMemoryAccess(*DAG.getContext(), DAG.getDataLayout(), MemVT,
-                              LDST->getAddressSpace(), ShAmt / 8,
-                              LDST->getMemOperand()->getFlags()))
-    return false;
+  if (ShAmt) {
+    assert(ShAmt % 8 == 0 && "ShAmt is byte offset");
+    const unsigned ByteShAmt = ShAmt / 8;
+    const Align LDSTAlign = LDST->getAlign();
+    const Align NarrowAlign = commonAlignment(LDSTAlign, ByteShAmt);
+    if (!TLI.allowsMemoryAccess(*DAG.getContext(), DAG.getDataLayout(), MemVT,
+                                LDST->getAddressSpace(), NarrowAlign,
+                                LDST->getMemOperand()->getFlags()))
+      return false;
+  }
 
   // It's not possible to generate a constant of extended or untyped type.
   EVT PtrType = LDST->getBasePtr().getValueType();
@@ -8493,7 +8498,7 @@ SDValue DAGCombiner::visitFunnelShift(SDNode *N) {
           SDLoc DL(RHS);
           uint64_t PtrOff =
               IsFSHL ? (((BitWidth - ShAmt) % BitWidth) / 8) : (ShAmt / 8);
-          unsigned NewAlign = MinAlign(RHS->getAlignment(), PtrOff);
+          Align NewAlign = commonAlignment(RHS->getAlign(), PtrOff);
           bool Fast = false;
           if (TLI.allowsMemoryAccess(*DAG.getContext(), DAG.getDataLayout(), VT,
                                      RHS->getAddressSpace(), NewAlign,
@@ -18281,6 +18286,9 @@ SDValue DAGCombiner::reduceBuildVecToShuffle(SDNode *N) {
         !isa<ConstantSDNode>(Op.getOperand(1)))
       return SDValue();
     SDValue ExtractedFromVec = Op.getOperand(0);
+
+    if (ExtractedFromVec.getValueType().isScalableVector())
+      return SDValue();
 
     const APInt &ExtractIdx = Op.getConstantOperandAPInt(1);
     if (ExtractIdx.uge(ExtractedFromVec.getValueType().getVectorNumElements()))

@@ -155,7 +155,7 @@ public:
     break;
 #include "clang/StaticAnalyzer/Core/Analyses.def"
     default:
-      llvm_unreachable("Unkown analyzer output type!");
+      llvm_unreachable("Unknown analyzer output type!");
     }
 
     // Create the analyzer component creators.

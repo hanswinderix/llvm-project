@@ -10957,8 +10957,9 @@ SDValue DAGCombiner::visitSIGN_EXTEND_INREG(SDNode *N) {
   unsigned VTBits = VT.getScalarSizeInBits();
   unsigned ExtVTBits = ExtVT.getScalarSizeInBits();
 
+  // sext_vector_inreg(undef) = 0 because the top bit will all be the same.
   if (N0.isUndef())
-    return DAG.getUNDEF(VT);
+    return DAG.getConstant(0, SDLoc(N), VT);
 
   // fold (sext_in_reg c1) -> c1
   if (DAG.isConstantIntBuildVectorOrConstantInt(N0))
@@ -11086,8 +11087,9 @@ SDValue DAGCombiner::visitSIGN_EXTEND_VECTOR_INREG(SDNode *N) {
   SDValue N0 = N->getOperand(0);
   EVT VT = N->getValueType(0);
 
+  // sext_vector_inreg(undef) = 0 because the top bit will all be the same.
   if (N0.isUndef())
-    return DAG.getUNDEF(VT);
+    return DAG.getConstant(0, SDLoc(N), VT);
 
   if (SDValue Res = tryToFoldExtendOfConstant(N, TLI, DAG, LegalTypes))
     return Res;
@@ -11102,8 +11104,9 @@ SDValue DAGCombiner::visitZERO_EXTEND_VECTOR_INREG(SDNode *N) {
   SDValue N0 = N->getOperand(0);
   EVT VT = N->getValueType(0);
 
+  // zext_vector_inreg(undef) = 0 because the top bits will be zero.
   if (N0.isUndef())
-    return DAG.getUNDEF(VT);
+    return DAG.getConstant(0, SDLoc(N), VT);
 
   if (SDValue Res = tryToFoldExtendOfConstant(N, TLI, DAG, LegalTypes))
     return Res;
@@ -11455,14 +11458,14 @@ SDValue DAGCombiner::CombineConsecutiveLoads(SDNode *N, EVT VT) {
   unsigned LD1Bytes = LD1VT.getStoreSize();
   if (ISD::isNON_EXTLoad(LD2) && LD2->hasOneUse() &&
       DAG.areNonVolatileConsecutiveLoads(LD2, LD1, LD1Bytes, 1)) {
-    unsigned Align = LD1->getAlignment();
-    unsigned NewAlign = DAG.getDataLayout().getABITypeAlignment(
+    Align Alignment = LD1->getAlign();
+    Align NewAlign = DAG.getDataLayout().getABITypeAlign(
         VT.getTypeForEVT(*DAG.getContext()));
 
-    if (NewAlign <= Align &&
+    if (NewAlign <= Alignment &&
         (!LegalOperations || TLI.isOperationLegal(ISD::LOAD, VT)))
       return DAG.getLoad(VT, SDLoc(N), LD1->getChain(), LD1->getBasePtr(),
-                         LD1->getPointerInfo(), Align);
+                         LD1->getPointerInfo(), Alignment);
   }
 
   return SDValue();
@@ -15011,11 +15014,11 @@ struct LoadedSlice {
   }
 
   /// Get the alignment of the load used for this slice.
-  unsigned getAlignment() const {
-    unsigned Alignment = Origin->getAlignment();
+  Align getAlign() const {
+    Align Alignment = Origin->getAlign();
     uint64_t Offset = getOffsetFromBase();
     if (Offset != 0)
-      Alignment = MinAlign(Alignment, Alignment + Offset);
+      Alignment = commonAlignment(Alignment, Alignment.value() + Offset);
     return Alignment;
   }
 
@@ -15111,8 +15114,8 @@ struct LoadedSlice {
     // Create the load for the slice.
     SDValue LastInst =
         DAG->getLoad(SliceType, SDLoc(Origin), Origin->getChain(), BaseAddr,
-                     Origin->getPointerInfo().getWithOffset(Offset),
-                     getAlignment(), Origin->getMemOperand()->getFlags());
+                     Origin->getPointerInfo().getWithOffset(Offset), getAlign(),
+                     Origin->getMemOperand()->getFlags());
     // If the final type is not the same as the loaded type, this means that
     // we have to pad with zero. Create a zero extend for that.
     EVT FinalType = Inst->getValueType(0);
@@ -15153,10 +15156,10 @@ struct LoadedSlice {
 
     // Check if it will be merged with the load.
     // 1. Check the alignment constraint.
-    unsigned RequiredAlignment = DAG->getDataLayout().getABITypeAlignment(
+    Align RequiredAlignment = DAG->getDataLayout().getABITypeAlign(
         ResVT.getTypeForEVT(*DAG->getContext()));
 
-    if (RequiredAlignment > getAlignment())
+    if (RequiredAlignment > getAlign())
       return false;
 
     // 2. Check that the load is a legal operation for that type.
@@ -15242,14 +15245,14 @@ static void adjustCostForPairing(SmallVectorImpl<LoadedSlice> &LoadedSlices,
       continue;
 
     // Check if the target supplies paired loads for this type.
-    unsigned RequiredAlignment = 0;
+    Align RequiredAlignment;
     if (!TLI.hasPairedLoad(LoadedType, RequiredAlignment)) {
       // move to the next pair, this type is hopeless.
       Second = nullptr;
       continue;
     }
     // Check if we meet the alignment requirement.
-    if (RequiredAlignment > First->getAlignment())
+    if (First->getAlign() < RequiredAlignment)
       continue;
 
     // Check that both loads are next to each other in memory.
@@ -15644,9 +15647,9 @@ SDValue DAGCombiner::ReduceLoadOpStoreWidth(SDNode *N) {
       if (DAG.getDataLayout().isBigEndian())
         PtrOff = (BitWidth + 7 - NewBW) / 8 - PtrOff;
 
-      unsigned NewAlign = MinAlign(LD->getAlignment(), PtrOff);
+      Align NewAlign = commonAlignment(LD->getAlign(), PtrOff);
       Type *NewVTTy = NewVT.getTypeForEVT(*DAG.getContext());
-      if (NewAlign < DAG.getDataLayout().getABITypeAlignment(NewVTTy))
+      if (NewAlign < DAG.getDataLayout().getABITypeAlign(NewVTTy))
         return SDValue();
 
       SDValue NewPtr = DAG.getMemBasePlusOffset(Ptr, PtrOff, SDLoc(LD));
@@ -15699,10 +15702,10 @@ SDValue DAGCombiner::TransformFPLoadStorePair(SDNode *N) {
         !TLI.isDesirableToTransformToIntegerOp(ISD::STORE, VT))
       return SDValue();
 
-    unsigned LDAlign = LD->getAlignment();
-    unsigned STAlign = ST->getAlignment();
+    Align LDAlign = LD->getAlign();
+    Align STAlign = ST->getAlign();
     Type *IntVTTy = IntVT.getTypeForEVT(*DAG.getContext());
-    unsigned ABIAlign = DAG.getDataLayout().getABITypeAlignment(IntVTTy);
+    Align ABIAlign = DAG.getDataLayout().getABITypeAlign(IntVTTy);
     if (LDAlign < ABIAlign || STAlign < ABIAlign)
       return SDValue();
 
@@ -16523,10 +16526,10 @@ bool DAGCombiner::MergeConsecutiveStores(StoreSDNode *St) {
     while (NumConsecutiveStores >= 2 && LoadNodes.size() >= 2) {
       // If we have load/store pair instructions and we only have two values,
       // don't bother merging.
-      unsigned RequiredAlignment;
+      Align RequiredAlignment;
       if (LoadNodes.size() == 2 &&
           TLI.hasPairedLoad(MemVT, RequiredAlignment) &&
-          StoreNodes[0].MemNode->getAlignment() >= RequiredAlignment) {
+          StoreNodes[0].MemNode->getAlign() >= RequiredAlignment) {
         StoreNodes.erase(StoreNodes.begin(), StoreNodes.begin() + 2);
         LoadNodes.erase(LoadNodes.begin(), LoadNodes.begin() + 2);
         break;
@@ -17428,11 +17431,12 @@ SDValue DAGCombiner::scalarizeExtractedVectorLoad(SDNode *EVE, EVT InVecVT,
 
   EVT ResultVT = EVE->getValueType(0);
   EVT VecEltVT = InVecVT.getVectorElementType();
-  unsigned Align = OriginalLoad->getAlignment();
-  unsigned NewAlign = DAG.getDataLayout().getABITypeAlignment(
+  Align Alignment = OriginalLoad->getAlign();
+  Align NewAlign = DAG.getDataLayout().getABITypeAlign(
       VecEltVT.getTypeForEVT(*DAG.getContext()));
 
-  if (NewAlign > Align || !TLI.isOperationLegalOrCustom(ISD::LOAD, VecEltVT))
+  if (NewAlign > Alignment ||
+      !TLI.isOperationLegalOrCustom(ISD::LOAD, VecEltVT))
     return SDValue();
 
   ISD::LoadExtType ExtTy = ResultVT.bitsGT(VecEltVT) ?
@@ -17440,7 +17444,7 @@ SDValue DAGCombiner::scalarizeExtractedVectorLoad(SDNode *EVE, EVT InVecVT,
   if (!TLI.shouldReduceLoadWidth(OriginalLoad, ExtTy, VecEltVT))
     return SDValue();
 
-  Align = NewAlign;
+  Alignment = NewAlign;
 
   SDValue NewPtr = OriginalLoad->getBasePtr();
   SDValue Offset;
@@ -17480,13 +17484,13 @@ SDValue DAGCombiner::scalarizeExtractedVectorLoad(SDNode *EVE, EVT InVecVT,
                                    : ISD::EXTLOAD;
     Load = DAG.getExtLoad(ExtType, SDLoc(EVE), ResultVT,
                           OriginalLoad->getChain(), NewPtr, MPI, VecEltVT,
-                          Align, OriginalLoad->getMemOperand()->getFlags(),
+                          Alignment, OriginalLoad->getMemOperand()->getFlags(),
                           OriginalLoad->getAAInfo());
     Chain = Load.getValue(1);
   } else {
-    Load = DAG.getLoad(VecEltVT, SDLoc(EVE), OriginalLoad->getChain(), NewPtr,
-                       MPI, Align, OriginalLoad->getMemOperand()->getFlags(),
-                       OriginalLoad->getAAInfo());
+    Load = DAG.getLoad(
+        VecEltVT, SDLoc(EVE), OriginalLoad->getChain(), NewPtr, MPI, Alignment,
+        OriginalLoad->getMemOperand()->getFlags(), OriginalLoad->getAAInfo());
     Chain = Load.getValue(1);
     if (ResultVT.bitsLT(VecEltVT))
       Load = DAG.getNode(ISD::TRUNCATE, SDLoc(EVE), ResultVT, Load);
@@ -19217,13 +19221,13 @@ SDValue DAGCombiner::visitEXTRACT_SUBVECTOR(SDNode *N) {
       V.getOperand(0).getValueType().isVector()) {
     SDValue SrcOp = V.getOperand(0);
     EVT SrcVT = SrcOp.getValueType();
-    unsigned SrcNumElts = SrcVT.getVectorNumElements();
-    unsigned DestNumElts = V.getValueType().getVectorNumElements();
+    unsigned SrcNumElts = SrcVT.getVectorMinNumElements();
+    unsigned DestNumElts = V.getValueType().getVectorMinNumElements();
     if ((SrcNumElts % DestNumElts) == 0) {
       unsigned SrcDestRatio = SrcNumElts / DestNumElts;
-      unsigned NewExtNumElts = NVT.getVectorNumElements() * SrcDestRatio;
+      ElementCount NewExtEC = NVT.getVectorElementCount() * SrcDestRatio;
       EVT NewExtVT = EVT::getVectorVT(*DAG.getContext(), SrcVT.getScalarType(),
-                                      NewExtNumElts);
+                                      NewExtEC);
       if (TLI.isOperationLegalOrCustom(ISD::EXTRACT_SUBVECTOR, NewExtVT)) {
         SDLoc DL(N);
         SDValue NewIndex = DAG.getVectorIdxConstant(ExtIdx * SrcDestRatio, DL);
@@ -19234,14 +19238,14 @@ SDValue DAGCombiner::visitEXTRACT_SUBVECTOR(SDNode *N) {
     }
     if ((DestNumElts % SrcNumElts) == 0) {
       unsigned DestSrcRatio = DestNumElts / SrcNumElts;
-      if ((NVT.getVectorNumElements() % DestSrcRatio) == 0) {
-        unsigned NewExtNumElts = NVT.getVectorNumElements() / DestSrcRatio;
+      if ((NVT.getVectorMinNumElements() % DestSrcRatio) == 0) {
+        ElementCount NewExtEC = NVT.getVectorElementCount() / DestSrcRatio;
         EVT ScalarVT = SrcVT.getScalarType();
         if ((ExtIdx % DestSrcRatio) == 0) {
           SDLoc DL(N);
           unsigned IndexValScaled = ExtIdx / DestSrcRatio;
           EVT NewExtVT =
-              EVT::getVectorVT(*DAG.getContext(), ScalarVT, NewExtNumElts);
+              EVT::getVectorVT(*DAG.getContext(), ScalarVT, NewExtEC);
           if (TLI.isOperationLegalOrCustom(ISD::EXTRACT_SUBVECTOR, NewExtVT)) {
             SDValue NewIndex = DAG.getVectorIdxConstant(IndexValScaled, DL);
             SDValue NewExtract =
@@ -19249,7 +19253,7 @@ SDValue DAGCombiner::visitEXTRACT_SUBVECTOR(SDNode *N) {
                             V.getOperand(0), NewIndex);
             return DAG.getBitcast(NVT, NewExtract);
           }
-          if (NewExtNumElts == 1 &&
+          if (NewExtEC == 1 &&
               TLI.isOperationLegalOrCustom(ISD::EXTRACT_VECTOR_ELT, ScalarVT)) {
             SDValue NewIndex = DAG.getVectorIdxConstant(IndexValScaled, DL);
             SDValue NewExtract =
@@ -19263,14 +19267,14 @@ SDValue DAGCombiner::visitEXTRACT_SUBVECTOR(SDNode *N) {
   }
 
   if (V.getOpcode() == ISD::CONCAT_VECTORS) {
-    unsigned ExtNumElts = NVT.getVectorNumElements();
+    unsigned ExtNumElts = NVT.getVectorMinNumElements();
     EVT ConcatSrcVT = V.getOperand(0).getValueType();
     assert(ConcatSrcVT.getVectorElementType() == NVT.getVectorElementType() &&
            "Concat and extract subvector do not change element type");
     assert((ExtIdx % ExtNumElts) == 0 &&
            "Extract index is not a multiple of the input vector length.");
 
-    unsigned ConcatSrcNumElts = ConcatSrcVT.getVectorNumElements();
+    unsigned ConcatSrcNumElts = ConcatSrcVT.getVectorMinNumElements();
     unsigned ConcatOpIdx = ExtIdx / ConcatSrcNumElts;
 
     // If the concatenated source types match this extract, it's a direct
@@ -19284,7 +19288,7 @@ SDValue DAGCombiner::visitEXTRACT_SUBVECTOR(SDNode *N) {
     // concat operand. Example:
     //   v2i8 extract_subvec (v16i8 concat (v8i8 X), (v8i8 Y), 14 -->
     //   v2i8 extract_subvec v8i8 Y, 6
-    if (ConcatSrcNumElts % ExtNumElts == 0) {
+    if (NVT.isFixedLengthVector() && ConcatSrcNumElts % ExtNumElts == 0) {
       SDLoc DL(N);
       unsigned NewExtIdx = ExtIdx - ConcatOpIdx * ConcatSrcNumElts;
       assert(NewExtIdx + ExtNumElts <= ConcatSrcNumElts &&
@@ -20266,7 +20270,9 @@ SDValue DAGCombiner::visitSCALAR_TO_VECTOR(SDNode *N) {
 
   // Replace a SCALAR_TO_VECTOR(EXTRACT_VECTOR_ELT(V,C0)) pattern
   // with a VECTOR_SHUFFLE and possible truncate.
-  if (InVal.getOpcode() == ISD::EXTRACT_VECTOR_ELT) {
+  if (InVal.getOpcode() == ISD::EXTRACT_VECTOR_ELT &&
+      VT.isFixedLengthVector() &&
+      InVal->getOperand(0).getValueType().isFixedLengthVector()) {
     SDValue InVec = InVal->getOperand(0);
     SDValue EltNo = InVal->getOperand(1);
     auto InVecT = InVec.getValueType();

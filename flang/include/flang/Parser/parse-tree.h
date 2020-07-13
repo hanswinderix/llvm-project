@@ -1395,8 +1395,7 @@ WRAPPER_CLASS(ContiguousStmt, std::list<ObjectName>);
 using ConstantSubobject = Constant<common::Indirection<Designator>>;
 
 // Represents an analyzed expression
-using TypedExpr = std::unique_ptr<evaluate::GenericExprWrapper,
-    common::Deleter<evaluate::GenericExprWrapper>>;
+using TypedExpr = common::ForwardOwningPointer<evaluate::GenericExprWrapper>;
 
 // R845 data-stmt-constant ->
 //        scalar-constant | scalar-constant-subobject |
@@ -1919,8 +1918,8 @@ struct DeallocateStmt {
 // R1032 assignment-stmt -> variable = expr
 struct AssignmentStmt {
   TUPLE_CLASS_BOILERPLATE(AssignmentStmt);
-  using TypedAssignment = std::unique_ptr<evaluate::GenericAssignmentWrapper,
-      common::Deleter<evaluate::GenericAssignmentWrapper>>;
+  using TypedAssignment =
+      common::ForwardOwningPointer<evaluate::GenericAssignmentWrapper>;
   mutable TypedAssignment typedAssignment;
   std::tuple<Variable, Expr> t;
 };
@@ -3140,8 +3139,7 @@ struct FunctionReference {
 // R1521 call-stmt -> CALL procedure-designator [( [actual-arg-spec-list] )]
 struct CallStmt {
   WRAPPER_CLASS_BOILERPLATE(CallStmt, Call);
-  mutable std::unique_ptr<evaluate::ProcedureRef,
-      common::Deleter<evaluate::ProcedureRef>>
+  mutable common::ForwardOwningPointer<evaluate::ProcedureRef>
       typedCall; // filled by semantics
 };
 
@@ -3707,11 +3705,23 @@ struct OpenMPCancelConstruct {
   std::tuple<Verbatim, OmpCancelType, std::optional<If>> t;
 };
 
-// 2.13.7 flush -> FLUSH [(variable-name-list)]
+// 2.17.8 Flush Construct [OpenMP 5.0]
+// memory-order-clause -> acq_rel
+//                        release
+//                        acquire
+struct OmpFlushMemoryClause {
+  ENUM_CLASS(FlushMemoryOrder, AcqRel, Release, Acquire)
+  WRAPPER_CLASS_BOILERPLATE(OmpFlushMemoryClause, FlushMemoryOrder);
+  CharBlock source;
+};
+
+// 2.17.8 flush -> FLUSH [memory-order-clause] [(variable-name-list)]
 struct OpenMPFlushConstruct {
   TUPLE_CLASS_BOILERPLATE(OpenMPFlushConstruct);
   CharBlock source;
-  std::tuple<Verbatim, std::optional<OmpObjectList>> t;
+  std::tuple<Verbatim, std::optional<OmpFlushMemoryClause>,
+      std::optional<OmpObjectList>>
+      t;
 };
 
 struct OmpSimpleStandaloneDirective {

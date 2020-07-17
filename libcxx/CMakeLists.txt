@@ -32,7 +32,7 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR OR LIBCXX_STANDALONE_BUIL
   project(libcxx CXX C)
 
   set(PACKAGE_NAME libcxx)
-  set(PACKAGE_VERSION 11.0.0git)
+  set(PACKAGE_VERSION 12.0.0git)
   set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
   set(PACKAGE_BUGREPORT "llvm-bugs@lists.llvm.org")
 
@@ -407,13 +407,9 @@ endif ()
 # Configure System
 #===============================================================================
 
-set(LIBCXX_COMPILER    ${CMAKE_CXX_COMPILER})
 set(LIBCXX_SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR})
 set(LIBCXX_BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR})
 set(LIBCXX_BINARY_INCLUDE_DIR "${LIBCXX_BINARY_DIR}/include/c++build")
-
-string(REGEX MATCH "[0-9]+\\.[0-9]+(\\.[0-9]+)?" CLANG_VERSION
-       ${PACKAGE_VERSION})
 
 if(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR AND NOT APPLE)
   set(LIBCXX_LIBRARY_DIR ${LLVM_LIBRARY_OUTPUT_INTDIR}/${LLVM_DEFAULT_TARGET_TRIPLE}/c++)
@@ -639,7 +635,6 @@ endfunction()
 # RTTI flags ==================================================================
 function(cxx_add_rtti_flags target)
   if (NOT LIBCXX_ENABLE_RTTI)
-    target_compile_definitions(${target} PUBLIC -D_LIBCPP_NO_RTTI)
     target_add_compile_flags_if_supported(${target} PUBLIC -GR-)
     target_add_compile_flags_if_supported(${target} PUBLIC -fno-rtti)
   endif()

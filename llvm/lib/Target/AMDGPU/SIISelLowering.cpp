@@ -449,6 +449,7 @@ SITargetLowering::SITargetLowering(const TargetMachine &TM,
 
   if (Subtarget->has16BitInsts()) {
     setOperationAction(ISD::FPOW, MVT::f16, Promote);
+    setOperationAction(ISD::FPOWI, MVT::f16, Promote);
     setOperationAction(ISD::FLOG, MVT::f16, Custom);
     setOperationAction(ISD::FEXP, MVT::f16, Custom);
     setOperationAction(ISD::FLOG10, MVT::f16, Custom);
@@ -2253,9 +2254,21 @@ SDValue SITargetLowering::LowerFormalArguments(
       const uint64_t Offset = VA.getLocMemOffset();
       Align Alignment = commonAlignment(KernelArgBaseAlign, Offset);
 
-      SDValue Arg =
-          lowerKernargMemParameter(DAG, VT, MemVT, DL, Chain, Offset, Alignment,
-                                   Ins[i].Flags.isSExt(), &Ins[i]);
+      if (Arg.Flags.isByRef()) {
+        SDValue Ptr = lowerKernArgParameterPtr(DAG, DL, Chain, Offset);
+
+        if (!isNoopAddrSpaceCast(AMDGPUAS::CONSTANT_ADDRESS,
+                                 Arg.Flags.getPointerAddrSpace())) {
+          Ptr = DAG.getAddrSpaceCast(DL, VT, Ptr, AMDGPUAS::CONSTANT_ADDRESS,
+                                     Arg.Flags.getPointerAddrSpace());
+        }
+
+        InVals.push_back(Ptr);
+        continue;
+      }
+
+      SDValue Arg = lowerKernargMemParameter(
+        DAG, VT, MemVT, DL, Chain, Offset, Alignment, Ins[i].Flags.isSExt(), &Ins[i]);
       Chains.push_back(Arg.getValue(1));
 
       auto *ParamTy =

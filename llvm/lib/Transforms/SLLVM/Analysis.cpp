@@ -1,7 +1,6 @@
 #include "Analysis.h"
 
 #include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/CallSite.h"
 #include "llvm/SLLVM.h"
 #include "llvm/Support/Debug.h"
 
@@ -63,8 +62,8 @@ SLLVMAnalysisResults::SLLVMAnalysisResults(const Module &M) : _isPM(false) {
   for (const Function& F : M) {
     for (const BasicBlock &BB : F) {
       for (const Instruction &I : BB) {
-        if (auto CS = ImmutableCallSite(&I)) {
-          const Function *CF = CS.getCalledFunction();
+        if (auto *CB = dyn_cast<CallBase>(&I)) {
+          const Function *CF = CB->getCalledFunction();
           if (CF != nullptr) { // TODO: Forbid indirect calls in enclaves
 
             if (isEEntry(CF)) {

@@ -260,8 +260,8 @@ void SGXTransformation::handleOutCalls(Module &M) {
       for (Instruction &I : BB) {
         if (A.isEExitCall(&I)) {
 
-          auto CS = CallSite(&I);
-          const Function *CF = CS.getCalledFunction();
+          auto *CB = dyn_cast<CallBase>(&I);
+          const Function *CF = CB->getCalledFunction();
 
           OCalls.push_back(&I);
 
@@ -279,7 +279,7 @@ void SGXTransformation::handleOutCalls(Module &M) {
             A.push_back(IRB.CreateLoad(PR));
             R = IRB.CreateLoad(R);
           }
-          A.insert(std::end(A), CS.arg_begin(), CS.arg_end());
+          A.insert(std::end(A), CB->arg_begin(), CB->arg_end());
 
           //auto CI = IRB.CreateCall(S, A);
           IRB.CreateCall(S, A);

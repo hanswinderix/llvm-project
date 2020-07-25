@@ -31,7 +31,7 @@ class AnnotationParser : public llvm::ModulePass
 
         AnnotationParser();
 
-        virtual bool runOnModule(llvm::Module& m);
+        virtual bool runOnModule(llvm::Module& m) override;
 
         const Map& getAnnotations() const;
         std::vector<Annotation>

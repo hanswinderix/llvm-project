@@ -2,7 +2,6 @@
 #include "Analysis.h"
 #include "../lib/Target/MSP430/MSP430Sancus.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
-#include "llvm/IR/CallSite.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Support/CommandLine.h"
 
@@ -368,7 +367,7 @@ void SancusTransformation::handleCalls(Module &M) {
   for (Function& F : M) {
     for (BasicBlock &BB : F) {
       for (Instruction &I : BB) {
-        auto CS = CallSite(&I);
+        auto *CB = dyn_cast<CallBase>(&I);
 
         if (A.isEExitCall(&I)) {
           // Make sure the PM's dispatcher and the local stack pointer are 
@@ -383,7 +382,7 @@ void SancusTransformation::handleCalls(Module &M) {
           IRB.SetInsertPoint(&I);
           ECalls.push_back(&I);
 
-          const Function *CF = CS.getCalledFunction();
+          const Function *CF = CB->getCalledFunction();
           auto S = getOrInsertEEntryFunction(M, CF);
           auto EF = S.first;
           auto ID = S.second;
@@ -403,7 +402,7 @@ void SancusTransformation::handleCalls(Module &M) {
           }
 
           SmallVector<Value *, 6> A {IRB.CreateLoad(ID)};
-          A.insert(std::end(A), CS.arg_begin(), CS.arg_end());
+          A.insert(std::end(A), CB->arg_begin(), CB->arg_end());
 
           CallInst * CI = IRB.CreateCall(cast<FunctionType>(EF->getType()->getPointerElementType()), EF, A);
           CI->setCallingConv(CallingConv::SANCUS_ENTRY);

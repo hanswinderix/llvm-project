@@ -9,9 +9,9 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Module.h>
-#include <llvm/IR/TypeBuilder.h>
-#include <llvm/IR/CallSite.h>
 #include <llvm/IR/InstIterator.h>
+#include <llvm/IR/InstrTypes.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/InlineAsm.h>
 
 #include <llvm/Support/raw_ostream.h>
@@ -32,21 +32,21 @@ struct SancusModuleCreator : ModulePass
 
     SancusModuleCreator();
 
-    virtual void getAnalysisUsage(AnalysisUsage& au) const;
-    virtual bool runOnModule(Module& m);
+    virtual void getAnalysisUsage(AnalysisUsage& au) const override;
+    virtual bool runOnModule(Module& m) override;
 
     bool handleFunction(Function& f);
     bool handleData(GlobalVariable& gv);
     void createFunctionTable(Module& m);
     Function* getStub(Function& caller, Function& callee);
     SancusModuleInfo getSancusModuleInfo(const GlobalValue* gv);
-    Function* getCalledFunction(CallSite cs);
+    Function* getCalledFunction(CallBase *cb);
     Instruction* getVerification(SancusModuleInfo callerInfo,
                                  SancusModuleInfo calleeInfo,
                                  Module& m);
     Constant* getSymbolAddress(Module& m, StringRef name);
     std::string fixSymbolName(const std::string& name);
-    CallSite handleSancusCall(CallSite cs);
+    CallBase *handleSancusCall(CallBase *cb);
 
     typedef std::map<const GlobalValue*, SancusModuleInfo> InfoMap;
     InfoMap modulesInfo;
@@ -86,9 +86,9 @@ bool SancusModuleCreator::runOnModule(Module& m)
 {
     module = &m;
     LLVMContext& ctx = m.getContext();
-    wordTy = TypeBuilder<types::i<16>, true>::get(ctx);
-    byteTy = TypeBuilder<types::i<8>, true>::get(ctx);
-    voidPtrTy = TypeBuilder<types::i<8>*, true>::get(ctx);
+    wordTy = Type::getInt16Ty(ctx);
+    byteTy = Type::getInt8Ty(ctx);
+    voidPtrTy = Type::getVoidTy(ctx);
     voidTy = Type::getVoidTy(ctx);
 
     Type* argTys[] = {voidPtrTy, voidPtrTy, voidPtrTy};
@@ -146,11 +146,11 @@ bool SancusModuleCreator::handleFunction(Function& f)
     for (inst_iterator it = inst_begin(f), end = inst_end(f); it != end; ++it)
     {
         Instruction* inst = &*it;
-        CallSite cs(inst);
-        if (!cs)
+        auto *cb = dyn_cast<CallBase>(inst);
+        if (!cb)
             continue;
 
-        Function* callee = getCalledFunction(cs);
+        Function* callee = getCalledFunction(cb);
         if (callee == nullptr)
         {
             if (CallInst* ci = cast<CallInst>(&*it))
@@ -178,8 +178,7 @@ bool SancusModuleCreator::handleFunction(Function& f)
             continue;
         else if (callee->getName() == "sancus_call")
         {
-            replacements[cs.getInstruction()] =
-                handleSancusCall(cs).getInstruction();
+            replacements[cb] = handleSancusCall(cb);
             continue;
         }
 
@@ -190,7 +189,7 @@ bool SancusModuleCreator::handleFunction(Function& f)
         }
 
         Function* stub = getStub(f, *callee);
-        cs.setCalledFunction(stub);
+        cb->setCalledFunction(stub);
 
         if (stub != callee)
             modified = true;
@@ -486,14 +485,14 @@ SancusModuleInfo SancusModuleCreator::getSancusModuleInfo(const GlobalValue* gv)
     return info;
 }
 
-Function* SancusModuleCreator::getCalledFunction(CallSite cs)
+Function* SancusModuleCreator::getCalledFunction(CallBase *cb)
 {
-    assert(cs && "Not a call site");
+    assert(cb && "Not a call site");
 
-    if (Function* f = cs.getCalledFunction())
+    if (Function* f = cb->getCalledFunction())
         return f;
 
-    if (ConstantExpr* ce = dyn_cast<ConstantExpr>(cs.getCalledValue()))
+    if (ConstantExpr* ce = dyn_cast<ConstantExpr>(cb->getCalledOperand()))
     {
         if (ce->isCast())
         {
@@ -565,11 +564,11 @@ std::string SancusModuleCreator::fixSymbolName(const std::string& name)
         return name;
 }
 
-CallSite SancusModuleCreator::handleSancusCall(CallSite cs)
+CallBase *SancusModuleCreator::handleSancusCall(CallBase *cb)
 {
-    assert(cs.arg_size() >= 2 && "sancus_call needs at least 2 arguments");
+    assert(cb->arg_size() >= 2 && "sancus_call needs at least 2 arguments");
 
-    auto numAsmArgs = cs.arg_size() - 2;
+    auto numAsmArgs = cb->arg_size() - 2;
 
     if (numAsmArgs > 3)
     {
@@ -578,19 +577,19 @@ CallSite SancusModuleCreator::handleSancusCall(CallSite cs)
     }
 
     auto argTys = std::vector<Type*>{voidPtrTy, wordTy};
-    auto entryVal = cs.getArgument(0);
-    auto indexVal = cs.getArgument(1);
+    auto entryVal = cb->getArgOperand(0);
+    auto indexVal = cb->getArgOperand(1);
     auto args = std::vector<Value*>{entryVal, indexVal};
 
     auto inputConstraints = std::string{",r,r"};
     std::ostringstream argsAsm;
     auto regsUsage = unsigned{0x10};
     auto clobbers = std::string{",~{r6},~{r7},~{r8},~{r15}"};
-    auto callerInfo = getSancusModuleInfo(cs.getCaller());
+    auto callerInfo = getSancusModuleInfo(cb->getCaller());
 
     for (decltype(numAsmArgs) i = 0; i < numAsmArgs; i++)
     {
-        auto arg = cs.getArgument(i + 2);
+        auto arg = cb->getArgOperand(i + 2);
         auto argTy = arg->getType();
 
         // TODO FunctionCcInfo should be used to check the argument. This is not
@@ -637,5 +636,5 @@ CallSite SancusModuleCreator::handleSancusCall(CallSite cs)
                                     /*hasSideEffects=*/true);
 
     auto asmCall = CallInst::Create(inlineAsm, args);
-    return CallSite(asmCall);
+    return dyn_cast<CallBase>(asmCall);
 }

@@ -434,25 +434,25 @@ vector unsigned long long test_vec_insertl_ul(void) {
 }
 
 vector unsigned char test_vec_insertl_ucv(void) {
-  // CHECK-BE: @llvm.ppc.altivec.vinsbvlx(<16 x i8> %{{.+}}, i64 %{{.+}}, <16 x i8>
+  // CHECK-BE: @llvm.ppc.altivec.vinsbvlx(<16 x i8> %{{.+}}, i32 %{{.+}}, <16 x i8>
   // CHECK-BE-NEXT: ret <16 x i8>
-  // CHECK-LE: @llvm.ppc.altivec.vinsbvrx(<16 x i8> %{{.+}}, i64 %{{.+}}, <16 x i8>
+  // CHECK-LE: @llvm.ppc.altivec.vinsbvrx(<16 x i8> %{{.+}}, i32 %{{.+}}, <16 x i8>
   // CHECK-LE-NEXT: ret <16 x i8>
   return vec_insertl(vuca, vucb, uia);
 }
 
 vector unsigned short test_vec_insertl_usv(void) {
-  // CHECK-BE: @llvm.ppc.altivec.vinshvlx(<8 x i16> %{{.+}}, i64 %{{.+}}, <8 x i16>
+  // CHECK-BE: @llvm.ppc.altivec.vinshvlx(<8 x i16> %{{.+}}, i32 %{{.+}}, <8 x i16>
   // CHECK-BE-NEXT: ret <8 x i16>
-  // CHECK-LE: @llvm.ppc.altivec.vinshvrx(<8 x i16> %{{.+}}, i64 %{{.+}}, <8 x i16>
+  // CHECK-LE: @llvm.ppc.altivec.vinshvrx(<8 x i16> %{{.+}}, i32 %{{.+}}, <8 x i16>
   // CHECK-LE-NEXT: ret <8 x i16>
   return vec_insertl(vusa, vusb, uia);
 }
 
 vector unsigned int test_vec_insertl_uiv(void) {
-  // CHECK-BE: @llvm.ppc.altivec.vinswvlx(<4 x i32> %{{.+}}, i64 %{{.+}}, <4 x i32>
+  // CHECK-BE: @llvm.ppc.altivec.vinswvlx(<4 x i32> %{{.+}}, i32 %{{.+}}, <4 x i32>
   // CHECK-BE-NEXT: ret <4 x i32>
-  // CHECK-LE: @llvm.ppc.altivec.vinswvrx(<4 x i32> %{{.+}}, i64 %{{.+}}, <4 x i32>
+  // CHECK-LE: @llvm.ppc.altivec.vinswvrx(<4 x i32> %{{.+}}, i32 %{{.+}}, <4 x i32>
   // CHECK-LE-NEXT: ret <4 x i32>
   return vec_insertl(vuia, vuib, uia);
 }
@@ -490,25 +490,25 @@ vector unsigned long long test_vec_inserth_ul(void) {
 }
 
 vector unsigned char test_vec_inserth_ucv(void) {
-  // CHECK-BE: @llvm.ppc.altivec.vinsbvrx(<16 x i8> %{{.+}}, i64 %{{.+}}, <16 x i8>
+  // CHECK-BE: @llvm.ppc.altivec.vinsbvrx(<16 x i8> %{{.+}}, i32 %{{.+}}, <16 x i8>
   // CHECK-BE-NEXT: ret <16 x i8>
-  // CHECK-LE: @llvm.ppc.altivec.vinsbvlx(<16 x i8> %{{.+}}, i64 %{{.+}}, <16 x i8>
+  // CHECK-LE: @llvm.ppc.altivec.vinsbvlx(<16 x i8> %{{.+}}, i32 %{{.+}}, <16 x i8>
   // CHECK-LE-NEXT: ret <16 x i8>
   return vec_inserth(vuca, vucb, uia);
 }
 
 vector unsigned short test_vec_inserth_usv(void) {
-  // CHECK-BE: @llvm.ppc.altivec.vinshvrx(<8 x i16> %{{.+}}, i64 %{{.+}}, <8 x i16>
+  // CHECK-BE: @llvm.ppc.altivec.vinshvrx(<8 x i16> %{{.+}}, i32 %{{.+}}, <8 x i16>
   // CHECK-BE-NEXT: ret <8 x i16>
-  // CHECK-LE: @llvm.ppc.altivec.vinshvlx(<8 x i16> %{{.+}}, i64 %{{.+}}, <8 x i16>
+  // CHECK-LE: @llvm.ppc.altivec.vinshvlx(<8 x i16> %{{.+}}, i32 %{{.+}}, <8 x i16>
   // CHECK-LE-NEXT: ret <8 x i16>
   return vec_inserth(vusa, vusb, uia);
 }
 
 vector unsigned int test_vec_inserth_uiv(void) {
-  // CHECK-BE: @llvm.ppc.altivec.vinswvrx(<4 x i32> %{{.+}}, i64 %{{.+}}, <4 x i32>
+  // CHECK-BE: @llvm.ppc.altivec.vinswvrx(<4 x i32> %{{.+}}, i32 %{{.+}}, <4 x i32>
   // CHECK-BE-NEXT: ret <4 x i32>
-  // CHECK-LE: @llvm.ppc.altivec.vinswvlx(<4 x i32> %{{.+}}, i64 %{{.+}}, <4 x i32>
+  // CHECK-LE: @llvm.ppc.altivec.vinswvlx(<4 x i32> %{{.+}}, i32 %{{.+}}, <4 x i32>
   // CHECK-LE-NEXT: ret <4 x i32>
   return vec_inserth(vuia, vuib, uia);
 }
@@ -582,14 +582,62 @@ vector float test_vec_vec_splati_ins_f(void) {
   return vec_splati_ins(vfa, 0, 1.0f);
 }
 
+void test_vec_xst_trunc_sc(vector signed __int128 __a, signed long long __b,
+                           signed char *__c) {
+  // CHECK: store i8 %{{.+}}, i8* %{{.+}}, align 1
+  vec_xst_trunc(__a, __b, __c);
+}
+
+void test_vec_xst_trunc_uc(vector unsigned __int128 __a, signed long long __b,
+                           unsigned char *__c) {
+  // CHECK: store i8 %{{.+}}, i8* %{{.+}}, align 1
+  vec_xst_trunc(__a, __b, __c);
+}
+
+void test_vec_xst_trunc_ss(vector signed __int128 __a, signed long long __b,
+                           signed short *__c) {
+  // CHECK: store i16 %{{.+}}, i16* %{{.+}}, align 2
+  vec_xst_trunc(__a, __b, __c);
+}
+
+void test_vec_xst_trunc_us(vector unsigned __int128 __a, signed long long __b,
+                           unsigned short *__c) {
+  // CHECK: store i16 %{{.+}}, i16* %{{.+}}, align 2
+  vec_xst_trunc(__a, __b, __c);
+}
+
+void test_vec_xst_trunc_si(vector signed __int128 __a, signed long long __b,
+                           signed int *__c) {
+  // CHECK: store i32 %{{.+}}, i32* %{{.+}}, align 4
+  vec_xst_trunc(__a, __b, __c);
+}
+
+void test_vec_xst_trunc_ui(vector unsigned __int128 __a, signed long long __b,
+                           unsigned int *__c) {
+  // CHECK: store i32 %{{.+}}, i32* %{{.+}}, align 4
+  vec_xst_trunc(__a, __b, __c);
+}
+
+void test_vec_xst_trunc_sll(vector signed __int128 __a, signed long long __b,
+                            signed long long *__c) {
+  // CHECK: store i64 %{{.+}}, i64* %{{.+}}, align 8
+  vec_xst_trunc(__a, __b, __c);
+}
+
+void test_vec_xst_trunc_ull(vector unsigned __int128 __a, signed long long __b,
+                            unsigned long long *__c) {
+  // CHECK: store i64 %{{.+}}, i64* %{{.+}}, align 8
+  vec_xst_trunc(__a, __b, __c);
+}
+
 int test_vec_test_lsbb_all_ones(void) {
-  // CHECK: @llvm.ppc.vsx.xvtlsbb(<16 x i8> %{{.+}}, i1 true
+  // CHECK: @llvm.ppc.vsx.xvtlsbb(<16 x i8> %{{.+}}, i32 1
   // CHECK-NEXT: ret i32
   return vec_test_lsbb_all_ones(vuca);
 }
 
 int test_vec_test_lsbb_all_zeros(void) {
-  // CHECK: @llvm.ppc.vsx.xvtlsbb(<16 x i8> %{{.+}}, i1 false
+  // CHECK: @llvm.ppc.vsx.xvtlsbb(<16 x i8> %{{.+}}, i32 0
   // CHECK-NEXT: ret i32
   return vec_test_lsbb_all_zeros(vuca);
 }

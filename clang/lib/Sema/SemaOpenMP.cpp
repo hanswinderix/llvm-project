@@ -2244,7 +2244,11 @@ OpenMPClauseKind Sema::isOpenMPPrivateDecl(ValueDecl *D, unsigned Level,
           [](OpenMPDirectiveKind K) { return isOpenMPTaskingDirective(K); },
           Level)) {
     bool IsTriviallyCopyable =
-        D->getType().getNonReferenceType().isTriviallyCopyableType(Context);
+        D->getType().getNonReferenceType().isTriviallyCopyableType(Context) &&
+        !D->getType()
+             .getNonReferenceType()
+             .getCanonicalType()
+             ->getAsCXXRecordDecl();
     OpenMPDirectiveKind DKind = DSAStack->getDirective(Level);
     SmallVector<OpenMPDirectiveKind, 4> CaptureRegions;
     getOpenMPCaptureRegions(CaptureRegions, DKind);
@@ -15321,7 +15325,8 @@ static bool actOnOMPReductionKindClause(
           S.DefaultLvalueConversion(DeclareReductionRef.get()).get());
       Expr *Args[] = {LHS.get(), RHS.get()};
       ReductionOp =
-          CallExpr::Create(Context, OVE, Args, Context.VoidTy, VK_RValue, ELoc);
+          CallExpr::Create(Context, OVE, Args, Context.VoidTy, VK_RValue, ELoc,
+                           S.CurFPFeatureOverrides());
     } else {
       ReductionOp = S.BuildBinOp(
           Stack->getCurScope(), ReductionId.getBeginLoc(), BOK, LHSDRE, RHSDRE);
@@ -17640,9 +17645,9 @@ OMPClause *Sema::ActOnOpenMPMapClause(
     OpenMPMapClauseKind MapType, bool IsMapTypeImplicit, SourceLocation MapLoc,
     SourceLocation ColonLoc, ArrayRef<Expr *> VarList,
     const OMPVarListLocTy &Locs, ArrayRef<Expr *> UnresolvedMappers) {
-  OpenMPMapModifierKind Modifiers[] = {OMPC_MAP_MODIFIER_unknown,
-                                       OMPC_MAP_MODIFIER_unknown,
-                                       OMPC_MAP_MODIFIER_unknown};
+  OpenMPMapModifierKind Modifiers[] = {
+      OMPC_MAP_MODIFIER_unknown, OMPC_MAP_MODIFIER_unknown,
+      OMPC_MAP_MODIFIER_unknown, OMPC_MAP_MODIFIER_unknown};
   SourceLocation ModifiersLoc[NumberOfOMPMapClauseModifiers];
 
   // Process map-type-modifiers, flag errors for duplicate modifiers.

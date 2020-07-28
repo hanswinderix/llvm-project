@@ -9,7 +9,6 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Module.h>
-#include <llvm/IR/TypeBuilder.h>
 #include <llvm/IR/CallSite.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/InlineAsm.h>
@@ -86,9 +85,9 @@ bool SancusModuleCreator::runOnModule(Module& m)
 {
     module = &m;
     LLVMContext& ctx = m.getContext();
-    wordTy = TypeBuilder<types::i<16>, true>::get(ctx);
-    byteTy = TypeBuilder<types::i<8>, true>::get(ctx);
-    voidPtrTy = TypeBuilder<types::i<8>*, true>::get(ctx);
+    wordTy = Type::getInt16Ty(ctx);
+    byteTy = Type::getInt8Ty(ctx);
+    voidPtrTy = Type::getInt8PtrTy(ctx);
     voidTy = Type::getVoidTy(ctx);
 
     Type* argTys[] = {voidPtrTy, voidPtrTy, voidPtrTy};

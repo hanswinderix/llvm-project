@@ -62,7 +62,6 @@ class X86TTIImpl : public BasicTTIImplBase<X86TTIImpl> {
       X86::FeatureLZCNTFalseDeps,
       X86::FeatureBranchFusion,
       X86::FeatureMacroFusion,
-      X86::FeatureMergeToThreeWayBranch,
       X86::FeaturePadShortFunctions,
       X86::FeaturePOPCNTFalseDeps,
       X86::FeatureSSEUnalignedMem,
@@ -243,6 +242,9 @@ private:
                       Align Alignment, unsigned AddressSpace);
   int getGSVectorCost(unsigned Opcode, Type *DataTy, const Value *Ptr,
                       Align Alignment, unsigned AddressSpace);
+
+  int getGatherOverhead() const;
+  int getScatterOverhead() const;
 
   /// @}
 };

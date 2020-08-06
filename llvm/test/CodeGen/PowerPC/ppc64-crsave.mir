@@ -78,8 +78,8 @@ body:             |
     ; Verify the proper live-ins have been added in the prologue.
     ; CHECK:    liveins: $x3, $x14, $cr2
 
-    ; COM: ELF V2 ABI allows saving only the clobbered cr fields,
-    ; COM: whereas the other ABIs do not.
+    ; ELF V2 ABI allows saving only the clobbered cr fields,
+    ; whereas the other ABIs do not.
     ; SAVEONE:     $x12 = MFOCRF8 killed $cr2
     ; SAVEALL:     $x12 = MFCR8 implicit killed $cr2
 

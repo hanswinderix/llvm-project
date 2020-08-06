@@ -156,32 +156,3 @@ void test_returned_from_func_block_async() {
   // expected-warning@-1 {{Address of stack memory associated with local variable 'leaked_x' \
 is captured by an asynchronously-executed block [alpha.core.StackAddressAsyncEscape]}}
 }
-
-typedef struct dispatch_queue_s *dispatch_queue_t;
-typedef void (^dispatch_block_t)(void);
-void dispatch_async(dispatch_queue_t queue, dispatch_block_t block);
-typedef long dispatch_once_t;
-void dispatch_once(dispatch_once_t *predicate, dispatch_block_t block);
-typedef long dispatch_time_t;
-void dispatch_after(dispatch_time_t when, dispatch_queue_t queue, dispatch_block_t block);
-void dispatch_barrier_sync(dispatch_queue_t queue, dispatch_block_t block);
-
-extern dispatch_queue_t queue;
-extern dispatch_once_t *predicate;
-extern dispatch_time_t when;
-
-dispatch_block_t get_leaking_block() {
-  int leaked_x = 791;
-  int *p = &leaked_x;
-  return ^void(void) {
-    *p = 1;
-  };
-  // expected-warning@-3 {{Address of stack memory associated with local variable 'leaked_x' \
-is captured by a returned block [core.StackAddressEscape]}}
-}
-
-void test_returned_from_func_block_async() {
-  dispatch_async(queue, get_leaking_block());
-  // expected-warning@-1 {{Address of stack memory associated with local variable 'leaked_x' \
-is captured by an asynchronously-executed block [alpha.core.StackAddressAsyncEscape]}}
-}

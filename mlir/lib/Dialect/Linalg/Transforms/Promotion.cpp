@@ -288,9 +288,6 @@ promoteSubViews(OpBuilder &b, Location loc,
     // Only fill the buffer if the full local view is used
     if (!options.useFullTileBuffers[v.second])
       continue;
-    // Only fill the buffer if the full local view is used
-    if (!options.useFullTileBuffers[v])
-      continue;
     Value fillVal;
     if (auto t = subView.getType().getElementType().dyn_cast<FloatType>())
       fillVal = folded_std_constant(folder, FloatAttr::get(t, 0.0));

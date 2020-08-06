@@ -3851,7 +3851,7 @@ bool DeclarationVisitor::Pre(const parser::ProcComponentDefStmt &) {
   CHECK(!interfaceName_);
   return true;
 }
-void DeclarationVisitor::Post(const parser::ProcComponentDefStmt &stmt) {
+void DeclarationVisitor::Post(const parser::ProcComponentDefStmt &) {
   interfaceName_ = nullptr;
 }
 bool DeclarationVisitor::Pre(const parser::ProcPointerInit &x) {

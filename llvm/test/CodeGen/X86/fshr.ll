@@ -275,20 +275,6 @@ define i64 @var_shift_i64(i64 %x, i64 %y, i64 %z) nounwind {
 ; X86-SLOW-NEXT:  .LBB5_4:
 ; X86-SLOW-NEXT:    movl %edi, %ecx
 ; X86-SLOW-NEXT:    xorl %edi, %edi
-; X86-SLOW-NEXT:  .LBB5_3:
-; X86-SLOW-NEXT:    movb %ch, %cl
-; X86-SLOW-NEXT:    shll %cl, %edx
-; X86-SLOW-NEXT:    testb $32, %ch
-; X86-SLOW-NEXT:    movl {{[0-9]+}}(%esp), %eax
-; X86-SLOW-NEXT:    jne .LBB5_4
-; X86-SLOW-NEXT:  # %bb.5:
-; X86-SLOW-NEXT:    movl %edx, (%esp) # 4-byte Spill
-; X86-SLOW-NEXT:    movl {{[-0-9]+}}(%e{{[sb]}}p), %ecx # 4-byte Reload
-; X86-SLOW-NEXT:    orl %esi, %ecx
-; X86-SLOW-NEXT:    jmp .LBB5_6
-; X86-SLOW-NEXT:  .LBB5_4:
-; X86-SLOW-NEXT:    movl %edx, %ecx
-; X86-SLOW-NEXT:    movl $0, (%esp) # 4-byte Folded Spill
 ; X86-SLOW-NEXT:  .LBB5_6:
 ; X86-SLOW-NEXT:    movl {{[0-9]+}}(%esp), %edx
 ; X86-SLOW-NEXT:    testl %ebx, %ebx

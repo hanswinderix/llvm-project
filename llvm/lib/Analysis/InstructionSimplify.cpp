@@ -2750,6 +2750,99 @@ static Value *simplifyICmpWithConstant(CmpInst::Predicate Pred, Value *LHS,
       return ConstantInt::getFalse(ITy);
   }
 
+  // (mul nuw/nsw X, MulC) != C --> true  (if C is not a multiple of MulC)
+  // (mul nuw/nsw X, MulC) == C --> false (if C is not a multiple of MulC)
+  const APInt *MulC;
+  if (ICmpInst::isEquality(Pred) &&
+      ((match(LHS, m_NUWMul(m_Value(), m_APIntAllowUndef(MulC))) &&
+        C->urem(*MulC) != 0) ||
+       (match(LHS, m_NSWMul(m_Value(), m_APIntAllowUndef(MulC))) &&
+        C->srem(*MulC) != 0)))
+    return ConstantInt::get(ITy, Pred == ICmpInst::ICMP_NE);
+
+  return nullptr;
+}
+
+static Value *simplifyICmpWithBinOpOnLHS(
+    CmpInst::Predicate Pred, BinaryOperator *LBO, Value *RHS,
+    const SimplifyQuery &Q, unsigned MaxRecurse) {
+  Type *ITy = GetCompareTy(RHS); // The return type.
+
+  Value *Y = nullptr;
+  // icmp pred (or X, Y), X
+  if (match(LBO, m_c_Or(m_Value(Y), m_Specific(RHS)))) {
+    if (Pred == ICmpInst::ICMP_ULT)
+      return getFalse(ITy);
+    if (Pred == ICmpInst::ICMP_UGE)
+      return getTrue(ITy);
+
+    if (Pred == ICmpInst::ICMP_SLT || Pred == ICmpInst::ICMP_SGE) {
+      KnownBits RHSKnown = computeKnownBits(RHS, Q.DL, 0, Q.AC, Q.CxtI, Q.DT);
+      KnownBits YKnown = computeKnownBits(Y, Q.DL, 0, Q.AC, Q.CxtI, Q.DT);
+      if (RHSKnown.isNonNegative() && YKnown.isNegative())
+        return Pred == ICmpInst::ICMP_SLT ? getTrue(ITy) : getFalse(ITy);
+      if (RHSKnown.isNegative() || YKnown.isNonNegative())
+        return Pred == ICmpInst::ICMP_SLT ? getFalse(ITy) : getTrue(ITy);
+    }
+  }
+
+  // icmp pred (and X, Y), X
+  if (match(LBO, m_c_And(m_Value(), m_Specific(RHS)))) {
+    if (Pred == ICmpInst::ICMP_UGT)
+      return getFalse(ITy);
+    if (Pred == ICmpInst::ICMP_ULE)
+      return getTrue(ITy);
+  }
+
+  // icmp pred (urem X, Y), Y
+  if (match(LBO, m_URem(m_Value(), m_Specific(RHS)))) {
+    switch (Pred) {
+    default:
+      break;
+    case ICmpInst::ICMP_SGT:
+    case ICmpInst::ICMP_SGE: {
+      KnownBits Known = computeKnownBits(RHS, Q.DL, 0, Q.AC, Q.CxtI, Q.DT);
+      if (!Known.isNonNegative())
+        break;
+      LLVM_FALLTHROUGH;
+    }
+    case ICmpInst::ICMP_EQ:
+    case ICmpInst::ICMP_UGT:
+    case ICmpInst::ICMP_UGE:
+      return getFalse(ITy);
+    case ICmpInst::ICMP_SLT:
+    case ICmpInst::ICMP_SLE: {
+      KnownBits Known = computeKnownBits(RHS, Q.DL, 0, Q.AC, Q.CxtI, Q.DT);
+      if (!Known.isNonNegative())
+        break;
+      LLVM_FALLTHROUGH;
+    }
+    case ICmpInst::ICMP_NE:
+    case ICmpInst::ICMP_ULT:
+    case ICmpInst::ICMP_ULE:
+      return getTrue(ITy);
+    }
+  }
+
+  // icmp pred (urem X, Y), X
+  if (match(LBO, m_URem(m_Specific(RHS), m_Value()))) {
+    if (Pred == ICmpInst::ICMP_ULE)
+      return getTrue(ITy);
+    if (Pred == ICmpInst::ICMP_UGT)
+      return getFalse(ITy);
+  }
+
+  // x >> y <=u x
+  // x udiv y <=u x.
+  if (match(LBO, m_LShr(m_Specific(RHS), m_Value())) ||
+      match(LBO, m_UDiv(m_Specific(RHS), m_Value()))) {
+    // icmp pred (X op Y), X
+    if (Pred == ICmpInst::ICMP_UGT)
+      return getFalse(ITy);
+    if (Pred == ICmpInst::ICMP_ULE)
+      return getTrue(ITy);
+  }
+
   return nullptr;
 }
 
@@ -3174,55 +3267,38 @@ static Value *simplifyICmpWithMinMax(CmpInst::Predicate Pred, Value *LHS,
       break;
     }
     case CmpInst::ICMP_UGE:
-      // Always true.
       return getTrue(ITy);
     case CmpInst::ICMP_ULT:
-      // Always false.
       return getFalse(ITy);
     }
   }
 
-  // Variants on "max(x,y) >= min(x,z)".
+  // Comparing 1 each of min/max with a common operand?
+  // Canonicalize min operand to RHS.
+  if (match(LHS, m_UMin(m_Value(), m_Value())) ||
+      match(LHS, m_SMin(m_Value(), m_Value()))) {
+    std::swap(LHS, RHS);
+    Pred = ICmpInst::getSwappedPredicate(Pred);
+  }
+
   Value *C, *D;
   if (match(LHS, m_SMax(m_Value(A), m_Value(B))) &&
       match(RHS, m_SMin(m_Value(C), m_Value(D))) &&
       (A == C || A == D || B == C || B == D)) {
-    // max(x, ?) pred min(x, ?).
+    // smax(A, B) >=s smin(A, D) --> true
     if (Pred == CmpInst::ICMP_SGE)
-      // Always true.
       return getTrue(ITy);
+    // smax(A, B) <s smin(A, D) --> false
     if (Pred == CmpInst::ICMP_SLT)
-      // Always false.
-      return getFalse(ITy);
-  } else if (match(LHS, m_SMin(m_Value(A), m_Value(B))) &&
-             match(RHS, m_SMax(m_Value(C), m_Value(D))) &&
-             (A == C || A == D || B == C || B == D)) {
-    // min(x, ?) pred max(x, ?).
-    if (Pred == CmpInst::ICMP_SLE)
-      // Always true.
-      return getTrue(ITy);
-    if (Pred == CmpInst::ICMP_SGT)
-      // Always false.
       return getFalse(ITy);
   } else if (match(LHS, m_UMax(m_Value(A), m_Value(B))) &&
              match(RHS, m_UMin(m_Value(C), m_Value(D))) &&
              (A == C || A == D || B == C || B == D)) {
-    // max(x, ?) pred min(x, ?).
+    // umax(A, B) >=u umin(A, D) --> true
     if (Pred == CmpInst::ICMP_UGE)
-      // Always true.
       return getTrue(ITy);
+    // umax(A, B) <u umin(A, D) --> false
     if (Pred == CmpInst::ICMP_ULT)
-      // Always false.
-      return getFalse(ITy);
-  } else if (match(LHS, m_UMin(m_Value(A), m_Value(B))) &&
-             match(RHS, m_UMax(m_Value(C), m_Value(D))) &&
-             (A == C || A == D || B == C || B == D)) {
-    // min(x, ?) pred max(x, ?).
-    if (Pred == CmpInst::ICMP_ULE)
-      // Always true.
-      return getTrue(ITy);
-    if (Pred == CmpInst::ICMP_UGT)
-      // Always false.
       return getFalse(ITy);
   }
 

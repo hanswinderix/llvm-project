@@ -60,12 +60,19 @@ static LLT getPow2ScalarType(LLT Ty) {
   return LLT::scalar(Pow2Bits);
 }
 
+/// \returs true if this is an odd sized vector which should widen by adding an
+/// additional element. This is mostly to handle <3 x s16> -> <4 x s16>. This
+/// excludes s1 vectors, which should always be scalarized.
 static LegalityPredicate isSmallOddVector(unsigned TypeIdx) {
   return [=](const LegalityQuery &Query) {
     const LLT Ty = Query.Types[TypeIdx];
-    return Ty.isVector() &&
-           Ty.getNumElements() % 2 != 0 &&
-           Ty.getElementType().getSizeInBits() < 32 &&
+    if (!Ty.isVector())
+      return false;
+
+    const LLT EltTy = Ty.getElementType();
+    const unsigned EltSize = EltTy.getSizeInBits();
+    return Ty.getNumElements() % 2 != 0 &&
+           EltSize > 1 && EltSize < 32 &&
            Ty.getSizeInBits() % 32 != 0;
   };
 }
@@ -262,7 +269,7 @@ static bool isLoadStoreSizeLegal(const GCNSubtarget &ST,
 
   unsigned RegSize = Ty.getSizeInBits();
   unsigned MemSize = Query.MMODescrs[0].SizeInBits;
-  unsigned Align = Query.MMODescrs[0].AlignInBits;
+  unsigned AlignBits = Query.MMODescrs[0].AlignInBits;
   unsigned AS = Query.Types[1].getAddressSpace();
 
   // All of these need to be custom lowered to cast the pointer operand.
@@ -305,9 +312,10 @@ static bool isLoadStoreSizeLegal(const GCNSubtarget &ST,
 
   assert(RegSize >= MemSize);
 
-  if (Align < MemSize) {
+  if (AlignBits < MemSize) {
     const SITargetLowering *TLI = ST.getTargetLowering();
-    if (!TLI->allowsMisalignedMemoryAccessesImpl(MemSize, AS, Align / 8))
+    if (!TLI->allowsMisalignedMemoryAccessesImpl(MemSize, AS,
+                                                 Align(AlignBits / 8)))
       return false;
   }
 
@@ -443,13 +451,13 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
   // TODO: All multiples of 32, vectors of pointers, all v2s16 pairs, more
   // elements for v3s16
   getActionDefinitionsBuilder(G_PHI)
-    .legalFor({S32, S64, V2S16, V4S16, S1, S128, S256})
+    .legalFor({S32, S64, V2S16, S16, V4S16, S1, S128, S256})
     .legalFor(AllS32Vectors)
     .legalFor(AllS64Vectors)
     .legalFor(AddrSpaces64)
     .legalFor(AddrSpaces32)
     .legalIf(isPointer(0))
-    .clampScalar(0, S32, S256)
+    .clampScalar(0, S16, S256)
     .widenScalarToNextPow2(0, 32)
     .clampMaxNumElements(0, S32, 16)
     .moreElementsIf(isSmallOddVector(0), oneMoreElement(0))
@@ -954,10 +962,10 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
 
     // Split vector extloads.
     unsigned MemSize = Query.MMODescrs[0].SizeInBits;
-    unsigned Align = Query.MMODescrs[0].AlignInBits;
+    unsigned AlignBits = Query.MMODescrs[0].AlignInBits;
 
     if (MemSize < DstTy.getSizeInBits())
-      MemSize = std::max(MemSize, Align);
+      MemSize = std::max(MemSize, AlignBits);
 
     if (DstTy.isVector() && DstTy.getSizeInBits() > MemSize)
       return true;
@@ -979,9 +987,10 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
         return true;
     }
 
-    if (Align < MemSize) {
+    if (AlignBits < MemSize) {
       const SITargetLowering *TLI = ST.getTargetLowering();
-      return !TLI->allowsMisalignedMemoryAccessesImpl(MemSize, AS, Align / 8);
+      return !TLI->allowsMisalignedMemoryAccessesImpl(MemSize, AS,
+                                                      Align(AlignBits / 8));
     }
 
     return false;

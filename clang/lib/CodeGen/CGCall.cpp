@@ -2476,6 +2476,12 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
       auto AI = Fn->getArg(FirstIRArg);
       llvm::Type *LTy = ConvertType(Arg->getType());
 
+      if (const ParmVarDecl *PVD = dyn_cast<ParmVarDecl>(Arg)) {
+        if (PVD->getAttr<SecretAttr>()) {
+          AI->addAttr(llvm::Attribute::get(getLLVMContext(), "secret"));
+        }
+      }
+
       // Prepare parameter attributes. So far, only attributes for pointer
       // parameters are prepared. See
       // http://llvm.org/docs/LangRef.html#paramattrs.
@@ -2489,10 +2495,6 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
                              PVD->getFunctionScopeIndex()) &&
               !CGM.getCodeGenOpts().NullPointerIsValid)
             AI->addAttr(llvm::Attribute::NonNull);
-
-          if (PVD->getAttr<SecretAttr>()) {
-            AI->addAttr(llvm::Attribute::get(getLLVMContext(), "secret"));
-          }
 
           QualType OTy = PVD->getOriginalType();
           if (const auto *ArrTy =

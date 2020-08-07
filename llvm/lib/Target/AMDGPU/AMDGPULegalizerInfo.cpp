@@ -474,7 +474,7 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
 
     getActionDefinitionsBuilder({G_UADDSAT, G_USUBSAT, G_SADDSAT, G_SSUBSAT})
       .legalFor({S32, S16, V2S16}) // Clamp modifier
-      .minScalar(0, S16)
+      .minScalarOrElt(0, S16)
       .clampMaxNumElements(0, S16, 2)
       .scalarize(0)
       .widenScalarToNextPow2(0, 32)
@@ -1340,7 +1340,8 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
       .clampScalar(EltTypeIdx, S32, S64)
       .clampScalar(VecTypeIdx, S32, S64)
       .clampScalar(IdxTypeIdx, S32, S32)
-      // TODO: Clamp the number of elements before resorting to stack lowering.
+      .clampMaxNumElements(1, S32, 32)
+      // TODO: Clamp elements for 64-bit vectors?
       // It should only be necessary with variable indexes.
       // As a last resort, lower to the stack
       .lower();
@@ -3209,6 +3210,37 @@ bool AMDGPULegalizerInfo::legalizeRsqClampIntrinsic(MachineInstr &MI,
   return true;
 }
 
+static unsigned getDSFPAtomicOpcode(Intrinsic::ID IID) {
+  switch (IID) {
+  case Intrinsic::amdgcn_ds_fadd:
+    return AMDGPU::G_ATOMICRMW_FADD;
+  case Intrinsic::amdgcn_ds_fmin:
+    return AMDGPU::G_AMDGPU_ATOMIC_FMIN;
+  case Intrinsic::amdgcn_ds_fmax:
+    return AMDGPU::G_AMDGPU_ATOMIC_FMAX;
+  default:
+    llvm_unreachable("not a DS FP intrinsic");
+  }
+}
+
+bool AMDGPULegalizerInfo::legalizeDSAtomicFPIntrinsic(LegalizerHelper &Helper,
+                                                      MachineInstr &MI,
+                                                      Intrinsic::ID IID) const {
+  GISelChangeObserver &Observer = Helper.Observer;
+  Observer.changingInstr(MI);
+
+  MI.setDesc(ST.getInstrInfo()->get(getDSFPAtomicOpcode(IID)));
+
+  // The remaining operands were used to set fields in the MemOperand on
+  // construction.
+  for (int I = 6; I > 3; --I)
+    MI.RemoveOperand(I);
+
+  MI.RemoveOperand(1); // Remove the intrinsic ID.
+  Observer.changedInstr(MI);
+  return true;
+}
+
 bool AMDGPULegalizerInfo::getImplicitArgPtr(Register DstReg,
                                             MachineRegisterInfo &MRI,
                                             MachineIRBuilder &B) const {
@@ -3616,6 +3648,9 @@ static unsigned getBufferAtomicPseudo(Intrinsic::ID IntrID) {
   case Intrinsic::amdgcn_raw_buffer_atomic_cmpswap:
   case Intrinsic::amdgcn_struct_buffer_atomic_cmpswap:
     return AMDGPU::G_AMDGPU_BUFFER_ATOMIC_CMPSWAP;
+  case Intrinsic::amdgcn_raw_buffer_atomic_fadd:
+  case Intrinsic::amdgcn_struct_buffer_atomic_fadd:
+    return AMDGPU::G_AMDGPU_BUFFER_ATOMIC_FADD;
   default:
     llvm_unreachable("unhandled atomic opcode");
   }
@@ -3626,12 +3661,20 @@ bool AMDGPULegalizerInfo::legalizeBufferAtomic(MachineInstr &MI,
                                                Intrinsic::ID IID) const {
   const bool IsCmpSwap = IID == Intrinsic::amdgcn_raw_buffer_atomic_cmpswap ||
                          IID == Intrinsic::amdgcn_struct_buffer_atomic_cmpswap;
+  const bool HasReturn = MI.getNumExplicitDefs() != 0;
 
-  Register Dst = MI.getOperand(0).getReg();
-  Register VData = MI.getOperand(2).getReg();
+  Register Dst;
 
-  Register CmpVal;
   int OpOffset = 0;
+  if (HasReturn) {
+    // A few FP atomics do not support return values.
+    Dst = MI.getOperand(0).getReg();
+  } else {
+    OpOffset = -1;
+  }
+
+  Register VData = MI.getOperand(2 + OpOffset).getReg();
+  Register CmpVal;
 
   if (IsCmpSwap) {
     CmpVal = MI.getOperand(3 + OpOffset).getReg();
@@ -3639,7 +3682,7 @@ bool AMDGPULegalizerInfo::legalizeBufferAtomic(MachineInstr &MI,
   }
 
   Register RSrc = MI.getOperand(3 + OpOffset).getReg();
-  const unsigned NumVIndexOps = IsCmpSwap ? 9 : 8;
+  const unsigned NumVIndexOps = (IsCmpSwap ? 8 : 7) + HasReturn;
 
   // The struct intrinsic variants add one additional operand over raw.
   const bool HasVIndex = MI.getNumOperands() == NumVIndexOps;
@@ -3664,9 +3707,12 @@ bool AMDGPULegalizerInfo::legalizeBufferAtomic(MachineInstr &MI,
   if (!VIndex)
     VIndex = B.buildConstant(LLT::scalar(32), 0).getReg(0);
 
-  auto MIB = B.buildInstr(getBufferAtomicPseudo(IID))
-    .addDef(Dst)
-    .addUse(VData); // vdata
+  auto MIB = B.buildInstr(getBufferAtomicPseudo(IID));
+
+  if (HasReturn)
+    MIB.addDef(Dst);
+
+  MIB.addUse(VData); // vdata
 
   if (IsCmpSwap)
     MIB.addReg(CmpVal);
@@ -4431,6 +4477,8 @@ bool AMDGPULegalizerInfo::legalizeIntrinsic(LegalizerHelper &Helper,
   case Intrinsic::amdgcn_struct_buffer_atomic_inc:
   case Intrinsic::amdgcn_raw_buffer_atomic_dec:
   case Intrinsic::amdgcn_struct_buffer_atomic_dec:
+  case Intrinsic::amdgcn_raw_buffer_atomic_fadd:
+  case Intrinsic::amdgcn_struct_buffer_atomic_fadd:
   case Intrinsic::amdgcn_raw_buffer_atomic_cmpswap:
   case Intrinsic::amdgcn_struct_buffer_atomic_cmpswap:
     return legalizeBufferAtomic(MI, B, IntrID);
@@ -4444,6 +4492,10 @@ bool AMDGPULegalizerInfo::legalizeIntrinsic(LegalizerHelper &Helper,
     return legalizeDebugTrapIntrinsic(MI, MRI, B);
   case Intrinsic::amdgcn_rsq_clamp:
     return legalizeRsqClampIntrinsic(MI, MRI, B);
+  case Intrinsic::amdgcn_ds_fadd:
+  case Intrinsic::amdgcn_ds_fmin:
+  case Intrinsic::amdgcn_ds_fmax:
+    return legalizeDSAtomicFPIntrinsic(Helper, MI, IntrID);
   default: {
     if (const AMDGPU::ImageDimIntrinsicInfo *ImageDimIntr =
             AMDGPU::getImageDimIntrinsicInfo(IntrID))

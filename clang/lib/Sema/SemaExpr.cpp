@@ -6865,6 +6865,7 @@ Sema::ActOnInitList(SourceLocation LBraceLoc, MultiExprArg InitArgList,
   bool DiagnosedArrayDesignator = false;
   bool DiagnosedNestedDesignator = false;
   bool DiagnosedMixedDesignator = false;
+  bool DiagnosedMissingComma = false;
 
   // Check that any designated initializers are syntactically valid in the
   // current language mode.
@@ -6908,21 +6909,34 @@ Sema::ActOnInitList(SourceLocation LBraceLoc, MultiExprArg InitArgList,
         << InitArgList[I]->getSourceRange();
     } else if (const auto *SL = dyn_cast<StringLiteral>(InitArgList[I])) {
       unsigned NumConcat = SL->getNumConcatenated();
-      const auto *SLNext =
-          dyn_cast<StringLiteral>(InitArgList[I + 1 < E ? I + 1 : 0]);
       // Diagnose missing comma in string array initialization.
       // Do not warn when all the elements in the initializer are concatenated
       // together. Do not warn for macros too.
-      if (NumConcat > 1 && E > 2 && !SL->getBeginLoc().isMacroID() && SLNext &&
-          NumConcat != SLNext->getNumConcatenated()) {
-        SmallVector<FixItHint, 1> Hints;
-        for (unsigned i = 0; i < NumConcat - 1; ++i)
-          Hints.push_back(FixItHint::CreateInsertion(
-              PP.getLocForEndOfToken(SL->getStrTokenLoc(i)), ","));
+      if (!DiagnosedMissingComma && NumConcat == 2 && E > 2 && !SL->getBeginLoc().isMacroID()) {
+        bool OnlyOneMissingComma = true;
+        for (unsigned J = 0; J < E; ++J) {
+          if (J == I)
+            continue;
+          const auto *SLJ = dyn_cast<StringLiteral>(InitArgList[J]);
+          if (!SLJ || SLJ->getNumConcatenated() > 1) {
+            OnlyOneMissingComma = false;
+            break;
+          }
+        }
 
-        Diag(SL->getStrTokenLoc(1), diag::warn_concatenated_literal_array_init)
-            << Hints;
-        Diag(SL->getBeginLoc(), diag::note_concatenated_string_literal_silence);
+        if (OnlyOneMissingComma) {
+          SmallVector<FixItHint, 1> Hints;
+          for (unsigned i = 0; i < NumConcat - 1; ++i)
+            Hints.push_back(FixItHint::CreateInsertion(
+                PP.getLocForEndOfToken(SL->getStrTokenLoc(i)), ","));
+
+          Diag(SL->getStrTokenLoc(1),
+               diag::warn_concatenated_literal_array_init)
+              << Hints;
+          Diag(SL->getBeginLoc(),
+               diag::note_concatenated_string_literal_silence);
+          DiagnosedMissingComma = true;
+        }
       }
     }
   }
@@ -17896,8 +17910,7 @@ static void DoMarkVarDeclReferenced(Sema &SemaRef, SourceLocation Loc,
   // This also requires the reference of the static device/constant variable by
   // host code to be visible in the device compilation for the compiler to be
   // able to externalize the static device/constant variable.
-  if ((Var->hasAttr<CUDADeviceAttr>() || Var->hasAttr<CUDAConstantAttr>()) &&
-      Var->isFileVarDecl() && Var->getStorageClass() == SC_Static) {
+  if (SemaRef.getASTContext().mayExternalizeStaticVar(Var)) {
     auto *CurContext = SemaRef.CurContext;
     if (!CurContext || !isa<FunctionDecl>(CurContext) ||
         cast<FunctionDecl>(CurContext)->hasAttr<CUDAHostAttr>() ||

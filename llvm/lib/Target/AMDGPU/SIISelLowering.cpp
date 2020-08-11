@@ -1564,7 +1564,7 @@ SDValue SITargetLowering::lowerKernArgParameterPtr(SelectionDAG &DAG,
   SDValue BasePtr = DAG.getCopyFromReg(Chain, SL,
     MRI.getLiveInVirtReg(InputPtrReg->getRegister()), PtrVT);
 
-  return DAG.getObjectPtrOffset(SL, BasePtr, Offset);
+  return DAG.getObjectPtrOffset(SL, BasePtr, TypeSize::Fixed(Offset));
 }
 
 SDValue SITargetLowering::getImplicitArgPtr(SelectionDAG &DAG,
@@ -5181,7 +5181,8 @@ SDValue SITargetLowering::getSegmentAperture(unsigned AS, const SDLoc &DL,
   // private_segment_aperture_base_hi.
   uint32_t StructOffset = (AS == AMDGPUAS::LOCAL_ADDRESS) ? 0x40 : 0x44;
 
-  SDValue Ptr = DAG.getObjectPtrOffset(DL, QueuePtr, StructOffset);
+  SDValue Ptr =
+      DAG.getObjectPtrOffset(DL, QueuePtr, TypeSize::Fixed(StructOffset));
 
   // TODO: Use custom target PseudoSourceValue.
   // TODO: We should use the value from the IR intrinsic call, but it might not
@@ -8552,7 +8553,7 @@ SDValue SITargetLowering::performSHLPtrCombine(SDNode *N,
   EVT VT = N->getValueType(0);
 
   SDValue ShlX = DAG.getNode(ISD::SHL, SL, VT, N0.getOperand(0), N1);
-  SDValue COffset = DAG.getConstant(Offset, SL, MVT::i32);
+  SDValue COffset = DAG.getConstant(Offset, SL, VT);
 
   SDNodeFlags Flags;
   Flags.setNoUnsignedWrap(N->getFlags().hasNoUnsignedWrap() &&

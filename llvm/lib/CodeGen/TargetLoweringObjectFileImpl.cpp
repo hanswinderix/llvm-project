@@ -2122,13 +2122,13 @@ void TargetLoweringObjectFileXCOFF::Initialize(MCContext &Ctx,
 }
 
 MCSection *TargetLoweringObjectFileXCOFF::getStaticCtorSection(
-    unsigned Priority, const MCSymbol *KeySym) const {
-  report_fatal_error("XCOFF ctor section not yet implemented.");
+	unsigned Priority, const MCSymbol *KeySym) const {
+  report_fatal_error("no static constructor section on AIX");
 }
 
 MCSection *TargetLoweringObjectFileXCOFF::getStaticDtorSection(
-    unsigned Priority, const MCSymbol *KeySym) const {
-  report_fatal_error("XCOFF dtor section not yet implemented.");
+	unsigned Priority, const MCSymbol *KeySym) const {
+  report_fatal_error("no static destructor section on AIX");
 }
 
 const MCExpr *TargetLoweringObjectFileXCOFF::lowerRelativeReference(
@@ -2202,8 +2202,11 @@ MCSection *TargetLoweringObjectFileXCOFF::getSectionForFunctionDescriptor(
 }
 
 MCSection *TargetLoweringObjectFileXCOFF::getSectionForTOCEntry(
-    const MCSymbol *Sym) const {
+    const MCSymbol *Sym, const TargetMachine &TM) const {
+  // Use TE storage-mapping class when large code model is enabled so that
+  // the chance of needing -bbigtoc is decreased.
   return getContext().getXCOFFSection(
-      cast<MCSymbolXCOFF>(Sym)->getSymbolTableName(), XCOFF::XMC_TC,
+      cast<MCSymbolXCOFF>(Sym)->getSymbolTableName(),
+      TM.getCodeModel() == CodeModel::Large ? XCOFF::XMC_TE : XCOFF::XMC_TC,
       XCOFF::XTY_SD, XCOFF::C_HIDEXT, SectionKind::getData());
 }

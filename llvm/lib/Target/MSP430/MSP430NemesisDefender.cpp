@@ -201,6 +201,7 @@ private:
   //  block info.
   bool IsSecretDependent(MachineInstr *MI);
   bool IsSecretDependent(MBBInfo *BBI);
+  bool IsTwoWayBranch(MBBInfo *BBI);
 
   void PrepareAnalysis();
   void FinishAnalysis();
@@ -1205,14 +1206,25 @@ MSP430NemesisDefenderPass::GetFingerprint(MachineLoop *L) {
   return Result;
 }
 
+bool MSP430NemesisDefenderPass::IsTwoWayBranch(MBBInfo *BBI) {
+  bool result = false;
+
+  if (BBI->HasSecretDependentBranch) {
+    if (BBI->IsConditionalBranch && (BBI->FallThroughBB == nullptr)) {
+      assert(BBI->TerminatorCount == 2);
+      result =  true;
+    }
+  }
+
+  return result;
+}
+
 void MSP430NemesisDefenderPass::AlignTwoWayBranch(MachineBasicBlock &MBB) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
   auto BBI = GetInfo(MBB);
 
-  assert(BBI->HasSecretDependentBranch);
-  assert(BBI->IsConditionalBranch && (BBI->FallThroughBB == nullptr) );
-  assert(BBI->TerminatorCount == 2);
+  assert(IsTwoWayBranch(BBI));
 
   auto T = MBB.getFirstTerminator();
   assert(T++->isConditionalBranch());
@@ -1221,32 +1233,34 @@ void MSP430NemesisDefenderPass::AlignTwoWayBranch(MachineBasicBlock &MBB) {
 
   LLVM_DEBUG(dbgs() << GetName(&MBB) << ": Align two-way branch\n");
 
-#if 1
-  // Compensate for the unconditional jump when the conditional jump has
-  // been taken (in the true path).
-  BuildNOPBranch(*BBI->TrueBB, BBI->TrueBB->begin(), TII);
-#else
-  // Add a "jump block" between MBB and TrueBB to contain a single
-  // unconditional jump statement)
-  auto JBB = CreateMachineBasicBlock("align", true);
-  BuildMI(*JBB, JBB->begin(), DL, TII->get(MSP430::JMP)).addMBB(BBI->TrueBB);
-  JBB->addSuccessor(BBI->TrueBB);
+  if ( std::all_of(BBI->TrueBB->pred_begin(), BBI->TrueBB->pred_end(),
+      [this](MachineBasicBlock *MBB) {return this->IsTwoWayBranch(GetInfo(*MBB)); })) {
+    // Compensate for the unconditional jump when the conditional jump has
+    // been taken (in the true path).
+    BuildNOPBranch(*BBI->TrueBB, BBI->TrueBB->begin(), TII);
+  }
+  else {
+    // Add a "jump block" between MBB and TrueBB to contain a single
+    // unconditional jump statement)
+    auto JBB = CreateMachineBasicBlock("align", true);
+    BuildMI(*JBB, JBB->begin(), DL, TII->get(MSP430::JMP)).addMBB(BBI->TrueBB);
+    JBB->addSuccessor(BBI->TrueBB);
 
-  // Update MBB accordingly
-  ReplaceSuccessor(&MBB, BBI->TrueBB, JBB);
-  RemoveTerminationCode(MBB);
-  TII->insertBranch(MBB, JBB, BBI->FalseBB, BBI->BrCond, DL);
+    // Update MBB accordingly
+    ReplaceSuccessor(&MBB, BBI->TrueBB, JBB);
+    RemoveTerminationCode(MBB);
+    TII->insertBranch(MBB, JBB, BBI->FalseBB, BBI->BrCond, DL);
 
-  // Update control flow analysis
-  ReAnalyzeControlFlow(MBB);
-  AnalyzeControlFlow(*JBB);
+    // Update control flow analysis
+    ReAnalyzeControlFlow(MBB);
+    AnalyzeControlFlow(*JBB);
 
-  auto JBBI = GetInfo(*JBB);
-  JBBI->Orig = CloneMBB(JBB, false); // TODO: Refactor the bookkeeping of
-                                     //        the original block contents
-  assert(JBB->succ_size() == 1);
-  assert(JBB->pred_size() == 1);
-#endif
+    auto JBBI = GetInfo(*JBB);
+    JBBI->Orig = CloneMBB(JBB, false); // TODO: Refactor the bookkeeping of
+    //        the original block contents
+    assert(JBB->succ_size() == 1);
+    assert(JBB->pred_size() == 1);
+  }
 }
 
 // Returns
@@ -2949,11 +2963,8 @@ void MSP430NemesisDefenderPass::AlignSensitiveBranch(MBBInfo &BBI) {
     // this compensating
     // instruction belongs the previous MBB (or you could say that it is an
     // artifact of how two-way branches need to be represented in MIR).
-    if (BBI->HasSecretDependentBranch) {
-      if (BBI->IsConditionalBranch && (BBI->FallThroughBB == nullptr)) {
-        assert(BBI->TerminatorCount == 2);
-        AlignTwoWayBranch(*MBB);
-      }
+    if (IsTwoWayBranch(BBI)) {
+      AlignTwoWayBranch(*MBB);
     }
   }
 

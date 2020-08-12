@@ -461,6 +461,8 @@ Error DWARFYAML::emitDebugLine(raw_ostream &OS, const DWARFYAML::Data &DI) {
       emitFileEntry(OS, File);
     OS.write('\0');
 
+    uint8_t AddrSize = DI.Is64BitAddrSize ? 8 : 4;
+
     for (auto Op : LineTable.Opcodes) {
       writeInteger((uint8_t)Op.Opcode, OS, DI.IsLittleEndian);
       if (Op.Opcode == 0) {
@@ -468,14 +470,14 @@ Error DWARFYAML::emitDebugLine(raw_ostream &OS, const DWARFYAML::Data &DI) {
         writeInteger((uint8_t)Op.SubOpcode, OS, DI.IsLittleEndian);
         switch (Op.SubOpcode) {
         case dwarf::DW_LNE_set_address:
-        case dwarf::DW_LNE_set_discriminator:
-          // TODO: Test this error.
-          if (Error Err = writeVariableSizedInteger(
-                  Op.Data, DI.CompileUnits[0].AddrSize, OS, DI.IsLittleEndian))
-            return Err;
+          cantFail(writeVariableSizedInteger(Op.Data, AddrSize, OS,
+                                             DI.IsLittleEndian));
           break;
         case dwarf::DW_LNE_define_file:
           emitFileEntry(OS, Op.FileEntry);
+          break;
+        case dwarf::DW_LNE_set_discriminator:
+          encodeULEB128(Op.Data, OS);
           break;
         case dwarf::DW_LNE_end_sequence:
           break;

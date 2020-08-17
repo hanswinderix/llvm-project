@@ -107,7 +107,7 @@ static cl::opt<bool>
                     cl::desc("Use the new MemorySSA-backed DSE."));
 
 static cl::opt<unsigned>
-    MemorySSAScanLimit("dse-memoryssa-scanlimit", cl::init(100), cl::Hidden,
+    MemorySSAScanLimit("dse-memoryssa-scanlimit", cl::init(150), cl::Hidden,
                        cl::desc("The number of memory instructions to scan for "
                                 "dead store elimination (default = 100)"));
 
@@ -1743,7 +1743,12 @@ struct DSEState {
   Optional<MemoryAccess *>
   getDomMemoryDef(MemoryDef *KillingDef, MemoryAccess *Current,
                   MemoryLocation DefLoc, bool DefVisibleToCallerBeforeRet,
-                  bool DefVisibleToCallerAfterRet, int &ScanLimit) const {
+                  bool DefVisibleToCallerAfterRet, unsigned &ScanLimit) const {
+    if (ScanLimit == 0) {
+      LLVM_DEBUG(dbgs() << "\n    ...  hit scan limit\n");
+      return None;
+    }
+
     MemoryAccess *DomAccess;
     bool StepAgain;
     LLVM_DEBUG(dbgs() << "  trying to get dominating access for " << *Current
@@ -1803,10 +1808,12 @@ struct DSEState {
       MemoryAccess *UseAccess = WorkList[I];
 
       LLVM_DEBUG(dbgs() << "   " << *UseAccess);
-      if (--ScanLimit == 0) {
+      // Bail out if the number of accesses to check exceeds the scan limit.
+      if (ScanLimit < (WorkList.size() - I)) {
         LLVM_DEBUG(dbgs() << "\n    ...  hit scan limit\n");
         return None;
       }
+      --ScanLimit;
 
       if (isa<MemoryPhi>(UseAccess)) {
         LLVM_DEBUG(dbgs() << "\n    ... adding PHI uses\n");
@@ -2038,29 +2045,28 @@ struct DSEState {
           !isRemovable(Def->getMemoryInst()))
         continue;
 
-      // TODO: Consider doing the underlying object check first, if it is
-      // beneficial compile-time wise.
-      if (isWriteAtEndOfFunction(Def)) {
-        Instruction *DefI = Def->getMemoryInst();
-        // See through pointer-to-pointer bitcasts
-        SmallVector<const Value *, 4> Pointers;
-        getUnderlyingObjects(getLocForWriteEx(DefI)->Ptr, Pointers);
+      Instruction *DefI = Def->getMemoryInst();
+      SmallVector<const Value *, 4> Pointers;
+      auto DefLoc = getLocForWriteEx(DefI);
+      if (!DefLoc)
+        continue;
+      getUnderlyingObjects(DefLoc->Ptr, Pointers);
 
+      bool CanKill = true;
+      for (const Value *Pointer : Pointers) {
+        if (!InvisibleToCallerAfterRet.count(Pointer)) {
+          CanKill = false;
+          break;
+        }
+      }
+
+      if (CanKill && isWriteAtEndOfFunction(Def)) {
+        // See through pointer-to-pointer bitcasts
         LLVM_DEBUG(dbgs() << "   ... MemoryDef is not accessed until the end "
                              "of the function\n");
-        bool CanKill = true;
-        for (const Value *Pointer : Pointers) {
-          if (!InvisibleToCallerAfterRet.count(Pointer)) {
-            CanKill = false;
-            break;
-          }
-        }
-
-        if (CanKill) {
-          deleteDeadInstruction(DefI);
-          ++NumFastStores;
-          MadeChange = true;
-        }
+        deleteDeadInstruction(DefI);
+        ++NumFastStores;
+        MadeChange = true;
       }
     }
     return MadeChange;
@@ -2154,7 +2160,7 @@ bool eliminateDeadStoresMemorySSA(Function &F, AliasAnalysis &AA,
     LLVM_DEBUG(dbgs() << "Trying to eliminate MemoryDefs killed by "
                       << *KillingDef << " (" << *SI << ")\n");
 
-    int ScanLimit = MemorySSAScanLimit;
+    unsigned ScanLimit = MemorySSAScanLimit;
     // Worklist of MemoryAccesses that may be killed by KillingDef.
     SetVector<MemoryAccess *> ToCheck;
     ToCheck.insert(KillingDef->getDefiningAccess());

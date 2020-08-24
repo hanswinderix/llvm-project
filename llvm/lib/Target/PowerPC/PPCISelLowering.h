@@ -447,6 +447,12 @@ namespace llvm {
     STRICT_FCTIDUZ,
     STRICT_FCTIWUZ,
 
+    /// Constrained integer-to-floating-point conversion instructions.
+    STRICT_FCFID,
+    STRICT_FCFIDU,
+    STRICT_FCFIDS,
+    STRICT_FCFIDUS,
+
     /// CHAIN = STBRX CHAIN, GPRC, Ptr, Type - This is a
     /// byte-swapping store instruction.  It byte-swaps the low "Type" bits of
     /// the GPRC input, then stores it through Ptr.  Type can be either i16 or
@@ -746,6 +752,12 @@ namespace llvm {
     /// LowerOperation - Provide custom lowering hooks for some operations.
     ///
     SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
+
+    /// LowerOperationWrapper - Place custom new result values for node in
+    /// Results.
+    void LowerOperationWrapper(SDNode *N,
+                               SmallVectorImpl<SDValue> &Results,
+                               SelectionDAG &DAG) const override;
 
     /// ReplaceNodeResults - Replace the results of node with an illegal result
     /// type with new values built out of custom code.

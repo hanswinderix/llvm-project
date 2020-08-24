@@ -1396,14 +1396,44 @@ bool SITargetLowering::allowsMisalignedMemoryAccessesImpl(
 
   if (AddrSpace == AMDGPUAS::LOCAL_ADDRESS ||
       AddrSpace == AMDGPUAS::REGION_ADDRESS) {
-    // ds_read/write_b64 require 8-byte alignment, but we can do a 4 byte
-    // aligned, 8 byte access in a single operation using ds_read2/write2_b32
-    // with adjacent offsets.
-    bool AlignedBy4 = Alignment >= Align(4);
-    if (IsFast)
-      *IsFast = AlignedBy4;
+    // Check if alignment requirements for ds_read/write instructions are
+    // disabled.
+    if (Subtarget->hasUnalignedDSAccessEnabled()) {
+      if (IsFast)
+        *IsFast = true;
+      return true;
+    }
 
-    return AlignedBy4;
+    if (Size == 64) {
+      // ds_read/write_b64 require 8-byte alignment, but we can do a 4 byte
+      // aligned, 8 byte access in a single operation using ds_read2/write2_b32
+      // with adjacent offsets.
+      bool AlignedBy4 = Alignment >= Align(4);
+      if (IsFast)
+        *IsFast = AlignedBy4;
+
+      return AlignedBy4;
+    }
+    if (Size == 96) {
+      // ds_read/write_b96 require 16-byte alignment on gfx8 and older.
+      bool Aligned =
+          Alignment >= Align(Subtarget->hasUnalignedDSAccess() ? 4 : 16);
+      if (IsFast)
+        *IsFast = Aligned;
+
+      return Aligned;
+    }
+    if (Size == 128) {
+      // ds_read/write_b128 require 16-byte alignment on gfx8 and older, but we
+      // can do a 8 byte aligned, 16 byte access in a single operation using
+      // ds_read2/write2_b64.
+      bool Aligned =
+          Alignment >= Align(Subtarget->hasUnalignedDSAccess() ? 4 : 8);
+      if (IsFast)
+        *IsFast = Aligned;
+
+      return Aligned;
+    }
   }
 
   // FIXME: We have to be conservative here and assume that flat operations
@@ -1419,7 +1449,9 @@ bool SITargetLowering::allowsMisalignedMemoryAccessesImpl(
     return AlignedBy4;
   }
 
-  if (Subtarget->hasUnalignedBufferAccess()) {
+  if (Subtarget->hasUnalignedBufferAccessEnabled() &&
+      !(AddrSpace == AMDGPUAS::LOCAL_ADDRESS ||
+        AddrSpace == AMDGPUAS::REGION_ADDRESS)) {
     // If we have an uniform constant load, it still requires using a slow
     // buffer instruction if unaligned.
     if (IsFast) {
@@ -7919,9 +7951,12 @@ SDValue SITargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
       llvm_unreachable("unsupported private_element_size");
     }
   } else if (AS == AMDGPUAS::LOCAL_ADDRESS || AS == AMDGPUAS::REGION_ADDRESS) {
-    // Use ds_read_b128 if possible.
-    if (Subtarget->useDS128() && Load->getAlignment() >= 16 &&
-        MemVT.getStoreSize() == 16)
+    // Use ds_read_b128 or ds_read_b96 when possible.
+    if (Subtarget->hasDS96AndDS128() &&
+        ((Subtarget->useDS128() && MemVT.getStoreSize() == 16) ||
+         MemVT.getStoreSize() == 12) &&
+        allowsMisalignedMemoryAccessesImpl(MemVT.getSizeInBits(), AS,
+                                           Load->getAlign()))
       return SDValue();
 
     if (NumElements > 2)
@@ -8389,9 +8424,12 @@ SDValue SITargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
       llvm_unreachable("unsupported private_element_size");
     }
   } else if (AS == AMDGPUAS::LOCAL_ADDRESS || AS == AMDGPUAS::REGION_ADDRESS) {
-    // Use ds_write_b128 if possible.
-    if (Subtarget->useDS128() && Store->getAlignment() >= 16 &&
-        VT.getStoreSize() == 16 && NumElements != 3)
+    // Use ds_write_b128 or ds_write_b96 when possible.
+    if (Subtarget->hasDS96AndDS128() &&
+        ((Subtarget->useDS128() && VT.getStoreSize() == 16) ||
+         (VT.getStoreSize() == 12)) &&
+        allowsMisalignedMemoryAccessesImpl(VT.getSizeInBits(), AS,
+                                           Store->getAlign()))
       return SDValue();
 
     if (NumElements > 2)

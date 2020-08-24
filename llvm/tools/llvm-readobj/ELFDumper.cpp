@@ -245,12 +245,10 @@ private:
 
   DynRegionInfo createDRI(uint64_t Offset, uint64_t Size, uint64_t EntSize) {
     const ELFFile<ELFT> *Obj = ObjF->getELFFile();
-    const uint8_t *Addr = Obj->base() + Offset;
-    if (Addr < Obj->base() || Addr + Size > Obj->base() + Obj->getBufSize())
+    if (Offset + Size < Offset || Offset + Size > Obj->getBufSize())
       reportError(errorCodeToError(llvm::object::object_error::parse_failed),
                   ObjF->getFileName());
-
-    return {Addr, Size, EntSize, ObjF->getFileName()};
+    return {Obj->base() + Offset, Size, EntSize, ObjF->getFileName()};
   }
 
   void printAttributes();
@@ -1696,8 +1694,7 @@ static StringRef segmentTypeToString(unsigned Arch, unsigned Type) {
 
 static std::string getGNUPtType(unsigned Arch, unsigned Type) {
   StringRef Seg = segmentTypeToString(Arch, Type);
-  // GNU doesn't recognize PT_OPENBSD_*.
-  if (Seg.empty() || Seg.startswith("PT_OPENBSD_"))
+  if (Seg.empty())
     return std::string("<unknown>: ") + to_string(format_hex(Type, 1));
 
   // E.g. "PT_ARM_EXIDX" -> "EXIDX".
@@ -1882,8 +1879,10 @@ ELFDumper<ELFT>::findDynamic(const ELFFile<ELFT> *Obj) {
     break;
   }
 
-  if (DynamicPhdr && DynamicPhdr->p_offset + DynamicPhdr->p_filesz >
-                         ObjF->getMemoryBufferRef().getBufferSize()) {
+  if (DynamicPhdr && ((DynamicPhdr->p_offset + DynamicPhdr->p_filesz >
+                       ObjF->getMemoryBufferRef().getBufferSize()) ||
+                      (DynamicPhdr->p_offset + DynamicPhdr->p_filesz <
+                       DynamicPhdr->p_offset))) {
     reportUniqueWarning(createError(
         "PT_DYNAMIC segment offset (0x" +
         Twine::utohexstr(DynamicPhdr->p_offset) + ") + file size (0x" +

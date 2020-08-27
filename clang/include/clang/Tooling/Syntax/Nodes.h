@@ -57,6 +57,7 @@ enum class NodeKind : uint16_t {
   IdExpression,
   MemberExpression,
   ThisExpression,
+  CallExpression,
 
   // Statements.
   UnknownStatement,
@@ -98,18 +99,22 @@ enum class NodeKind : uint16_t {
   ParametersAndQualifiers,
   MemberPointer,
   UnqualifiedId,
+  ParameterDeclarationList,
+  CallArguments,
   // Nested Name Specifiers.
   NestedNameSpecifier,
   GlobalNameSpecifier,
   DecltypeNameSpecifier,
   IdentifierNameSpecifier,
-  SimpleTemplateNameSpecifier
+  SimpleTemplateNameSpecifier,
 };
 /// For debugging purposes.
 raw_ostream &operator<<(raw_ostream &OS, NodeKind K);
 
 /// A relation between a parent and child node, e.g. 'left-hand-side of
 /// a binary expression'. Used for implementing accessors.
+///
+/// In general `NodeRole`s should be named the same as their accessors.
 ///
 /// Some roles describe parent/child relations that occur multiple times in
 /// language grammar. We define only one role to describe all instances of such
@@ -121,12 +126,6 @@ raw_ostream &operator<<(raw_ostream &OS, NodeKind K);
 /// opening paren), we define a role for this token and use it across all
 /// grammar rules with the same requirement. Names of such reusable roles end
 /// with a ~Token or a ~Keyword suffix.
-///
-/// Some roles are assigned only to child nodes of one specific parent syntax
-/// node type. Names of such roles start with the name of the parent syntax tree
-/// node type. For example, a syntax node with a role
-/// BinaryOperatorExpression_leftHandSide can only appear as a child of a
-/// BinaryOperatorExpression node.
 enum class NodeRole : uint8_t {
   // Roles common to multiple node kinds.
   /// A node without a parent
@@ -141,7 +140,7 @@ enum class NodeRole : uint8_t {
   IntroducerKeyword,
   /// A token that represents a literal, e.g. 'nullptr', '1', 'true', etc.
   LiteralToken,
-  /// Tokens or Keywords
+  /// Tokens or Keywords.
   ArrowToken,
   ExternKeyword,
   TemplateKeyword,
@@ -149,36 +148,37 @@ enum class NodeRole : uint8_t {
   /// statement, e.g. loop body for while, for, etc; inner statement for case,
   /// default, etc.
   BodyStatement,
-  List_element,
-  List_delimiter,
+  /// List API roles.
+  ListElement,
+  ListDelimiter,
 
   // Roles specific to particular node kinds.
-  OperatorExpression_operatorToken,
-  UnaryOperatorExpression_operand,
-  BinaryOperatorExpression_leftHandSide,
-  BinaryOperatorExpression_rightHandSide,
-  CaseStatement_value,
-  IfStatement_thenStatement,
-  IfStatement_elseKeyword,
-  IfStatement_elseStatement,
-  ReturnStatement_value,
-  ExpressionStatement_expression,
-  CompoundStatement_statement,
-  StaticAssertDeclaration_condition,
-  StaticAssertDeclaration_message,
-  SimpleDeclaration_declarator,
-  TemplateDeclaration_declaration,
-  ExplicitTemplateInstantiation_declaration,
-  ArraySubscript_sizeExpression,
-  TrailingReturnType_declarator,
-  ParametersAndQualifiers_parameter,
-  ParametersAndQualifiers_trailingReturn,
-  IdExpression_id,
-  IdExpression_qualifier,
-  ParenExpression_subExpression,
-  MemberExpression_object,
-  MemberExpression_accessToken,
-  MemberExpression_member,
+  OperatorToken,
+  Operand,
+  LeftHandSide,
+  RightHandSide,
+  ReturnValue,
+  CaseValue,
+  ThenStatement,
+  ElseKeyword,
+  ElseStatement,
+  Expression,
+  Statement,
+  Condition,
+  Message,
+  Declarator,
+  Declaration,
+  Size,
+  Parameters,
+  TrailingReturn,
+  UnqualifiedId,
+  Qualifier,
+  SubExpression,
+  Object,
+  AccessToken,
+  Member,
+  Callee,
+  Arguments,
 };
 /// For debugging purposes.
 raw_ostream &operator<<(raw_ostream &OS, NodeRole R);
@@ -322,6 +322,37 @@ public:
     return N->kind() == NodeKind::ThisExpression;
   }
   Leaf *thisKeyword();
+};
+
+/// Models arguments of a function call.
+///   call-arguments:
+///     delimited_list(expression, ',')
+/// Note: This construct is a simplification of the grammar rule for
+/// `expression-list`, that is used in the definition of `call-expression`
+class CallArguments final : public List {
+public:
+  CallArguments() : List(NodeKind::CallArguments) {}
+  static bool classof(const Node *N) {
+    return N->kind() <= NodeKind::CallArguments;
+  }
+  std::vector<Expression *> arguments();
+  std::vector<List::ElementAndDelimiter<Expression>> argumentsAndCommas();
+};
+
+/// A function call. C++ [expr.call]
+/// call-expression:
+///   expression '(' call-arguments ')'
+/// e.g `f(1, '2')` or `this->Base::f()`
+class CallExpression final : public Expression {
+public:
+  CallExpression() : Expression(NodeKind::CallExpression) {}
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::CallExpression;
+  }
+  Expression *callee();
+  Leaf *openParen();
+  CallArguments *arguments();
+  Leaf *closeParen();
 };
 
 /// Models a parenthesized expression `(E)`. C++ [expr.prim.paren]
@@ -620,7 +651,7 @@ public:
     return N->kind() == NodeKind::CaseStatement;
   }
   Leaf *caseKeyword();
-  Expression *value();
+  Expression *caseValue();
   Statement *body();
 };
 
@@ -700,7 +731,7 @@ public:
     return N->kind() == NodeKind::ReturnStatement;
   }
   Leaf *returnKeyword();
-  Expression *value();
+  Expression *returnValue();
 };
 
 /// for (<decl> : <init>) <body>
@@ -936,7 +967,7 @@ public:
   }
   // TODO: add an accessor for the "static" keyword.
   Leaf *lbracket();
-  Expression *sizeExpression();
+  Expression *size();
   Leaf *rbracket();
 };
 
@@ -950,7 +981,22 @@ public:
   }
   // TODO: add accessors for specifiers.
   Leaf *arrowToken();
+  // FIXME: This should be a `type-id` following the grammar. Fix this once we
+  // have a representation of `type-id`s.
   SimpleDeclarator *declarator();
+};
+
+/// Models a `parameter-declaration-list` which appears within
+/// `parameters-and-qualifiers`. See C++ [dcl.fct]
+class ParameterDeclarationList final : public List {
+public:
+  ParameterDeclarationList() : List(NodeKind::ParameterDeclarationList) {}
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::ParameterDeclarationList;
+  }
+  std::vector<SimpleDeclaration *> parameterDeclarations();
+  std::vector<List::ElementAndDelimiter<syntax::SimpleDeclaration>>
+  parametersAndCommas();
 };
 
 /// Parameter list for a function type and a trailing return type, if the
@@ -971,8 +1017,7 @@ public:
     return N->kind() == NodeKind::ParametersAndQualifiers;
   }
   Leaf *lparen();
-  /// FIXME: use custom iterator instead of 'vector'.
-  std::vector<SimpleDeclaration *> parameters();
+  ParameterDeclarationList *parameters();
   Leaf *rparen();
   TrailingReturnType *trailingReturn();
 };

@@ -74,22 +74,23 @@ class Type;
   /// This is the base class for unary cast operator classes.
   class SCEVCastExpr : public SCEV {
   protected:
-    const SCEV *Op;
+    std::array<const SCEV *, 1> Operands;
     Type *Ty;
 
     SCEVCastExpr(const FoldingSetNodeIDRef ID,
                  unsigned SCEVTy, const SCEV *op, Type *ty);
 
   public:
-    const SCEV *getOperand() const { return Op; }
+    const SCEV *getOperand() const { return Operands[0]; }
     const SCEV *getOperand(unsigned i) const {
       assert(i == 0 && "Operand index out of range!");
-      return Op;
+      return Operands[0];
     }
-    using op_iterator = const SCEV *const *;
+    using op_iterator = std::array<const SCEV *, 1>::const_iterator;
     using op_range = iterator_range<op_iterator>;
+
     op_range operands() const {
-      return make_range(&Op, &Op + 1);
+      return make_range(Operands.begin(), Operands.end());
     }
     size_t getNumOperands() const { return 1; }
     Type *getType() const { return Ty; }
@@ -273,7 +274,7 @@ class Type;
   class SCEVUDivExpr : public SCEV {
     friend class ScalarEvolution;
 
-    std::array<const SCEV*, 2> Operands;
+    std::array<const SCEV *, 2> Operands;
 
     SCEVUDivExpr(const FoldingSetNodeIDRef ID, const SCEV *lhs, const SCEV *rhs)
         : SCEV(ID, scUDivExpr, computeExpressionSize({lhs, rhs})) {
@@ -290,7 +291,7 @@ class Type;
       return i == 0 ? getLHS() : getRHS();
     }
 
-    using op_iterator = const SCEV *const *;
+    using op_iterator = std::array<const SCEV *, 2>::const_iterator;
     using op_range = iterator_range<op_iterator>;
     op_range operands() const {
       return make_range(Operands.begin(), Operands.end());

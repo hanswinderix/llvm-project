@@ -45,17 +45,17 @@
 
 namespace Fortran::semantics {
 
-using NameToSymbolMap = std::map<const char *, SymbolRef>;
+using NameToSymbolMap = std::multimap<parser::CharBlock, SymbolRef>;
 static void DoDumpSymbols(llvm::raw_ostream &, const Scope &, int indent = 0);
 static void PutIndent(llvm::raw_ostream &, int indent);
 
 static void GetSymbolNames(const Scope &scope, NameToSymbolMap &symbols) {
   // Finds all symbol names in the scope without collecting duplicates.
   for (const auto &pair : scope) {
-    symbols.emplace(pair.second->name().begin(), *pair.second);
+    symbols.emplace(pair.second->name(), *pair.second);
   }
   for (const auto &pair : scope.commonBlocks()) {
-    symbols.emplace(pair.second->name().begin(), *pair.second);
+    symbols.emplace(pair.second->name(), *pair.second);
   }
   for (const auto &child : scope.children()) {
     GetSymbolNames(child, symbols);
@@ -221,23 +221,28 @@ bool SemanticsContext::AnyFatalError() const {
       (warningsAreErrors_ || messages_.AnyFatalError());
 }
 bool SemanticsContext::HasError(const Symbol &symbol) {
-  return CheckError(symbol.test(Symbol::Flag::Error));
+  return errorSymbols_.count(symbol) > 0;
 }
 bool SemanticsContext::HasError(const Symbol *symbol) {
-  return CheckError(!symbol || HasError(*symbol));
+  return !symbol || HasError(*symbol);
 }
 bool SemanticsContext::HasError(const parser::Name &name) {
   return HasError(name.symbol);
 }
-void SemanticsContext::SetError(Symbol &symbol, bool value) {
+void SemanticsContext::SetError(const Symbol &symbol, bool value) {
   if (value) {
-    CHECK(AnyFatalError());
-    symbol.set(Symbol::Flag::Error);
+    CheckError(symbol);
+    errorSymbols_.emplace(symbol);
   }
 }
-bool SemanticsContext::CheckError(bool error) {
-  CHECK(!error || AnyFatalError());
-  return error;
+void SemanticsContext::CheckError(const Symbol &symbol) {
+  if (!AnyFatalError()) {
+    std::string buf;
+    llvm::raw_string_ostream ss{buf};
+    ss << symbol;
+    common::die(
+        "No error was reported but setting error on: %s", ss.str().c_str());
+  }
 }
 
 const Scope &SemanticsContext::FindScope(parser::CharBlock source) const {

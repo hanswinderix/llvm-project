@@ -3109,7 +3109,7 @@ argsAreStructReturn(ArrayRef<ISD::InputArg> Ins, bool IsMCU) {
 static SDValue CreateCopyOfByValArgument(SDValue Src, SDValue Dst,
                                          SDValue Chain, ISD::ArgFlagsTy Flags,
                                          SelectionDAG &DAG, const SDLoc &dl) {
-  SDValue SizeNode = DAG.getConstant(Flags.getByValSize(), dl, MVT::i32);
+  SDValue SizeNode = DAG.getIntPtrConstant(Flags.getByValSize(), dl);
 
   return DAG.getMemcpy(
       Chain, dl, Dst, Src, SizeNode, Flags.getNonZeroByValAlign(),
@@ -16788,9 +16788,8 @@ static SDValue lowerV8F32Shuffle(const SDLoc &DL, ArrayRef<int> Mask,
   // since after split we get a more efficient code using vpunpcklwd and
   // vpunpckhwd instrs than vblend.
   if (!Subtarget.hasAVX512() && isUnpackWdShuffleMask(Mask, MVT::v8f32))
-    if (SDValue V = lowerShuffleAsSplitOrBlend(DL, MVT::v8f32, V1, V2, Mask,
-                                               Subtarget, DAG))
-      return V;
+    return lowerShuffleAsSplitOrBlend(DL, MVT::v8f32, V1, V2, Mask, Subtarget,
+                                      DAG);
 
   // If we have AVX2 then we always want to lower with a blend because at v8 we
   // can fully permute the elements.
@@ -16828,9 +16827,8 @@ static SDValue lowerV8I32Shuffle(const SDLoc &DL, ArrayRef<int> Mask,
   // vpunpcklwd and vpunpckhwd instrs.
   if (isUnpackWdShuffleMask(Mask, MVT::v8i32) && !V2.isUndef() &&
       !Subtarget.hasAVX512())
-    if (SDValue V = lowerShuffleAsSplitOrBlend(DL, MVT::v8i32, V1, V2, Mask,
-                                               Subtarget, DAG))
-      return V;
+    return lowerShuffleAsSplitOrBlend(DL, MVT::v8i32, V1, V2, Mask, Subtarget,
+                                      DAG);
 
   if (SDValue Blend = lowerShuffleAsBlend(DL, MVT::v8i32, V1, V2, Mask,
                                           Zeroable, Subtarget, DAG))
@@ -19230,7 +19228,7 @@ X86TargetLowering::LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const {
       else
         IDX = DAG.getLoad(PtrVT, dl, Chain, IDX, MachinePointerInfo());
 
-      auto &DL = DAG.getDataLayout();
+      const DataLayout &DL = DAG.getDataLayout();
       SDValue Scale =
           DAG.getConstant(Log2_64_Ceil(DL.getPointerSize()), dl, MVT::i8);
       IDX = DAG.getNode(ISD::SHL, dl, PtrVT, IDX, Scale);
@@ -20345,7 +20343,7 @@ X86TargetLowering::FP_TO_INTHelper(SDValue Op, SelectionDAG &DAG,
                                    *DAG.getContext(), TheVT);
     SDValue Cmp;
     if (IsStrict) {
-      Cmp = DAG.getSetCC(DL, ResVT, Value, ThreshVal, ISD::SETLT,
+      Cmp = DAG.getSetCC(DL, ResVT, Value, ThreshVal, ISD::SETLT, SDNodeFlags(),
                          Chain, /*IsSignaling*/ true);
       Chain = Cmp.getValue(1);
     } else {
@@ -26322,7 +26320,7 @@ SDValue X86TargetLowering::LowerINIT_TRAMPOLINE(SDValue Op,
         for (FunctionType::param_iterator I = FTy->param_begin(),
              E = FTy->param_end(); I != E; ++I, ++Idx)
           if (Attrs.hasAttribute(Idx, Attribute::InReg)) {
-            auto &DL = DAG.getDataLayout();
+            const DataLayout &DL = DAG.getDataLayout();
             // FIXME: should only count parameters that are lowered to integers.
             InRegCount += (DL.getTypeSizeInBits(*I) + 31) / 32;
           }
@@ -31212,7 +31210,7 @@ static bool isEFLAGSLiveAfter(MachineBasicBlock::iterator Itr,
 /// Utility function to emit xbegin specifying the start of an RTM region.
 static MachineBasicBlock *emitXBegin(MachineInstr &MI, MachineBasicBlock *MBB,
                                      const TargetInstrInfo *TII) {
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc &DL = MI.getDebugLoc();
 
   const BasicBlock *BB = MBB->getBasicBlock();
   MachineFunction::iterator I = ++MBB->getIterator();
@@ -31338,7 +31336,7 @@ X86TargetLowering::EmitVAARG64WithCustomInserter(MachineInstr &MI,
   MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
   const TargetRegisterClass *AddrRegClass = getRegClassFor(MVT::i64);
   const TargetRegisterClass *OffsetRegClass = getRegClassFor(MVT::i32);
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc &DL = MI.getDebugLoc();
 
   // struct va_list {
   //   i32   gp_offset
@@ -31585,7 +31583,7 @@ MachineBasicBlock *X86TargetLowering::EmitVAStartSaveXMMRegsWithCustomInserter(
 
   // Now add the instructions.
   const TargetInstrInfo *TII = Subtarget.getInstrInfo();
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc &DL = MI.getDebugLoc();
 
   Register CountReg = MI.getOperand(0).getReg();
   int64_t RegSaveFrameIndex = MI.getOperand(1).getImm();
@@ -31897,7 +31895,7 @@ MachineBasicBlock *
 X86TargetLowering::EmitLoweredSelect(MachineInstr &MI,
                                      MachineBasicBlock *ThisMBB) const {
   const TargetInstrInfo *TII = Subtarget.getInstrInfo();
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc &DL = MI.getDebugLoc();
 
   // To "insert" a SELECT_CC instruction, we actually have to insert the
   // diamond control-flow pattern.  The incoming instruction knows the
@@ -32052,7 +32050,7 @@ X86TargetLowering::EmitLoweredProbedAlloca(MachineInstr &MI,
   MachineFunction *MF = MBB->getParent();
   const TargetInstrInfo *TII = Subtarget.getInstrInfo();
   const X86FrameLowering &TFI = *Subtarget.getFrameLowering();
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc &DL = MI.getDebugLoc();
   const BasicBlock *LLVM_BB = MBB->getBasicBlock();
 
   const unsigned ProbeSize = getStackProbeSize(*MF);
@@ -32145,7 +32143,7 @@ X86TargetLowering::EmitLoweredSegAlloca(MachineInstr &MI,
                                         MachineBasicBlock *BB) const {
   MachineFunction *MF = BB->getParent();
   const TargetInstrInfo *TII = Subtarget.getInstrInfo();
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc &DL = MI.getDebugLoc();
   const BasicBlock *LLVM_BB = BB->getBasicBlock();
 
   assert(MF->shouldSplitStack());
@@ -32180,7 +32178,7 @@ X86TargetLowering::EmitLoweredSegAlloca(MachineInstr &MI,
   const TargetRegisterClass *AddrRegClass =
       getRegClassFor(getPointerTy(MF->getDataLayout()));
 
-  unsigned mallocPtrVReg = MRI.createVirtualRegister(AddrRegClass),
+  Register mallocPtrVReg = MRI.createVirtualRegister(AddrRegClass),
            bumpSPPtrVReg = MRI.createVirtualRegister(AddrRegClass),
            tmpSPVReg = MRI.createVirtualRegister(AddrRegClass),
            SPLimitVReg = MRI.createVirtualRegister(AddrRegClass),
@@ -32280,7 +32278,7 @@ X86TargetLowering::EmitLoweredCatchRet(MachineInstr &MI,
   MachineFunction *MF = BB->getParent();
   const TargetInstrInfo &TII = *Subtarget.getInstrInfo();
   MachineBasicBlock *TargetMBB = MI.getOperand(0).getMBB();
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc &DL = MI.getDebugLoc();
 
   assert(!isAsynchronousEHPersonality(
              classifyEHPersonality(MF->getFunction().getPersonalityFn())) &&
@@ -32318,7 +32316,7 @@ X86TargetLowering::EmitLoweredTLSAddr(MachineInstr &MI,
   // inside MC, therefore without the two markers shrink-wrapping
   // may push the prologue/epilogue pass them.
   const TargetInstrInfo &TII = *Subtarget.getInstrInfo();
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc &DL = MI.getDebugLoc();
   MachineFunction &MF = *BB->getParent();
 
   // Emit CALLSEQ_START right before the instruction.
@@ -32347,7 +32345,7 @@ X86TargetLowering::EmitLoweredTLSCall(MachineInstr &MI,
   // be in the normal return register.
   MachineFunction *F = BB->getParent();
   const X86InstrInfo *TII = Subtarget.getInstrInfo();
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc &DL = MI.getDebugLoc();
 
   assert(Subtarget.isTargetDarwin() && "Darwin only instr emitted?");
   assert(MI.getOperand(3).isGlobal() && "This should be a global");
@@ -32486,7 +32484,7 @@ X86TargetLowering::EmitLoweredIndirectThunk(MachineInstr &MI,
                                             MachineBasicBlock *BB) const {
   // Copy the virtual register into the R11 physical register and
   // call the retpoline thunk.
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc &DL = MI.getDebugLoc();
   const X86InstrInfo *TII = Subtarget.getInstrInfo();
   Register CalleeVReg = MI.getOperand(0).getReg();
   unsigned Opc = getOpcodeForIndirectThunk(MI.getOpcode());
@@ -32548,7 +32546,7 @@ X86TargetLowering::EmitLoweredIndirectThunk(MachineInstr &MI,
 /// \param [in] MBB The Machine Basic Block that will be modified.
 void X86TargetLowering::emitSetJmpShadowStackFix(MachineInstr &MI,
                                                  MachineBasicBlock *MBB) const {
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc &DL = MI.getDebugLoc();
   MachineFunction *MF = MBB->getParent();
   const TargetInstrInfo *TII = Subtarget.getInstrInfo();
   MachineRegisterInfo &MRI = MF->getRegInfo();
@@ -32591,7 +32589,7 @@ void X86TargetLowering::emitSetJmpShadowStackFix(MachineInstr &MI,
 MachineBasicBlock *
 X86TargetLowering::emitEHSjLjSetJmp(MachineInstr &MI,
                                     MachineBasicBlock *MBB) const {
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc &DL = MI.getDebugLoc();
   MachineFunction *MF = MBB->getParent();
   const TargetInstrInfo *TII = Subtarget.getInstrInfo();
   const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
@@ -32751,7 +32749,7 @@ X86TargetLowering::emitEHSjLjSetJmp(MachineInstr &MI,
 MachineBasicBlock *
 X86TargetLowering::emitLongJmpShadowStackFix(MachineInstr &MI,
                                              MachineBasicBlock *MBB) const {
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc &DL = MI.getDebugLoc();
   MachineFunction *MF = MBB->getParent();
   const TargetInstrInfo *TII = Subtarget.getInstrInfo();
   MachineRegisterInfo &MRI = MF->getRegInfo();
@@ -32932,7 +32930,7 @@ X86TargetLowering::emitLongJmpShadowStackFix(MachineInstr &MI,
 MachineBasicBlock *
 X86TargetLowering::emitEHSjLjLongJmp(MachineInstr &MI,
                                      MachineBasicBlock *MBB) const {
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc &DL = MI.getDebugLoc();
   MachineFunction *MF = MBB->getParent();
   const TargetInstrInfo *TII = Subtarget.getInstrInfo();
   MachineRegisterInfo &MRI = MF->getRegInfo();
@@ -33016,7 +33014,7 @@ void X86TargetLowering::SetupEntryBlockForSjLj(MachineInstr &MI,
                                                MachineBasicBlock *MBB,
                                                MachineBasicBlock *DispatchBB,
                                                int FI) const {
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc &DL = MI.getDebugLoc();
   MachineFunction *MF = MBB->getParent();
   MachineRegisterInfo *MRI = &MF->getRegInfo();
   const X86InstrInfo *TII = Subtarget.getInstrInfo();
@@ -33065,7 +33063,7 @@ void X86TargetLowering::SetupEntryBlockForSjLj(MachineInstr &MI,
 MachineBasicBlock *
 X86TargetLowering::EmitSjLjDispatchBlock(MachineInstr &MI,
                                          MachineBasicBlock *BB) const {
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc &DL = MI.getDebugLoc();
   MachineFunction *MF = BB->getParent();
   MachineRegisterInfo *MRI = &MF->getRegInfo();
   const X86InstrInfo *TII = Subtarget.getInstrInfo();
@@ -33295,7 +33293,7 @@ X86TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                MachineBasicBlock *BB) const {
   MachineFunction *MF = BB->getParent();
   const TargetInstrInfo *TII = Subtarget.getInstrInfo();
-  DebugLoc DL = MI.getDebugLoc();
+  const DebugLoc &DL = MI.getDebugLoc();
 
   auto TMMImmToTMMReg = [](unsigned Imm) {
     assert (Imm < 8 && "Illegal tmm index");

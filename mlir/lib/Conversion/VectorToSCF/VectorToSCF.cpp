@@ -131,7 +131,6 @@ private:
   VectorType minorVectorType; // vector<(minor_dims) x type>
   MemRefType memRefMinorVectorType; // memref<vector<(minor_dims) x type>>
 };
-} // namespace
 
 template <typename ConcreteOp>
 void NDTransferOpHelper<ConcreteOp>::emitLoops(
@@ -395,6 +394,8 @@ LogicalResult NDTransferOpHelper<TransferWriteOp>::doReplace() {
   return success();
 }
 
+} // namespace
+
 /// Analyzes the `transfer` to find an access dimension along the fastest remote
 /// MemRef dimension. If such a dimension with coalescing properties is found,
 /// `pivs` and `vectorBoundsCapture` are swapped so that the invocation of
@@ -495,6 +496,8 @@ static void emitWithBoundsChecks(
   else
     inBoundsFun(scalarAccessExprs);
 }
+
+namespace mlir {
 
 /// Lowers TransferReadOp into a combination of:
 ///   1. local memory allocation;
@@ -664,8 +667,6 @@ LogicalResult VectorTransferRewriter<TransferWriteOp>::matchAndRewrite(
   rewriter.eraseOp(op);
   return success();
 }
-
-namespace mlir {
 
 void populateVectorToSCFConversionPatterns(
     OwningRewritePatternList &patterns, MLIRContext *context,

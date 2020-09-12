@@ -646,12 +646,6 @@ Sema::ActOnCXXTypeid(SourceLocation OpLoc, SourceLocation LParenLoc,
     return ExprError(Diag(OpLoc, diag::err_no_typeid_with_fno_rtti));
   }
 
-  // Warns when typeid is used with RTTI data disabled.
-  if (!getLangOpts().RTTIData)
-    Diag(OpLoc, diag::warn_no_typeid_with_rtti_disabled)
-        << (getDiagnostics().getDiagnosticOptions().getFormat() ==
-            DiagnosticOptions::MSVC);
-
   QualType TypeInfoType = Context.getTypeDeclType(CXXTypeInfoDecl);
 
   if (isType) {
@@ -1509,7 +1503,8 @@ Sema::BuildCXXTypeConstructExpr(TypeSourceInfo *TInfo,
                            : SourceRange(LParenOrBraceLoc, RParenOrBraceLoc);
     Result = CXXFunctionalCastExpr::Create(
         Context, ResultType, Expr::getValueKindForType(Ty), TInfo, CK_NoOp,
-        Result.get(), /*Path=*/nullptr, Locs.getBegin(), Locs.getEnd());
+        Result.get(), /*Path=*/nullptr, CurFPFeatureOverrides(),
+        Locs.getBegin(), Locs.getEnd());
   }
 
   return Result;
@@ -2210,7 +2205,7 @@ Sema::BuildCXXNew(SourceRange Range, bool UseGlobal,
         SizeTy, SourceLocation());
     ImplicitCastExpr DesiredAlignment(ImplicitCastExpr::OnStack, AlignValT,
                                       CK_IntegralCast, &AlignmentLiteral,
-                                      VK_RValue);
+                                      VK_RValue, CurFPFeatureOverrides());
 
     // Adjust placement args by prepending conjured size and alignment exprs.
     llvm::SmallVector<Expr *, 8> CallArgs;
@@ -3921,7 +3916,8 @@ static ExprResult BuildCXXCastArgument(Sema &S,
     // Record usage of conversion in an implicit cast.
     Result = ImplicitCastExpr::Create(S.Context, Result.get()->getType(),
                                       CK_UserDefinedConversion, Result.get(),
-                                      nullptr, Result.get()->getValueKind());
+                                      nullptr, Result.get()->getValueKind(),
+                                      S.CurFPFeatureOverrides());
 
     return S.MaybeBindToTemporary(Result.get());
   }
@@ -4102,7 +4098,8 @@ Sema::PerformImplicitConversion(Expr *From, QualType ToType,
     if (const AtomicType *FromAtomic = FromType->getAs<AtomicType>()) {
       FromType = FromAtomic->getValueType().getUnqualifiedType();
       From = ImplicitCastExpr::Create(Context, FromType, CK_AtomicToNonAtomic,
-                                      From, /*BasePath=*/nullptr, VK_RValue);
+                                      From, /*BasePath=*/nullptr, VK_RValue,
+                                      CurFPFeatureOverrides());
     }
     break;
 
@@ -6846,7 +6843,7 @@ ExprResult Sema::MaybeBindToTemporary(Expr *E) {
     CastKind ck = (ReturnsRetained ? CK_ARCConsumeObject
                                    : CK_ARCReclaimReturnedObject);
     return ImplicitCastExpr::Create(Context, E->getType(), ck, E, nullptr,
-                                    VK_RValue);
+                                    VK_RValue, CurFPFeatureOverrides());
   }
 
   if (E->getType().isDestructedType() == QualType::DK_nontrivial_c_struct)

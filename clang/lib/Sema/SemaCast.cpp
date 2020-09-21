@@ -107,7 +107,8 @@ namespace {
       if (IsARCUnbridgedCast) {
         castExpr = ImplicitCastExpr::Create(
             Self.Context, Self.Context.ARCUnbridgedCastTy, CK_Dependent,
-            castExpr, nullptr, castExpr->getValueKind(), FPOptionsOverride());
+            castExpr, nullptr, castExpr->getValueKind(),
+            Self.CurFPFeatureOverrides());
       }
       updatePartOfExplicitCastFlags(castExpr);
       return castExpr;
@@ -886,6 +887,18 @@ void CastOperation::CheckDynamicCast() {
     Self.Diag(OpRange.getBegin(), diag::err_no_dynamic_cast_with_fno_rtti);
     SrcExpr = ExprError();
     return;
+  }
+
+  // Warns when dynamic_cast is used with RTTI data disabled.
+  if (!Self.getLangOpts().RTTIData) {
+    bool MicrosoftABI =
+        Self.getASTContext().getTargetInfo().getCXXABI().isMicrosoft();
+    bool isClangCL = Self.getDiagnostics().getDiagnosticOptions().getFormat() ==
+                     DiagnosticOptions::MSVC;
+    if (MicrosoftABI || !DestPointee->isVoidType())
+      Self.Diag(OpRange.getBegin(),
+                diag::warn_no_dynamic_cast_with_rtti_disabled)
+          << isClangCL;
   }
 
   // Done. Everything else is run-time checks.

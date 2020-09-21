@@ -3095,8 +3095,7 @@ static void TryMoveInitialization(Sema& S,
                                   bool ConvertingConstructorsOnly,
                                   ExprResult &Res) {
   ImplicitCastExpr AsRvalue(ImplicitCastExpr::OnStack, Value->getType(),
-                            CK_NoOp, Value, VK_XValue,
-                            S.CurFPFeatureOverrides());
+                            CK_NoOp, Value, VK_XValue, FPOptionsOverride());
 
   Expr *InitExpr = &AsRvalue;
 
@@ -3153,7 +3152,7 @@ static void TryMoveInitialization(Sema& S,
     // expression node to persist.
     Value =
         ImplicitCastExpr::Create(S.Context, Value->getType(), CK_NoOp, Value,
-                                 nullptr, VK_XValue, S.CurFPFeatureOverrides());
+                                 nullptr, VK_XValue, FPOptionsOverride());
 
     // Complete type-checking the initialization of the return type
     // using the constructor we found.

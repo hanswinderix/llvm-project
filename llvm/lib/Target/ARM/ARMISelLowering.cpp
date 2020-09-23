@@ -4430,12 +4430,25 @@ SDValue ARMTargetLowering::LowerFormalArguments(
   }
 
   // varargs
-  if (isVarArg && MFI.hasVAStart())
-    VarArgStyleRegisters(CCInfo, DAG, dl, Chain,
-                         CCInfo.getNextStackOffset(),
+  if (isVarArg && MFI.hasVAStart()) {
+    VarArgStyleRegisters(CCInfo, DAG, dl, Chain, CCInfo.getNextStackOffset(),
                          TotalArgRegsSaveSize);
+    if (AFI->isCmseNSEntryFunction()) {
+      DiagnosticInfoUnsupported Diag(
+          DAG.getMachineFunction().getFunction(),
+          "secure entry function must not be variadic", dl.getDebugLoc());
+      DAG.getContext()->diagnose(Diag);
+    }
+  }
 
   AFI->setArgumentStackSize(CCInfo.getNextStackOffset());
+
+  if (CCInfo.getNextStackOffset() > 0 && AFI->isCmseNSEntryFunction()) {
+    DiagnosticInfoUnsupported Diag(
+        DAG.getMachineFunction().getFunction(),
+        "secure entry function requires arguments on stack", dl.getDebugLoc());
+    DAG.getContext()->diagnose(Diag);
+  }
 
   return Chain;
 }
@@ -18067,6 +18080,9 @@ bool ARMTargetLowering::isFPImmLegal(const APFloat &Imm, EVT VT,
     return false;
   if (VT == MVT::f16 && Subtarget->hasFullFP16())
     return ARM_AM::getFP16Imm(Imm) != -1;
+  if (VT == MVT::f32 && Subtarget->hasFullFP16() &&
+      ARM_AM::getFP32FP16Imm(Imm) != -1)
+    return true;
   if (VT == MVT::f32)
     return ARM_AM::getFP32Imm(Imm) != -1;
   if (VT == MVT::f64 && Subtarget->hasFP64())

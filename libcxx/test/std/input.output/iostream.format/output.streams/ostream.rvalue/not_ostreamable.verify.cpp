@@ -6,20 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: no-exceptions
+// UNSUPPORTED: c++03
 
-// "support/test_macros.hpp"
+// Make sure the rvalue overload of operator<< isn't part of the overload set
+// when the type is not output streamable into a lvalue stream.
 
-// #define TEST_HAS_NO_EXCEPTIONS
+#include <ostream>
+#include <utility>
 
-#include "test_macros.h"
+struct Foo { };
 
-#if defined(TEST_HAS_NO_EXCEPTIONS)
-#error macro defined unexpectedly
-#endif
-
-int main(int, char**) {
-    try { ((void)0); } catch (...) {}
-
-  return 0;
-}
+using X = decltype(std::declval<std::ostream>() << std::declval<Foo const&>()); // expected-error {{invalid operands to binary expression}}

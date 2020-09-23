@@ -3007,6 +3007,42 @@ static __inline__ vector double __ATTRS_o_ai vec_cpsgn(vector double __a,
 
 #define vec_vctuxs __builtin_altivec_vctuxs
 
+/* vec_signext */
+
+#ifdef __POWER9_VECTOR__
+static __inline__ vector signed int __ATTRS_o_ai
+vec_signexti(vector signed char __a) {
+  return __builtin_altivec_vextsb2w(__a);
+}
+
+static __inline__ vector signed int __ATTRS_o_ai
+vec_signexti(vector signed short __a) {
+  return __builtin_altivec_vextsh2w(__a);
+}
+
+static __inline__ vector signed long long __ATTRS_o_ai
+vec_signextll(vector signed char __a) {
+  return __builtin_altivec_vextsb2d(__a);
+}
+
+static __inline__ vector signed long long __ATTRS_o_ai
+vec_signextll(vector signed short __a) {
+  return __builtin_altivec_vextsh2d(__a);
+}
+
+static __inline__ vector signed long long __ATTRS_o_ai
+vec_signextll(vector signed int __a) {
+  return __builtin_altivec_vextsw2d(__a);
+}
+#endif
+
+#ifdef __POWER10_VECTOR__
+static __inline__ vector signed __int128 __ATTRS_o_ai
+vec_signextq(vector signed long long __a) {
+  return __builtin_altivec_vextsd2q(__a);
+}
+#endif
+
 /* vec_signed */
 
 static __inline__ vector signed int __ATTRS_o_ai
@@ -3365,6 +3401,16 @@ vec_dive(vector signed long long __a, vector signed long long __b) {
 static __inline__ vector unsigned long long __ATTRS_o_ai
 vec_dive(vector unsigned long long __a, vector unsigned long long __b) {
   return __builtin_altivec_vdiveud(__a, __b);
+}
+
+static __inline__ vector unsigned __int128 __ATTRS_o_ai
+vec_dive(vector unsigned __int128 __a, vector unsigned __int128 __b) {
+  return __builtin_altivec_vdiveuq(__a, __b);
+}
+
+static __inline__ vector signed __int128 __ATTRS_o_ai
+vec_dive(vector signed __int128 __a, vector signed __int128 __b) {
+  return __builtin_altivec_vdivesq(__a, __b);
 }
 #endif
 
@@ -17259,6 +17305,16 @@ vec_mod(vector unsigned long long __a, vector unsigned long long __b) {
   return __a % __b;
 }
 
+static __inline__ vector signed __int128 __ATTRS_o_ai
+vec_mod(vector signed __int128 __a, vector signed __int128 __b) {
+  return __a % __b;
+}
+
+static __inline__ vector unsigned __int128 __ATTRS_o_ai
+vec_mod(vector unsigned __int128 __a, vector unsigned __int128 __b) {
+  return  __a % __b;
+}
+
 /* vec_sldbi */
 
 #define vec_sldb(__a, __b, __c) __builtin_altivec_vsldbi(__a, __b, (__c & 0x7))
@@ -17625,6 +17681,150 @@ vec_test_lsbb_all_zeros(vector unsigned char __a) {
   return __builtin_vsx_xvtlsbb(__a, 0);
 }
 #endif /* __VSX__ */
+
+/* vec_stril */
+
+static __inline__ vector unsigned char __ATTRS_o_ai
+vec_stril(vector unsigned char __a) {
+#ifdef __LITTLE_ENDIAN__
+  return __builtin_altivec_vstribr((vector signed char)__a);
+#else
+  return __builtin_altivec_vstribl((vector signed char)__a);
+#endif
+}
+
+static __inline__ vector signed char __ATTRS_o_ai
+vec_stril(vector signed char __a) {
+#ifdef __LITTLE_ENDIAN__
+  return __builtin_altivec_vstribr(__a);
+#else
+  return __builtin_altivec_vstribl(__a);
+#endif
+}
+
+static __inline__ vector unsigned short __ATTRS_o_ai
+vec_stril(vector unsigned short __a) {
+#ifdef __LITTLE_ENDIAN__
+  return __builtin_altivec_vstrihr((vector signed short)__a);
+#else
+  return __builtin_altivec_vstrihl((vector signed short)__a);
+#endif
+}
+
+static __inline__ vector signed short __ATTRS_o_ai
+vec_stril(vector signed short __a) {
+#ifdef __LITTLE_ENDIAN__
+  return __builtin_altivec_vstrihr(__a);
+#else
+  return __builtin_altivec_vstrihl(__a);
+#endif
+}
+
+/* vec_stril_p */
+
+static __inline__ int __ATTRS_o_ai vec_stril_p(vector unsigned char __a) {
+#ifdef __LITTLE_ENDIAN__
+  return __builtin_altivec_vstribr_p(__CR6_EQ, (vector signed char)__a);
+#else
+  return __builtin_altivec_vstribl_p(__CR6_EQ, (vector signed char)__a);
+#endif
+}
+
+static __inline__ int __ATTRS_o_ai vec_stril_p(vector signed char __a) {
+#ifdef __LITTLE_ENDIAN__
+  return __builtin_altivec_vstribr_p(__CR6_EQ, __a);
+#else
+  return __builtin_altivec_vstribl_p(__CR6_EQ, __a);
+#endif
+}
+
+static __inline__ int __ATTRS_o_ai vec_stril_p(vector unsigned short __a) {
+#ifdef __LITTLE_ENDIAN__
+  return __builtin_altivec_vstrihr_p(__CR6_EQ, (vector signed short)__a);
+#else
+  return __builtin_altivec_vstrihl_p(__CR6_EQ, (vector signed short)__a);
+#endif
+}
+
+static __inline__ int __ATTRS_o_ai vec_stril_p(vector signed short __a) {
+#ifdef __LITTLE_ENDIAN__
+  return __builtin_altivec_vstrihr_p(__CR6_EQ, __a);
+#else
+  return __builtin_altivec_vstrihl_p(__CR6_EQ, __a);
+#endif
+}
+
+/* vec_strir */
+
+static __inline__ vector unsigned char __ATTRS_o_ai
+vec_strir(vector unsigned char __a) {
+#ifdef __LITTLE_ENDIAN__
+  return __builtin_altivec_vstribl((vector signed char)__a);
+#else
+  return __builtin_altivec_vstribr((vector signed char)__a);
+#endif
+}
+
+static __inline__ vector signed char __ATTRS_o_ai
+vec_strir(vector signed char __a) {
+#ifdef __LITTLE_ENDIAN__
+  return __builtin_altivec_vstribl(__a);
+#else
+  return __builtin_altivec_vstribr(__a);
+#endif
+}
+
+static __inline__ vector unsigned short __ATTRS_o_ai
+vec_strir(vector unsigned short __a) {
+#ifdef __LITTLE_ENDIAN__
+  return __builtin_altivec_vstrihl((vector signed short)__a);
+#else
+  return __builtin_altivec_vstrihr((vector signed short)__a);
+#endif
+}
+
+static __inline__ vector signed short __ATTRS_o_ai
+vec_strir(vector signed short __a) {
+#ifdef __LITTLE_ENDIAN__
+  return __builtin_altivec_vstrihl(__a);
+#else
+  return __builtin_altivec_vstrihr(__a);
+#endif
+}
+
+/* vec_strir_p */
+
+static __inline__ int __ATTRS_o_ai vec_strir_p(vector unsigned char __a) {
+#ifdef __LITTLE_ENDIAN__
+  return __builtin_altivec_vstribl_p(__CR6_EQ, (vector signed char)__a);
+#else
+  return __builtin_altivec_vstribr_p(__CR6_EQ, (vector signed char)__a);
+#endif
+}
+
+static __inline__ int __ATTRS_o_ai vec_strir_p(vector signed char __a) {
+#ifdef __LITTLE_ENDIAN__
+  return __builtin_altivec_vstribl_p(__CR6_EQ, __a);
+#else
+  return __builtin_altivec_vstribr_p(__CR6_EQ, __a);
+#endif
+}
+
+static __inline__ int __ATTRS_o_ai vec_strir_p(vector unsigned short __a) {
+#ifdef __LITTLE_ENDIAN__
+  return __builtin_altivec_vstrihl_p(__CR6_EQ, (vector signed short)__a);
+#else
+  return __builtin_altivec_vstrihr_p(__CR6_EQ, (vector signed short)__a);
+#endif
+}
+
+static __inline__ int __ATTRS_o_ai vec_strir_p(vector signed short __a) {
+#ifdef __LITTLE_ENDIAN__
+  return __builtin_altivec_vstrihl_p(__CR6_EQ, __a);
+#else
+  return __builtin_altivec_vstrihr_p(__CR6_EQ, __a);
+#endif
+}
 
 /* vs[l | r | ra] */
 

@@ -629,6 +629,17 @@ def OpNonNorm : TEST_Op<"op_nonnorm"> {
   let arguments = (ins AnyMemRef:$X, AnyMemRef:$Y);
 }
 
+// Test for memrefs normalization of an op with a reference to a function
+// symbol.
+def OpFuncRef : TEST_Op<"op_funcref"> {
+  let summary = "Test op with a reference to a function symbol";
+  let description = [{
+    The "test.op_funcref" is a test op with a reference to a function symbol.
+  }];
+  let builders = [OpBuilder<[{OpBuilder &builder, OperationState &state,
+                             FuncOp function}]>];
+}
+
 // Pattern add the argument plus a increasing static number hidden in
 // OpMTest function. That value is set into the optional argument.
 // That way, we will know if operations is called once or twice.
@@ -1542,6 +1553,17 @@ def FormatCustomDirectiveSuccessors
   let assemblyFormat = [{
     custom<CustomDirectiveSuccessors>(
       $successor, $successors
+    )
+    attr-dict
+  }];
+}
+
+def FormatCustomDirectiveAttributes
+    : TEST_Op<"format_custom_directive_attributes"> {
+  let arguments = (ins I64Attr:$attr, OptionalAttr<I64Attr>:$optAttr);
+  let assemblyFormat = [{
+    custom<CustomDirectiveAttributes>(
+      $attr, $optAttr
     )
     attr-dict
   }];

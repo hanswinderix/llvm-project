@@ -721,13 +721,13 @@ def CallOp : Std_Op<"call", [CallOpInterface, MemRefsNormalizable]> {
       result.addTypes(callee.getType().getResults());
   }]>, OpBuilder<
     "OpBuilder &builder, OperationState &result, SymbolRefAttr callee,"
-    "ArrayRef<Type> results, ValueRange operands = {}", [{
+    "TypeRange results, ValueRange operands = {}", [{
       result.addOperands(operands);
       result.addAttribute("callee", callee);
       result.addTypes(results);
   }]>, OpBuilder<
     "OpBuilder &builder, OperationState &result, StringRef callee,"
-    "ArrayRef<Type> results, ValueRange operands = {}", [{
+    "TypeRange results, ValueRange operands = {}", [{
       build(builder, result, builder.getSymbolRefAttr(callee), results,
             operands);
   }]>];
@@ -1831,7 +1831,8 @@ def IndexCastOp : CastOp<"index_cast">, Arguments<(ins AnyType:$in)> {
 def LoadOp : Std_Op<"load",
      [TypesMatchWith<"result type matches element type of 'memref'",
                      "memref", "result",
-                     "$_self.cast<MemRefType>().getElementType()">]> {
+                     "$_self.cast<MemRefType>().getElementType()">,
+                     MemRefsNormalizable]> {
   let summary = "load operation";
   let description = [{
     The `load` op reads an element from a memref specified by an index list. The
@@ -2580,7 +2581,8 @@ def SqrtOp : FloatUnaryOp<"sqrt"> {
 def StoreOp : Std_Op<"store",
      [TypesMatchWith<"type of 'value' matches element type of 'memref'",
                      "memref", "value",
-                     "$_self.cast<MemRefType>().getElementType()">]> {
+                     "$_self.cast<MemRefType>().getElementType()">,
+                     MemRefsNormalizable]> {
   let summary = "store operation";
   let description = [{
     Store a value to a memref location given by indices. The value stored should
@@ -2812,7 +2814,7 @@ def SubViewOp : Std_Op<"subview", [
   let results = (outs AnyMemRef:$result);
 
   let builders = [
-    // Build a SubViewOp with mized static and dynamic entries.
+    // Build a SubViewOp with mixed static and dynamic entries.
     OpBuilder<
       "OpBuilder &b, OperationState &result, Value source, "
       "ArrayRef<int64_t> staticOffsets, ArrayRef<int64_t> staticSizes,"

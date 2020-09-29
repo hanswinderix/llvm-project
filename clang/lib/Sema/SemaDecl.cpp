@@ -2593,8 +2593,7 @@ static bool mergeDeclAttribute(Sema &S, NamedDecl *D,
   } else if (const auto *MA = dyn_cast<MinSizeAttr>(Attr))
     NewAttr = S.mergeMinSizeAttr(D, *MA);
   else if (const auto *SNA = dyn_cast<SwiftNameAttr>(Attr))
-    NewAttr = S.mergeSwiftNameAttr(D, *SNA, SNA->getName(),
-                                   AMK == Sema::AMK_Override);
+    NewAttr = S.mergeSwiftNameAttr(D, *SNA, SNA->getName());
   else if (const auto *OA = dyn_cast<OptimizeNoneAttr>(Attr))
     NewAttr = S.mergeOptimizeNoneAttr(D, *OA);
   else if (const auto *InternalLinkageA = dyn_cast<InternalLinkageAttr>(Attr))
@@ -9645,7 +9644,8 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
 
   // In C builtins get merged with implicitly lazily created declarations.
   // In C++ we need to check if it's a builtin and add the BuiltinAttr here.
-  if (getLangOpts().CPlusPlus) {
+  if (getLangOpts().CPlusPlus &&
+      NewFD->getDeclContext()->getRedeclContext()->isFileContext()) {
     if (IdentifierInfo *II = Previous.getLookupName().getAsIdentifierInfo()) {
       if (unsigned BuiltinID = II->getBuiltinID()) {
         if (NewFD->getLanguageLinkage() == CLanguageLinkage) {

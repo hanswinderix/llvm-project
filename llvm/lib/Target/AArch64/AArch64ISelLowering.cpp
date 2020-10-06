@@ -790,6 +790,7 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
   setTargetDAGCombine(ISD::INTRINSIC_W_CHAIN);
   setTargetDAGCombine(ISD::INSERT_VECTOR_ELT);
   setTargetDAGCombine(ISD::EXTRACT_VECTOR_ELT);
+  setTargetDAGCombine(ISD::VECREDUCE_ADD);
 
   setTargetDAGCombine(ISD::GlobalAddress);
 
@@ -1113,6 +1114,13 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
       setOperationAction(ISD::UMAX, MVT::v2i64, Custom);
       setOperationAction(ISD::UMIN, MVT::v1i64, Custom);
       setOperationAction(ISD::UMIN, MVT::v2i64, Custom);
+      setOperationAction(ISD::VECREDUCE_AND, MVT::v8i8, Custom);
+      setOperationAction(ISD::VECREDUCE_AND, MVT::v16i8, Custom);
+      setOperationAction(ISD::VECREDUCE_AND, MVT::v4i16, Custom);
+      setOperationAction(ISD::VECREDUCE_AND, MVT::v8i16, Custom);
+      setOperationAction(ISD::VECREDUCE_AND, MVT::v2i32, Custom);
+      setOperationAction(ISD::VECREDUCE_AND, MVT::v4i32, Custom);
+      setOperationAction(ISD::VECREDUCE_AND, MVT::v2i64, Custom);
       setOperationAction(ISD::VECREDUCE_SMAX, MVT::v2i64, Custom);
       setOperationAction(ISD::VECREDUCE_SMIN, MVT::v2i64, Custom);
       setOperationAction(ISD::VECREDUCE_UMAX, MVT::v2i64, Custom);
@@ -1244,6 +1252,7 @@ void AArch64TargetLowering::addTypeForFixedLengthSVE(MVT VT) {
   setOperationAction(ISD::UMAX, VT, Custom);
   setOperationAction(ISD::UMIN, VT, Custom);
   setOperationAction(ISD::VECREDUCE_ADD, VT, Custom);
+  setOperationAction(ISD::VECREDUCE_AND, VT, Custom);
   setOperationAction(ISD::VECREDUCE_FMAX, VT, Custom);
   setOperationAction(ISD::VECREDUCE_FMIN, VT, Custom);
   setOperationAction(ISD::VECREDUCE_SMAX, VT, Custom);
@@ -3926,6 +3935,7 @@ SDValue AArch64TargetLowering::LowerOperation(SDValue Op,
   case ISD::STORE:
     return LowerSTORE(Op, DAG);
   case ISD::VECREDUCE_ADD:
+  case ISD::VECREDUCE_AND:
   case ISD::VECREDUCE_SMAX:
   case ISD::VECREDUCE_SMIN:
   case ISD::VECREDUCE_UMAX:
@@ -9713,12 +9723,15 @@ SDValue AArch64TargetLowering::LowerVECREDUCE(SDValue Op,
 
   // Try to lower fixed length reductions to SVE.
   EVT SrcVT = Src.getValueType();
-  bool OverrideNEON = Op.getOpcode() != ISD::VECREDUCE_ADD &&
-                      SrcVT.getVectorElementType() == MVT::i64;
+  bool OverrideNEON = Op.getOpcode() == ISD::VECREDUCE_AND ||
+                      (Op.getOpcode() != ISD::VECREDUCE_ADD &&
+                       SrcVT.getVectorElementType() == MVT::i64);
   if (useSVEForFixedLengthVectorVT(SrcVT, OverrideNEON)) {
     switch (Op.getOpcode()) {
     case ISD::VECREDUCE_ADD:
       return LowerFixedLengthReductionToSVE(AArch64ISD::UADDV_PRED, Op, DAG);
+    case ISD::VECREDUCE_AND:
+      return LowerFixedLengthReductionToSVE(AArch64ISD::ANDV_PRED, Op, DAG);
     case ISD::VECREDUCE_SMAX:
       return LowerFixedLengthReductionToSVE(AArch64ISD::SMAXV_PRED, Op, DAG);
     case ISD::VECREDUCE_SMIN:
@@ -10987,6 +11000,37 @@ static SDValue performIntegerAbsCombine(SDNode *N, SelectionDAG &DAG) {
                            SDValue(Cmp.getNode(), 1));
       }
   return SDValue();
+}
+
+// VECREDUCE_ADD( EXTEND(v16i8_type) ) to
+// VECREDUCE_ADD( DOTv16i8(v16i8_type) )
+static SDValue performVecReduceAddCombine(SDNode *N, SelectionDAG &DAG,
+                                          const AArch64Subtarget *ST) {
+  SDValue Op0 = N->getOperand(0);
+  if (!ST->hasDotProd() || N->getValueType(0) != MVT::i32)
+    return SDValue();
+
+  if (Op0.getValueType().getVectorElementType() != MVT::i32)
+    return SDValue();
+
+  unsigned ExtOpcode = Op0.getOpcode();
+  if (ExtOpcode != ISD::ZERO_EXTEND && ExtOpcode != ISD::SIGN_EXTEND)
+    return SDValue();
+
+  EVT Op0VT = Op0.getOperand(0).getValueType();
+  if (Op0VT != MVT::v16i8)
+    return SDValue();
+
+  SDLoc DL(Op0);
+  SDValue Ones = DAG.getConstant(1, DL, Op0VT);
+  SDValue Zeros = DAG.getConstant(0, DL, MVT::v4i32);
+  auto DotIntrisic = (ExtOpcode == ISD::ZERO_EXTEND)
+                         ? Intrinsic::aarch64_neon_udot
+                         : Intrinsic::aarch64_neon_sdot;
+  SDValue Dot = DAG.getNode(ISD::INTRINSIC_WO_CHAIN, DL, Zeros.getValueType(),
+                            DAG.getConstant(DotIntrisic, DL, MVT::i32), Zeros,
+                            Ones, Op0.getOperand(0));
+  return DAG.getNode(ISD::VECREDUCE_ADD, DL, N->getValueType(0), Dot);
 }
 
 static SDValue performXorCombine(SDNode *N, SelectionDAG &DAG,
@@ -14671,6 +14715,8 @@ SDValue AArch64TargetLowering::PerformDAGCombine(SDNode *N,
     return performPostLD1Combine(N, DCI, true);
   case ISD::EXTRACT_VECTOR_ELT:
     return performExtractVectorEltCombine(N, DAG);
+  case ISD::VECREDUCE_ADD:
+    return performVecReduceAddCombine(N, DCI.DAG, Subtarget);
   case ISD::INTRINSIC_VOID:
   case ISD::INTRINSIC_W_CHAIN:
     switch (cast<ConstantSDNode>(N->getOperand(1))->getZExtValue()) {

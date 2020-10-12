@@ -3421,70 +3421,6 @@ ExprResult Sema::BuildPredefinedExpr(SourceLocation Loc,
   return PredefinedExpr::Create(Context, Loc, ResTy, IK, SL);
 }
 
-static std::pair<QualType, StringLiteral *>
-GetUniqueStableNameInfo(ASTContext &Context, QualType OpType,
-                        SourceLocation OpLoc, PredefinedExpr::IdentKind K) {
-  std::pair<QualType, StringLiteral*> Result{{}, nullptr};
-
-  if (OpType->isDependentType()) {
-      Result.first = Context.DependentTy;
-      return Result;
-  }
-
-  std::string Str = PredefinedExpr::ComputeName(Context, K, OpType);
-  llvm::APInt Length(32, Str.length() + 1);
-  Result.first =
-      Context.adjustStringLiteralBaseType(Context.CharTy.withConst());
-  Result.first = Context.getConstantArrayType(
-      Result.first, Length, nullptr, ArrayType::Normal, /*IndexTypeQuals*/ 0);
-  Result.second = StringLiteral::Create(Context, Str, StringLiteral::Ascii,
-                                        /*Pascal*/ false, Result.first, OpLoc);
-  return Result;
-}
-
-ExprResult Sema::BuildUniqueStableName(SourceLocation OpLoc,
-                                       TypeSourceInfo *Operand) {
-  QualType ResultTy;
-  StringLiteral *SL;
-  std::tie(ResultTy, SL) = GetUniqueStableNameInfo(
-      Context, Operand->getType(), OpLoc, PredefinedExpr::UniqueStableNameType);
-
-  return PredefinedExpr::Create(Context, OpLoc, ResultTy,
-                                PredefinedExpr::UniqueStableNameType, SL,
-                                Operand);
-}
-
-ExprResult Sema::BuildUniqueStableName(SourceLocation OpLoc,
-                                       Expr *E) {
-  QualType ResultTy;
-  StringLiteral *SL;
-  std::tie(ResultTy, SL) = GetUniqueStableNameInfo(
-      Context, E->getType(), OpLoc, PredefinedExpr::UniqueStableNameExpr);
-
-  return PredefinedExpr::Create(Context, OpLoc, ResultTy,
-                                PredefinedExpr::UniqueStableNameExpr, SL, E);
-}
-
-ExprResult Sema::ActOnUniqueStableNameExpr(SourceLocation OpLoc,
-                                           SourceLocation L, SourceLocation R,
-                                           ParsedType Ty) {
-  TypeSourceInfo *TInfo = nullptr;
-  QualType T = GetTypeFromParser(Ty, &TInfo);
-
-  if (T.isNull())
-    return ExprError();
-  if (!TInfo)
-    TInfo = Context.getTrivialTypeSourceInfo(T, OpLoc);
-
-  return BuildUniqueStableName(OpLoc, TInfo);
-}
-
-ExprResult Sema::ActOnUniqueStableNameExpr(SourceLocation OpLoc,
-                                           SourceLocation L, SourceLocation R,
-                                           Expr *E) {
-  return BuildUniqueStableName(OpLoc, E);
-}
-
 ExprResult Sema::ActOnPredefinedExpr(SourceLocation Loc, tok::TokenKind Kind) {
   PredefinedExpr::IdentKind IK;
 
@@ -8067,6 +8003,16 @@ QualType Sema::CheckConditionalOperands(ExprResult &Cond, ExprResult &LHS,
   VK = VK_RValue;
   OK = OK_Ordinary;
 
+  if (Context.isDependenceAllowed() &&
+      (Cond.get()->isTypeDependent() || LHS.get()->isTypeDependent() ||
+       RHS.get()->isTypeDependent())) {
+    assert(!getLangOpts().CPlusPlus);
+    assert((Cond.get()->containsErrors() || LHS.get()->containsErrors() ||
+            RHS.get()->containsErrors()) &&
+           "should only occur in error-recovery path.");
+    return Context.DependentTy;
+  }
+
   // The OpenCL operator with a vector condition is sufficiently
   // different to merit its own checker.
   if ((getLangOpts().OpenCL && Cond.get()->getType()->isVectorType()) ||
@@ -10026,7 +9972,7 @@ static void DiagnoseDivisionSizeofPointerOrArray(Sema &S, Expr *LHS, Expr *RHS,
   QualType RHSTy;
 
   if (RUE->isArgumentType())
-    RHSTy = RUE->getArgumentType();
+    RHSTy = RUE->getArgumentType().getNonReferenceType();
   else
     RHSTy = RUE->getArgumentExpr()->IgnoreParens()->getType();
 

@@ -126,28 +126,29 @@ func @dynamic_results(%arg0: tensor<?x?xf32>)
 
 // -----
 
-func @foo() -> tensor<4xf32> {
+func @foo() -> tensor<2x3xf32> {
 // CHECK-LABEL: func @foo(
-//  CHECK-SAME:   %[[A:[0-9a-z]*]]: memref<4xf32>) {
+//  CHECK-SAME:   %[[A:[0-9a-z]*]]: memref<2x3xf32>) {
 
-  %0 = constant dense<[0.0, 1.0, 2.0, 3.0]> : tensor<4xf32>
-//  CHECK-NEXT:   %[[CST:.*]] = constant dense<[0.000000e+00, 1.000000e+00, 2.000000e+00, 3.000000e+00]> : vector<4xf32>
-//  CHECK-NEXT:   %[[ALLOC:.*]] = alloc() : memref<vector<4xf32>>
-//  CHECK-NEXT:   store %[[CST]], %[[ALLOC]][] : memref<vector<4xf32>>
-//  CHECK-NEXT:   %[[RES:.*]] = vector.type_cast %[[ALLOC]] : memref<vector<4xf32>> to memref<4xf32>
+  %0 = constant dense<[[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]]> : tensor<2x3xf32>
+//  CHECK-NEXT:   %[[ALLOC:.*]] = alloc() : memref<vector<6xf32>>
+//  CHECK-NEXT:   %[[CST:.*]] = constant dense<[0.000000e+00, 1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00, 5.000000e+00]> : vector<6xf32>
+//  CHECK-NEXT:   store %[[CST]], %[[ALLOC]][] : memref<vector<6xf32>>
+//  CHECK-NEXT:   %[[FLAT:.*]] = vector.type_cast %[[ALLOC]] : memref<vector<6xf32>> to memref<6xf32>
+//  CHECK-NEXT:   %[[RES:.*]] = linalg.reshape %[[FLAT]] {{.*}} : memref<6xf32> into memref<2x3xf32>
 
-  return %0 : tensor<4xf32>
-//  CHECK-NEXT:   linalg.copy(%[[RES]], %[[A]]) : memref<4xf32>, memref<4xf32>
-//  CHECK-NEXT:   dealloc %[[ALLOC]] : memref<vector<4xf32>>
+  return %0 : tensor<2x3xf32>
+//  CHECK-NEXT:   linalg.copy(%[[RES]], %[[A]]) : memref<2x3xf32>, memref<2x3xf32>
+//  CHECK-NEXT:   dealloc %[[ALLOC]] : memref<vector<6xf32>>
 //  CHECK-NEXT:   return
 }
 
 func @bar() {
 // CHECK-LABEL: func @bar() {
 
-  %0 = call @foo() : () -> tensor<4xf32>
-//  CHECK-NEXT:   %[[ALLOC:.*]] = alloc() : memref<4xf32>
-//  CHECK-NEXT:   call @foo(%[[ALLOC]]) : (memref<4xf32>) -> ()
+  %0 = call @foo() : () -> tensor<2x3xf32>
+//  CHECK-NEXT:   %[[ALLOC:.*]] = alloc() : memref<2x3xf32>
+//  CHECK-NEXT:   call @foo(%[[ALLOC]]) : (memref<2x3xf32>) -> ()
 
   // Instead of relying on tensor_store which introduces aliasing, we rely on
   // the conversion of print_memref_f32(tensor<*xf32>) to
@@ -155,15 +156,15 @@ func @bar() {
   // Note that this is skipping a step and we would need at least some function
   // attribute to declare that this conversion is valid (e.g. when we statically
   // know that things will play nicely at the C ABI boundary).
-  %unranked = tensor_cast %0 : tensor<4xf32> to tensor<*xf32>
+  %unranked = tensor_cast %0 : tensor<2x3xf32> to tensor<*xf32>
 //  CHECK-NEXT:   %[[UNRANKED:.*]] = memref_cast %[[ALLOC]] :
-//  CHECK-SAME:     memref<4xf32> to memref<*xf32>
+//  CHECK-SAME:     memref<2x3xf32> to memref<*xf32>
 
   call @print_memref_f32(%unranked) : (tensor<*xf32>) -> ()
 //  CHECK-NEXT:   call @print_memref_f32(%[[UNRANKED]]) : (memref<*xf32>) -> ()
 
   return
-//  CHECK-NEXT:   dealloc %[[ALLOC]] : memref<4xf32>
+//  CHECK-NEXT:   dealloc %[[ALLOC]] : memref<2x3xf32>
 //  CHECK-NEXT:   return
 }
 
@@ -173,3 +174,142 @@ func @bar() {
 // know that things will play nicely at the C ABI boundary).
 func @print_memref_f32(%ptr : tensor<*xf32>)
 // CHECK-LABEL: func @print_memref_f32(memref<*xf32>)
+
+// -----
+
+#accesses = [
+  affine_map<(i, j, k) -> (j, i, k)>,
+  affine_map<(i, j, k) -> (i, j)>
+]
+
+#trait = {
+  indexing_maps = #accesses,
+  iterator_types = ["parallel", "parallel", "reduction"]
+}
+
+func @generic_with_init_tensor(%arg0: tensor<2x3x4xvector<3x4xi4>>,
+  %arg1: tensor<3x2xf32>) -> (tensor<3x2xf32>) {
+
+  %0 = linalg.generic #trait
+    ins(%arg0 : tensor<2x3x4xvector<3x4xi4>>)
+   init(%arg1 : tensor<3x2xf32>) {
+    ^bb(%v0: vector<3x4xi4>, %v1: f32) :
+      %f0 = constant 0.0 : f32
+      linalg.yield %f0 : f32
+  } -> tensor<3x2xf32>
+
+  return %0 : tensor<3x2xf32>
+}
+// CHECK-LABEL: func @generic_with_init_tensor
+//  CHECK-SAME: (%[[ARG0:.*]]: memref<2x3x4xvector<3x4xi4>>, %[[ARG1:.*]]: memref<3x2xf32>, %[[RESULT0:.*]]: memref<3x2xf32>) {
+//  CHECK-NEXT: linalg.generic
+//       CHECK: linalg.copy(%[[ARG1]], %[[RESULT0]])
+//  CHECK-NEXT: return
+//   CHECK-NOT: %
+
+// -----
+
+#accesses = [
+  affine_map<(i, j, k) -> (j, i, k)>,
+  affine_map<(i, j, k) -> (i, j)>
+]
+
+#trait = {
+  indexing_maps = #accesses,
+  iterator_types = ["parallel", "parallel", "reduction"]
+}
+
+func @init_tensor_with_2_uses(%arg0: tensor<2x3x4xvector<3x4xi4>>,
+  %arg1: tensor<3x2xf32>) -> (tensor<3x2xf32>, tensor<3x2xf32>) {
+
+  %0 = linalg.generic #trait
+    ins(%arg0 : tensor<2x3x4xvector<3x4xi4>>)
+   init(%arg1 : tensor<3x2xf32>) {
+    ^bb(%v0: vector<3x4xi4>, %v1: f32) :
+      %f0 = constant 0.0 : f32
+      linalg.yield %f0 : f32
+  } -> tensor<3x2xf32>
+
+  %1 = linalg.generic #trait
+    ins(%arg0 : tensor<2x3x4xvector<3x4xi4>>)
+   init(%arg1 : tensor<3x2xf32>) {
+    ^bb(%v0: vector<3x4xi4>, %v1: f32) :
+      %f0 = constant 0.0 : f32
+      linalg.yield %f0 : f32
+  } -> tensor<3x2xf32>
+
+  return %0, %1 : tensor<3x2xf32>, tensor<3x2xf32>
+}
+// CHECK-LABEL: func @init_tensor_with_2_uses
+//  CHECK-SAME: (%[[ARG0:.*]]: memref<2x3x4xvector<3x4xi4>>, %[[ARG1:.*]]: memref<3x2xf32>, %[[RESULT0:.*]]: memref<3x2xf32>, %[[RESULT1:.*]]: memref<3x2xf32>) {
+//  CHECK-NEXT: %[[ALLOC0:.*]] = alloc
+//  CHECK-NEXT: linalg.copy(%[[ARG1]], %[[ALLOC0]])
+//  CHECK-NEXT: linalg.generic
+//  CHECK-SAME: outs(%[[ALLOC0]]
+//  CHECK-NEXT: ^bb
+//  CHECK-NEXT:   constant
+//  CHECK-NEXT:   yield
+//  CHECK-NEXT: }
+//  CHECK-NEXT: %[[ALLOC1:.*]] = alloc
+//  CHECK-NEXT: linalg.copy(%[[ARG1]], %[[ALLOC1]])
+//  CHECK-NEXT: linalg.generic
+//  CHECK-SAME: outs(%[[ALLOC1]]
+//  CHECK-NEXT: ^bb
+//  CHECK-NEXT:   constant
+//  CHECK-NEXT:   yield
+//  CHECK-NEXT: }
+//  CHECK-NEXT: linalg.copy(%[[ALLOC0]], %[[RESULT0]])
+//  CHECK-NEXT: dealloc
+//  CHECK-NEXT: linalg.copy(%[[ALLOC1]], %[[RESULT1]])
+//  CHECK-NEXT: dealloc
+//  CHECK-NEXT: return
+//   CHECK-NOT: %
+
+// -----
+
+#accesses = [
+  affine_map<(i, j, k) -> (j, i, k)>,
+  affine_map<(i, j, k) -> (i, j)>
+]
+
+#trait = {
+  indexing_maps = #accesses,
+  iterator_types = ["parallel", "parallel", "reduction"]
+}
+
+func @init_tensor_with_1_use_def_chain(%arg0: tensor<2x3x4xvector<3x4xi4>>,
+  %arg1: tensor<3x2xf32>) -> (tensor<3x2xf32>) {
+
+  %0 = linalg.generic #trait
+    ins(%arg0 : tensor<2x3x4xvector<3x4xi4>>)
+   init(%arg1 : tensor<3x2xf32>) {
+    ^bb(%v0: vector<3x4xi4>, %v1: f32) :
+      %f0 = constant 0.0 : f32
+      linalg.yield %f0 : f32
+  } -> tensor<3x2xf32>
+
+  %1 = linalg.generic #trait
+    ins(%arg0 : tensor<2x3x4xvector<3x4xi4>>)
+   init(%0 : tensor<3x2xf32>) {
+    ^bb(%v0: vector<3x4xi4>, %v1: f32) :
+      %f0 = constant 0.0 : f32
+      linalg.yield %f0 : f32
+  } -> tensor<3x2xf32>
+
+  return %1 : tensor<3x2xf32>
+}
+// CHECK-LABEL: func @init_tensor_with_1_use_def_chain
+//  CHECK-SAME: (%[[ARG0:.*]]: memref<2x3x4xvector<3x4xi4>>, %[[ARG1:.*]]: memref<3x2xf32>, %[[RESULT0:.*]]: memref<3x2xf32>) {
+//  CHECK-NEXT: linalg.generic
+//  CHECK-NEXT: ^bb
+//  CHECK-NEXT:   constant
+//  CHECK-NEXT:   yield
+//  CHECK-NEXT: }
+//  CHECK-NEXT: linalg.generic
+//  CHECK-NEXT: ^bb
+//  CHECK-NEXT:   constant
+//  CHECK-NEXT:   yield
+//  CHECK-NEXT: }
+//  CHECK-NEXT: linalg.copy(%[[ARG1]], %[[RESULT0]])
+//  CHECK-NEXT: return
+//   CHECK-NOT: %

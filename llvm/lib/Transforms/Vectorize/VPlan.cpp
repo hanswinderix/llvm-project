@@ -536,7 +536,7 @@ void VPlan::execute(VPTransformState *State) {
                                    "trip.count.minus.1");
     auto VF = State->VF;
     Value *VTCMO =
-        VF == 1 ? TCMO : Builder.CreateVectorSplat(VF, TCMO, "broadcast");
+        VF.isScalar() ? TCMO : Builder.CreateVectorSplat(VF, TCMO, "broadcast");
     for (unsigned Part = 0, UF = State->UF; Part < UF; ++Part)
       State->set(BackedgeTakenCount, VTCMO, Part);
   }
@@ -790,7 +790,7 @@ void VPlanPrinter::dumpRegion(const VPRegionBlock *Region) {
   dumpEdges(Region);
 }
 
-void VPlanPrinter::printAsIngredient(raw_ostream &O, Value *V) {
+void VPlanPrinter::printAsIngredient(raw_ostream &O, const Value *V) {
   std::string IngredientString;
   raw_string_ostream RSO(IngredientString);
   if (auto *Inst = dyn_cast<Instruction>(V)) {
@@ -903,13 +903,14 @@ void VPPredInstPHIRecipe::print(raw_ostream &O, const Twine &Indent,
 
 void VPWidenMemoryInstructionRecipe::print(raw_ostream &O, const Twine &Indent,
                                            VPSlotTracker &SlotTracker) const {
-  O << "\"WIDEN " << VPlanIngredient(&Instr);
-  O << ", ";
-  getAddr()->printAsOperand(O, SlotTracker);
-  VPValue *Mask = getMask();
-  if (Mask) {
-    O << ", ";
-    Mask->printAsOperand(O, SlotTracker);
+  O << "\"WIDEN " << Instruction::getOpcodeName(Instr.getOpcode()) << " ";
+
+  bool First = true;
+  for (VPValue *Op : operands()) {
+    if (!First)
+      O << ", ";
+    Op->printAsOperand(O, SlotTracker);
+    First = false;
   }
 }
 
@@ -930,7 +931,8 @@ void VPWidenCanonicalIVRecipe::execute(VPTransformState &State) {
           ConstantInt::get(STy, Part * VF.getKnownMinValue() + Lane));
     // If VF == 1, there is only one iteration in the loop above, thus the
     // element pushed back into Indices is ConstantInt::get(STy, Part)
-    Constant *VStep = VF == 1 ? Indices.back() : ConstantVector::get(Indices);
+    Constant *VStep =
+        VF.isScalar() ? Indices.back() : ConstantVector::get(Indices);
     // Add the consecutive indices to the vector value.
     Value *CanonicalVectorIV = Builder.CreateAdd(VStart, VStep, "vec.iv");
     State.set(getVPValue(), CanonicalVectorIV, Part);

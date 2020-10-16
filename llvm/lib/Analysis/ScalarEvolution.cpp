@@ -3505,15 +3505,15 @@ const SCEV *ScalarEvolution::getUMinExpr(SmallVectorImpl<const SCEV *> &Ops) {
 }
 
 const SCEV *ScalarEvolution::getSizeOfExpr(Type *IntTy, Type *AllocTy) {
+  // We can bypass creating a target-independent
+  // constant expression and then folding it back into a ConstantInt.
+  // This is just a compile-time optimization.
   if (isa<ScalableVectorType>(AllocTy)) {
     Constant *NullPtr = Constant::getNullValue(AllocTy->getPointerTo());
     Constant *One = ConstantInt::get(IntTy, 1);
     Constant *GEP = ConstantExpr::getGetElementPtr(AllocTy, NullPtr, One);
-    return getUnknown(ConstantExpr::getPtrToInt(GEP, IntTy));
+    return getSCEV(ConstantExpr::getPtrToInt(GEP, IntTy));
   }
-  // We can bypass creating a target-independent
-  // constant expression and then folding it back into a ConstantInt.
-  // This is just a compile-time optimization.
   return getConstant(IntTy, getDataLayout().getTypeAllocSize(AllocTy));
 }
 
@@ -5509,6 +5509,17 @@ ScalarEvolution::getRangeRef(const SCEV *S,
         ConservativeResult =
             ConservativeResult.intersectWith(RangeFromFactoring, RangeType);
       }
+
+      // Now try symbolic BE count and more powerful methods.
+      MaxBECount = computeMaxBackedgeTakenCount(AddRec->getLoop());
+      if (!isa<SCEVCouldNotCompute>(MaxBECount) &&
+          getTypeSizeInBits(MaxBECount->getType()) <= BitWidth &&
+          AddRec->hasNoSelfWrap()) {
+        auto RangeFromAffineNew = getRangeForAffineNoSelfWrappingAR(
+            AddRec, MaxBECount, BitWidth, SignHint);
+        ConservativeResult =
+            ConservativeResult.intersectWith(RangeFromAffineNew, RangeType);
+      }
     }
 
     return setRange(AddRec, SignHint, std::move(ConservativeResult));
@@ -5676,6 +5687,67 @@ ConstantRange ScalarEvolution::getRangeForAffineAR(const SCEV *Start,
 
   // Finally, intersect signed and unsigned ranges.
   return SR.intersectWith(UR, ConstantRange::Smallest);
+}
+
+ConstantRange ScalarEvolution::getRangeForAffineNoSelfWrappingAR(
+    const SCEVAddRecExpr *AddRec, const SCEV *MaxBECount, unsigned BitWidth,
+    ScalarEvolution::RangeSignHint SignHint) {
+  assert(AddRec->isAffine() && "Non-affine AddRecs are not suppored!\n");
+  assert(AddRec->hasNoSelfWrap() &&
+         "This only works for non-self-wrapping AddRecs!");
+  const bool IsSigned = SignHint == HINT_RANGE_SIGNED;
+  const SCEV *Step = AddRec->getStepRecurrence(*this);
+  // Let's make sure that we can prove that we do not self-wrap during
+  // MaxBECount iterations. We need this because MaxBECount is a maximum
+  // iteration count estimate, and we might infer nw from some exit for which we
+  // do not know max exit count (or any other side reasoning).
+  // TODO: Turn into assert at some point.
+  MaxBECount = getNoopOrZeroExtend(MaxBECount, AddRec->getType());
+  const SCEV *RangeWidth = getNegativeSCEV(getOne(AddRec->getType()));
+  const SCEV *StepAbs = getUMinExpr(Step, getNegativeSCEV(Step));
+  const SCEV *MaxItersWithoutWrap = getUDivExpr(RangeWidth, StepAbs);
+  if (!isKnownPredicate(ICmpInst::ICMP_ULE, MaxBECount, MaxItersWithoutWrap))
+    return ConstantRange::getFull(BitWidth);
+
+  ICmpInst::Predicate LEPred =
+      IsSigned ? ICmpInst::ICMP_SLE : ICmpInst::ICMP_ULE;
+  ICmpInst::Predicate GEPred =
+      IsSigned ? ICmpInst::ICMP_SGE : ICmpInst::ICMP_UGE;
+  const SCEV *Start = AddRec->getStart();
+  const SCEV *End = AddRec->evaluateAtIteration(MaxBECount, *this);
+  // We could handle non-constant End, but it harms compile time a lot.
+  if (!isa<SCEVConstant>(End))
+    return ConstantRange::getFull(BitWidth);
+
+  // We know that there is no self-wrap. Let's take Start and End values and
+  // look at all intermediate values V1, V2, ..., Vn that IndVar takes during
+  // the iteration. They either lie inside the range [Min(Start, End),
+  // Max(Start, End)] or outside it:
+  //
+  // Case 1:   RangeMin    ...    Start V1 ... VN End ...           RangeMax;
+  // Case 2:   RangeMin Vk ... V1 Start    ...    End Vn ... Vk + 1 RangeMax;
+  //
+  // No self wrap flag guarantees that the intermediate values cannot be BOTH
+  // outside and inside the range [Min(Start, End), Max(Start, End)]. Using that
+  // knowledge, let's try to prove that we are dealing with Case 1. It is so if
+  // Start <= End and step is positive, or Start >= End and step is negative.
+  ConstantRange StartRange =
+      IsSigned ? getSignedRange(Start) : getUnsignedRange(Start);
+  ConstantRange EndRange =
+      IsSigned ? getSignedRange(End) : getUnsignedRange(End);
+  ConstantRange RangeBetween = StartRange.unionWith(EndRange);
+  // If they already cover full iteration space, we will know nothing useful
+  // even if we prove what we want to prove.
+  if (RangeBetween.isFullSet())
+    return RangeBetween;
+
+  if (isKnownPositive(Step) &&
+      isKnownViaNonRecursiveReasoning(LEPred, Start, End))
+    return RangeBetween;
+  else if (isKnownNegative(Step) &&
+           isKnownViaNonRecursiveReasoning(GEPred, Start, End))
+    return RangeBetween;
+  return ConstantRange::getFull(BitWidth);
 }
 
 ConstantRange ScalarEvolution::getRangeViaFactoring(const SCEV *Start,
@@ -6301,36 +6373,6 @@ const SCEV *ScalarEvolution::createSCEV(Value *V) {
       return getSCEV(U->getOperand(0));
     break;
 
-  case Instruction::PtrToInt: {
-    // It's tempting to handle inttoptr and ptrtoint as no-ops,
-    // however this can lead to pointer expressions which cannot safely be
-    // expanded to GEPs because ScalarEvolution doesn't respect
-    // the GEP aliasing rules when simplifying integer expressions.
-    //
-    // However, given
-    //   %x = ???
-    //   %y = ptrtoint %x
-    //   %z = ptrtoint %x
-    // it is safe to say that %y and %z are the same thing.
-    //
-    // So instead of modelling the cast itself as unknown,
-    // since the casts are transparent within SCEV,
-    // we can at least model the casts original value as unknow instead.
-
-    // BUT, there's caveat. If we simply model %x as unknown, unrelated uses
-    // of %x will also see it as unknown, which is obviously bad.
-    // So we can only do this iff %x would be modelled as unknown anyways.
-    auto *OpSCEV = getSCEV(U->getOperand(0));
-    if (isa<SCEVUnknown>(OpSCEV))
-      return getTruncateOrZeroExtend(OpSCEV, U->getType());
-    // If we can model the operand, however, we must fallback to modelling
-    // the whole cast as unknown instead.
-    LLVM_FALLTHROUGH;
-  }
-  case Instruction::IntToPtr:
-    // We can't do this for inttoptr at all, however.
-    return getUnknown(V);
-
   case Instruction::SDiv:
     // If both operands are non-negative, this is just an udiv.
     if (isKnownNonNegative(getSCEV(U->getOperand(0))) &&
@@ -6344,6 +6386,11 @@ const SCEV *ScalarEvolution::createSCEV(Value *V) {
         isKnownNonNegative(getSCEV(U->getOperand(1))))
       return getURemExpr(getSCEV(U->getOperand(0)), getSCEV(U->getOperand(1)));
     break;
+
+  // It's tempting to handle inttoptr and ptrtoint as no-ops, however this can
+  // lead to pointer expressions which cannot safely be expanded to GEPs,
+  // because ScalarEvolution doesn't respect the GEP aliasing rules when
+  // simplifying integer expressions.
 
   case Instruction::GetElementPtr:
     return createNodeForGEP(cast<GEPOperator>(U));
@@ -7976,7 +8023,7 @@ const SCEV *ScalarEvolution::getSCEVAtScope(const SCEV *V, const Loop *L) {
 /// will return Constants for objects which aren't represented by a
 /// SCEVConstant, because SCEVConstant is restricted to ConstantInt.
 /// Returns NULL if the SCEV isn't representable as a Constant.
-static Constant *BuildConstantFromSCEV(const SCEV *V, const DataLayout &DL) {
+static Constant *BuildConstantFromSCEV(const SCEV *V) {
   switch (static_cast<SCEVTypes>(V->getSCEVType())) {
     case scCouldNotCompute:
     case scAddRecExpr:
@@ -7987,47 +8034,32 @@ static Constant *BuildConstantFromSCEV(const SCEV *V, const DataLayout &DL) {
       return dyn_cast<Constant>(cast<SCEVUnknown>(V)->getValue());
     case scSignExtend: {
       const SCEVSignExtendExpr *SS = cast<SCEVSignExtendExpr>(V);
-      if (Constant *CastOp = BuildConstantFromSCEV(SS->getOperand(), DL)) {
-        if (CastOp->getType()->isPointerTy())
-          // Note that for SExt, unlike ZExt/Trunc, it is incorrect to just call
-          // ConstantExpr::getPtrToInt() and be done with it, because PtrToInt
-          // will zero-extend (otherwise ZExt case wouldn't work). So we need to
-          // first cast to the same-bitwidth integer, and then SExt it.
-          CastOp = ConstantExpr::getPtrToInt(
-              CastOp, DL.getIntPtrType(CastOp->getType()));
-        // And now, we can actually perform the sign-extension.
+      if (Constant *CastOp = BuildConstantFromSCEV(SS->getOperand()))
         return ConstantExpr::getSExt(CastOp, SS->getType());
-      }
       break;
     }
     case scZeroExtend: {
       const SCEVZeroExtendExpr *SZ = cast<SCEVZeroExtendExpr>(V);
-      if (Constant *CastOp = BuildConstantFromSCEV(SZ->getOperand(), DL)) {
-        if (!CastOp->getType()->isPointerTy())
-          return ConstantExpr::getZExt(CastOp, SZ->getType());
-        return ConstantExpr::getPtrToInt(CastOp, SZ->getType());
-      }
+      if (Constant *CastOp = BuildConstantFromSCEV(SZ->getOperand()))
+        return ConstantExpr::getZExt(CastOp, SZ->getType());
       break;
     }
     case scTruncate: {
       const SCEVTruncateExpr *ST = cast<SCEVTruncateExpr>(V);
-      if (Constant *CastOp = BuildConstantFromSCEV(ST->getOperand(), DL)) {
-        if (!CastOp->getType()->isPointerTy())
-          return ConstantExpr::getTrunc(CastOp, ST->getType());
-        return ConstantExpr::getPtrToInt(CastOp, ST->getType());
-      }
+      if (Constant *CastOp = BuildConstantFromSCEV(ST->getOperand()))
+        return ConstantExpr::getTrunc(CastOp, ST->getType());
       break;
     }
     case scAddExpr: {
       const SCEVAddExpr *SA = cast<SCEVAddExpr>(V);
-      if (Constant *C = BuildConstantFromSCEV(SA->getOperand(0), DL)) {
+      if (Constant *C = BuildConstantFromSCEV(SA->getOperand(0))) {
         if (PointerType *PTy = dyn_cast<PointerType>(C->getType())) {
           unsigned AS = PTy->getAddressSpace();
           Type *DestPtrTy = Type::getInt8PtrTy(C->getContext(), AS);
           C = ConstantExpr::getBitCast(C, DestPtrTy);
         }
         for (unsigned i = 1, e = SA->getNumOperands(); i != e; ++i) {
-          Constant *C2 = BuildConstantFromSCEV(SA->getOperand(i), DL);
+          Constant *C2 = BuildConstantFromSCEV(SA->getOperand(i));
           if (!C2) return nullptr;
 
           // First pointer!
@@ -8059,11 +8091,11 @@ static Constant *BuildConstantFromSCEV(const SCEV *V, const DataLayout &DL) {
     }
     case scMulExpr: {
       const SCEVMulExpr *SM = cast<SCEVMulExpr>(V);
-      if (Constant *C = BuildConstantFromSCEV(SM->getOperand(0), DL)) {
+      if (Constant *C = BuildConstantFromSCEV(SM->getOperand(0))) {
         // Don't bother with pointers at all.
         if (C->getType()->isPointerTy()) return nullptr;
         for (unsigned i = 1, e = SM->getNumOperands(); i != e; ++i) {
-          Constant *C2 = BuildConstantFromSCEV(SM->getOperand(i), DL);
+          Constant *C2 = BuildConstantFromSCEV(SM->getOperand(i));
           if (!C2 || C2->getType()->isPointerTy()) return nullptr;
           C = ConstantExpr::getMul(C, C2);
         }
@@ -8073,8 +8105,8 @@ static Constant *BuildConstantFromSCEV(const SCEV *V, const DataLayout &DL) {
     }
     case scUDivExpr: {
       const SCEVUDivExpr *SU = cast<SCEVUDivExpr>(V);
-      if (Constant *LHS = BuildConstantFromSCEV(SU->getLHS(), DL))
-        if (Constant *RHS = BuildConstantFromSCEV(SU->getRHS(), DL))
+      if (Constant *LHS = BuildConstantFromSCEV(SU->getLHS()))
+        if (Constant *RHS = BuildConstantFromSCEV(SU->getRHS()))
           if (LHS->getType() == RHS->getType())
             return ConstantExpr::getUDiv(LHS, RHS);
       break;
@@ -8179,7 +8211,7 @@ const SCEV *ScalarEvolution::computeSCEVAtScope(const SCEV *V, const Loop *L) {
           const SCEV *OpV = getSCEVAtScope(OrigV, L);
           MadeImprovement |= OrigV != OpV;
 
-          Constant *C = BuildConstantFromSCEV(OpV, getDataLayout());
+          Constant *C = BuildConstantFromSCEV(OpV);
           if (!C) return V;
           if (C->getType() != Op->getType())
             C = ConstantExpr::getCast(CastInst::getCastOpcode(C, false,
@@ -9730,7 +9762,17 @@ bool ScalarEvolution::isImpliedCond(ICmpInst::Predicate Pred, const SCEV *LHS,
       FoundRHS = getZeroExtendExpr(FoundRHS, LHS->getType());
     }
   }
+  return isImpliedCondBalancedTypes(Pred, LHS, RHS, FoundPred, FoundLHS,
+                                    FoundRHS, Context);
+}
 
+bool ScalarEvolution::isImpliedCondBalancedTypes(
+    ICmpInst::Predicate Pred, const SCEV *LHS, const SCEV *RHS,
+    ICmpInst::Predicate FoundPred, const SCEV *FoundLHS, const SCEV *FoundRHS,
+    const Instruction *Context) {
+  assert(getTypeSizeInBits(LHS->getType()) ==
+             getTypeSizeInBits(FoundLHS->getType()) &&
+         "Types should be balanced!");
   // Canonicalize the query to match the way instcombine will have
   // canonicalized the comparison.
   if (SimplifyICmpOperands(Pred, LHS, RHS))

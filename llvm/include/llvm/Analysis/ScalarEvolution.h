@@ -572,6 +572,8 @@ public:
   /// \p IndexExprs The expressions for the indices.
   const SCEV *getGEPExpr(GEPOperator *GEP,
                          const SmallVectorImpl<const SCEV *> &IndexExprs);
+  const SCEV *getAbsExpr(const SCEV *Op, bool IsNSW);
+  const SCEV *getSignumExpr(const SCEV *Op);
   const SCEV *getMinMaxExpr(unsigned Kind,
                             SmallVectorImpl<const SCEV *> &Operands);
   const SCEV *getSMaxExpr(const SCEV *LHS, const SCEV *RHS);
@@ -590,6 +592,11 @@ public:
 
   /// Return a SCEV for the constant 1 of a specific type.
   const SCEV *getOne(Type *Ty) { return getConstant(Ty, 1); }
+
+  /// Return a SCEV for the constant -1 of a specific type.
+  const SCEV *getMinusOne(Type *Ty) {
+    return getConstant(Ty, -1, /*isSigned=*/true);
+  }
 
   /// Return an expression for sizeof AllocTy that is type IntTy
   const SCEV *getSizeOfExpr(Type *IntTy, Type *AllocTy);
@@ -1488,13 +1495,6 @@ private:
   /// Helper for \c getRange.
   ConstantRange getRangeForAffineAR(const SCEV *Start, const SCEV *Stop,
                                     const SCEV *MaxBECount, unsigned BitWidth);
-
-  /// Determines the range for the affine non-self-wrapping SCEVAddRecExpr {\p
-  /// Start,+,\p Stop}<nw>.
-  ConstantRange getRangeForAffineNoSelfWrappingAR(const SCEVAddRecExpr *AddRec,
-                                                  const SCEV *MaxBECount,
-                                                  unsigned BitWidth,
-                                                  RangeSignHint SignHint);
 
   /// Try to compute a range for the affine SCEVAddRecExpr {\p Start,+,\p
   /// Stop} by "factoring out" a ternary expression from the add recurrence.

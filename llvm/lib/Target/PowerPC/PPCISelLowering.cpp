@@ -892,6 +892,7 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
       setOperationAction(ISD::SREM, MVT::v1i128, Legal);
       setOperationAction(ISD::UDIV, MVT::v1i128, Legal);
       setOperationAction(ISD::SDIV, MVT::v1i128, Legal);
+      setOperationAction(ISD::ROTL, MVT::v1i128, Legal);
     }
 
     setOperationAction(ISD::MUL, MVT::v8i16, Legal);
@@ -14073,6 +14074,8 @@ SDValue PPCTargetLowering::combineFPToIntToFP(SDNode *N,
   // Don't handle ppc_fp128 here or conversions that are out-of-range capable
   // from the hardware.
   if (Op.getValueType() != MVT::f32 && Op.getValueType() != MVT::f64)
+    return SDValue();
+  if (!Op.getOperand(0).getValueType().isSimple())
     return SDValue();
   if (Op.getOperand(0).getValueType().getSimpleVT() <= MVT(MVT::i1) ||
       Op.getOperand(0).getValueType().getSimpleVT() > MVT(MVT::i64))

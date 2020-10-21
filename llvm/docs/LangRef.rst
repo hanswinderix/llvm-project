@@ -1958,6 +1958,18 @@ example:
     the function. The instrumentation checks that the return address for the
     function has not changed between the function prolog and epilog. It is
     currently x86_64-specific.
+``mustprogress``
+    This attribute indicates that the function is required to return, unwind,
+    or interact with the environment in an observable way e.g. via a volatile
+    memory access, I/O, or other synchronization.  The ``mustprogress``
+    attribute is intended to model the requirements of the first section of
+    [intro.progress] of the C++ Standard. As a consequence, a loop in a
+    function with the `mustprogress` attribute can be assumed to terminate if
+    it does not interact with the environment in an observable way, and
+    terminating loops without side-effects can be removed. If a `mustprogress`
+    function does not satisfy this contract, the behavior is undefined.  This
+    attribute does not apply transitively to callees, but does apply to call
+    sites within the function. Note that `willreturn` implies `mustprogress`. 
 
 Call Site Attributes
 ----------------------
@@ -15474,8 +15486,8 @@ This is an overloaded intrinsic.
 
 ::
 
-      declare void @llvm.test.set.loop.iterations.i32(i32)
-      declare void @llvm.test.set.loop.iterations.i64(i64)
+      declare i1 @llvm.test.set.loop.iterations.i32(i32)
+      declare i1 @llvm.test.set.loop.iterations.i64(i64)
 
 Overview:
 """""""""
@@ -15499,6 +15511,7 @@ The '``llvm.test.set.loop.iterations.*``' intrinsics do not perform any
 arithmetic on their operand. It's a hint to the backend that can use this to
 set up the hardware-loop count with a target specific instruction, usually a
 move of this value to a special register or a hardware-loop instruction.
+The result is the conditional value of whether the given count is not zero.
 
 '``llvm.loop.decrement.reg.*``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

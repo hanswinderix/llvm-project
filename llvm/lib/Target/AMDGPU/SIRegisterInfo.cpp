@@ -98,9 +98,10 @@ SIRegisterInfo::SIRegisterInfo(const GCNSubtarget &ST)
       Width = SubRegFromChannelTableWidthMap[Width];
       if (Width == 0)
         continue;
-      assert((Width - 1) < SubRegFromChannelTable.size());
-      assert(Offset < SubRegFromChannelTable[Width].size());
-      SubRegFromChannelTable[Width - 1][Offset] = Idx;
+      unsigned TableIdx = Width - 1;
+      assert(TableIdx < SubRegFromChannelTable.size());
+      assert(Offset < SubRegFromChannelTable[TableIdx].size());
+      SubRegFromChannelTable[TableIdx][Offset] = Idx;
     }
   };
 
@@ -1988,9 +1989,4 @@ SIRegisterInfo::getAllSGPR128(const MachineFunction &MF) const {
 ArrayRef<MCPhysReg>
 SIRegisterInfo::getAllSGPR32(const MachineFunction &MF) const {
   return makeArrayRef(AMDGPU::SGPR_32RegClass.begin(), ST.getMaxNumSGPRs(MF));
-}
-
-ArrayRef<MCPhysReg>
-SIRegisterInfo::getAllVGPR32(const MachineFunction &MF) const {
-  return makeArrayRef(AMDGPU::VGPR_32RegClass.begin(), ST.getMaxNumVGPRs(MF));
 }

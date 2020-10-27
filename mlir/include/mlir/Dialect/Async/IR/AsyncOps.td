@@ -24,7 +24,9 @@ include "mlir/Interfaces/SideEffectInterfaces.td"
 class Async_Op<string mnemonic, list<OpTrait> traits = []> :
     Op<AsyncDialect, mnemonic, traits>;
 
-def Async_ExecuteOp : Async_Op<"execute", [AttrSizedOperandSegments]> {
+def Async_ExecuteOp :
+  Async_Op<"execute", [SingleBlockImplicitTerminator<"YieldOp">,
+                       AttrSizedOperandSegments]> {
   let summary = "Asynchronous execute operation";
   let description = [{
     The `body` region attached to the `async.execute` operation semantically
@@ -116,7 +118,8 @@ def Async_AwaitOp : Async_Op<"await", [NoSideEffect]> {
   let skipDefaultBuilders = 1;
 
   let builders = [
-    OpBuilder<"Value operand, ArrayRef<NamedAttribute> attrs = {}">,
+    OpBuilderDAG<(ins "Value":$operand,
+      CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs)>,
   ];
 
   let extraClassDeclaration = [{

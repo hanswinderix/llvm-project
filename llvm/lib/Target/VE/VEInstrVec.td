@@ -601,6 +601,134 @@ multiclass RVFIXm<string opcStr, bits<8> opc, RegisterClass RC,
   let cy = 0, sy = 0, vy = ?, vz = ? in
   defm v : RVmm<opcStr#"$vz", ", $vy", opc, RC, RCM, (ins RDOp:$vz, RC:$vy)>;
 }
+// Multiclass for generic iterative vector calculation
+let vx = ?, hasSideEffects = 0, Uses = [VL] in
+multiclass RVIbm<string opcStr, string argStr, bits<8>opc, RegisterClass RC,
+                dag dag_in, string disEnc = ""> {
+  let DisableEncoding = disEnc in
+  def "" : RV<opc, (outs RC:$vx), dag_in,
+              !strconcat(opcStr, " $vx", argStr)>;
+  let isCodeGenOnly = 1, Constraints = "$vx = $base", DisableEncoding = disEnc#"$base" in
+  def _v : RV<opc, (outs RC:$vx), !con(dag_in, (ins RC:$base)),
+              !strconcat(opcStr, " $vx", argStr)>;
+}
+multiclass RVIlm<string opcStr, string argStr, bits<8>opc, RegisterClass RC,
+                 dag dag_in> {
+  defm "" : RVIbm<opcStr, argStr, opc, RC, dag_in>;
+  let isCodeGenOnly = 1, VE_VLInUse = 1 in {
+    defm l : RVIbm<opcStr, argStr, opc, RC, !con(dag_in, (ins I32:$vl)),
+                   "$vl,">;
+    defm L : RVIbm<opcStr, argStr, opc, RC, !con(dag_in, (ins VLS:$vl)),
+                   "$vl,">;
+  }
+}
+// Generic RV multiclass for iterative operation with 2 argument.
+//   e.g. VFIA, VFIS, and VFIM
+let VE_VLIndex = 3 in
+multiclass RVI2m<string opcStr, bits<8>opc, RegisterClass VRC,
+                 RegisterClass RC> {
+  let vy = ? in
+  defm vr : RVIlm<opcStr, ", $vy, $sy", opc, VRC, (ins VRC:$vy, RC:$sy)>;
+  let cy = 0, vy = ? in
+  defm vi : RVIlm<opcStr, ", $vy, $sy", opc, VRC, (ins VRC:$vy, simm7fp:$sy)>;
+}
+// Generic RV multiclass for iterative operation with 3 argument.
+//   e.g. VFIAM, VFISM, VFIMA, and etc.
+let VE_VLIndex = 4 in
+multiclass RVI3m<string opcStr, bits<8>opc, RegisterClass VRC,
+                 RegisterClass RC> {
+  let vy = ?, vz = ? in
+  defm vvr : RVIlm<opcStr, ", $vy, $vz, $sy", opc, VRC,
+                   (ins VRC:$vy, VRC:$vz, RC:$sy)>;
+  let cy = 0, vy = ?, vz = ? in
+  defm vvi : RVIlm<opcStr, ", $vy, $vz, $sy", opc, VRC,
+                   (ins VRC:$vy, VRC:$vz, simm7fp:$sy)>;
+}
+// special RV multiclass with 3 arguments for VSHF.
+//   e.g. VSHF
+let vy = ?, vz = ?, VE_VLIndex = 4 in
+multiclass RVSHFm<string opcStr, bits<8>opc, RegisterClass RC,
+                  Operand SIMM = uimm4> {
+  defm vvr : RVlm<opcStr, ", $vy, $vz, $sy", opc, RC,
+                  (ins RC:$vy, RC:$vz, I64:$sy)>;
+  let cy = 0 in defm vvi : RVlm<opcStr, ", $vy, $vz, $sy", opc, RC,
+                                (ins RC:$vy, RC:$vz, SIMM:$sy)>;
+}
+// Multiclass for generic mask calculation
+let vx = ?, hasSideEffects = 0, Uses = [VL] in
+multiclass RVMKbm<string opcStr, string argStr, bits<8>opc, dag dag_out,
+                  dag dag_in> {
+  def "" : RV<opc, dag_out, dag_in, !strconcat(opcStr, argStr)>;
+  let DisableEncoding = "$vl", isCodeGenOnly = 1, VE_VLInUse = 1 in {
+    def l : RV<opc, dag_out, !con(dag_in, (ins I32:$vl)),
+               !strconcat(opcStr, argStr)>;
+    def L : RV<opc, dag_out, !con(dag_in, (ins VLS:$vl)),
+               !strconcat(opcStr, argStr)>;
+  }
+}
+multiclass RVMKlm<string opcStr, string argStr, bits<8>opc, RegisterClass RCM,
+                  dag dag_in> {
+  defm "" : RVMKbm<opcStr, " $vx"#argStr, opc, (outs RCM:$vx), dag_in>;
+  let m = ?, VE_VLWithMask = 1 in
+  defm m : RVMKbm<opcStr, " $vx"#argStr#", $m", opc, (outs RCM:$vx),
+                  !con(dag_in, (ins RCM:$m))>;
+}
+// Generic RV multiclass for mask calculation with a condition.
+//   e.g. VFMK, VFMS, and VFMF
+let cy = 0, sy = 0 in
+multiclass RVMKom<string opcStr, bits<8> opc, RegisterClass RC,
+                 RegisterClass RCM> {
+  let vy = ?, vz = ?, VE_VLIndex = 3 in
+  defm v : RVMKlm<opcStr#"$vy", ", $vz", opc, RCM, (ins CCOp:$vy, RC:$vz)>;
+  let vy = 15 /* AT */, VE_VLIndex = 1 in
+  defm a : RVMKlm<opcStr#"at", "", opc, RCM, (ins)>;
+  let vy = 0 /* AF */, VE_VLIndex = 1 in
+  defm na : RVMKlm<opcStr#"af", "", opc, RCM, (ins)>;
+}
+multiclass RVMKm<string opcStr, bits<8> opc, RegisterClass RC,
+                 RegisterClass RCM> {
+  defm "" : RVMKom<opcStr, opc, RC, RCM>;
+}
+// Generic RV multiclass for mask calculation with 2 arguments.
+//   e.g. ANDM, ORM, XORM, and etc.
+let cy = 0, sy = 0, vx = ?, vy = ?, vz = ?, hasSideEffects = 0 in
+multiclass RVM2m<string opcStr, bits<8> opc, RegisterClass RCM> {
+  def mm : RV<opc, (outs RCM:$vx), (ins RCM:$vy, RCM:$vz),
+              !strconcat(opcStr, " $vx, $vy, $vz")>;
+}
+// Generic RV multiclass for mask calculation with 1 argument.
+//   e.g. NEGM
+let cy = 0, sy = 0, vx = ?, vy = ?, hasSideEffects = 0 in
+multiclass RVM1m<string opcStr, bits<8> opc, RegisterClass RCM> {
+  def m : RV<opc, (outs RCM:$vx), (ins RCM:$vy),
+             !strconcat(opcStr, " $vx, $vy")>;
+}
+// Generic RV multiclass for mask calculation with 1 argument.
+//   e.g. PCVM, LZVM, and TOVM
+let cy = 0, sy = 0, vy = ?, hasSideEffects = 0, Uses = [VL] in
+multiclass RVMSbm<string opcStr, string argStr, bits<8>opc, dag dag_in> {
+  def "" : RV<opc, (outs I64:$sx), dag_in,
+              !strconcat(opcStr, " $sx,", argStr)> {
+    bits<7> sx;
+    let Inst{54-48} = sx;
+  }
+  let DisableEncoding = "$vl", isCodeGenOnly = 1, VE_VLInUse = 1 in {
+    def l : RV<opc, (outs I64:$sx), !con(dag_in, (ins I32:$vl)),
+               !strconcat(opcStr, " $sx,", argStr)> {
+      bits<7> sx;
+      let Inst{54-48} = sx;
+    }
+    def L : RV<opc, (outs I64:$sx), !con(dag_in, (ins VLS:$vl)),
+               !strconcat(opcStr, " $sx,", argStr)> {
+      bits<7> sx;
+      let Inst{54-48} = sx;
+    }
+  }
+}
+let VE_VLIndex = 2 in
+multiclass RVMSm<string opcStr, bits<8> opc, RegisterClass RCM> {
+  defm m : RVMSbm<opcStr, " $vy", opc, (ins RCM:$vy)>;
+}
 
 // Section 8.10.1 - VADD (Vector Add)
 let cx = 0, cx2 = 0 in
@@ -1116,3 +1244,210 @@ defm VCVTSD : RVF1m<"vcvt.s.d", 0x9f, V64, VM>;
 
 // Section 8.13.19 - VCVD (Vector Convert to Double-format)
 defm VCVTDS : RVF1m<"vcvt.d.s", 0x8f, V64, VM>;
+
+//-----------------------------------------------------------------------------
+// Section 8.14 - Vector Reduction Instructions
+//-----------------------------------------------------------------------------
+
+// Section 8.14.1 - VSUMS (Vector Sum Single)
+defm VSUMWSX : RVF1m<"vsum.w.sx", 0xea, V64, VM>;
+let cx2 = 1 in defm VSUMWZX : RVF1m<"vsum.w.zx", 0xea, V64, VM>;
+
+// Section 8.14.2 - VSUMX (Vector Sum)
+defm VSUML : RVF1m<"vsum.l", 0xaa, V64, VM>;
+
+// Section 8.14.3 - VFSUM (Vector Floating Sum)
+defm VFSUMD : RVF1m<"vfsum.d", 0xec, V64, VM>;
+let cx = 1 in defm VFSUMS : RVF1m<"vfsum.s", 0xec, V64, VM>;
+
+// Section 8.14.4 - VMAXS (Vector Maximum/Minimum Single)
+let cx2 = 0 in defm VRMAXSWFSTSX : RVF1m<"vrmaxs.w.fst.sx", 0xbb, V64, VM>;
+let cx2 = 1 in defm VRMAXSWFSTZX : RVF1m<"vrmaxs.w.fst.zx", 0xbb, V64, VM>;
+let cs = 1 in {
+  let cx2 = 0 in
+  defm VRMAXSWLSTSX : RVF1m<"vrmaxs.w.lst.sx", 0xbb, V64, VM>;
+  let cx2 = 1 in
+  defm VRMAXSWLSTZX : RVF1m<"vrmaxs.w.lst.zx", 0xbb, V64, VM>;
+}
+let cs2 = 1 in {
+  let cx2 = 0 in
+  defm VRMINSWFSTSX : RVF1m<"vrmins.w.fst.sx", 0xbb, V64, VM>;
+  let cx2 = 1 in
+  defm VRMINSWFSTZX : RVF1m<"vrmins.w.fst.zx", 0xbb, V64, VM>;
+  let cs = 1 in {
+    let cx2 = 0 in
+    defm VRMINSWLSTSX : RVF1m<"vrmins.w.lst.sx", 0xbb, V64, VM>;
+    let cx2 = 1 in
+    defm VRMINSWLSTZX : RVF1m<"vrmins.w.lst.zx", 0xbb, V64, VM>;
+  }
+}
+
+// Section 8.14.5 - VMAXX (Vector Maximum/Minimum)
+let cs = 0 in defm VRMAXSLFST : RVF1m<"vrmaxs.l.fst", 0xab, V64, VM>;
+let cs = 1 in defm VRMAXSLLST : RVF1m<"vrmaxs.l.lst", 0xab, V64, VM>;
+let cs2 = 1 in {
+  let cs = 0 in defm VRMINSLFST : RVF1m<"vrmins.l.fst", 0xab, V64, VM>;
+  let cs = 1 in defm VRMINSLLST : RVF1m<"vrmins.l.lst", 0xab, V64, VM>;
+}
+
+// Section 8.14.6 - VFMAX (Vector Floating Maximum/Minimum)
+let cs = 0 in defm VFRMAXDFST : RVF1m<"vfrmax.d.fst", 0xad, V64, VM>;
+let cs = 1 in defm VFRMAXDLST : RVF1m<"vfrmax.d.lst", 0xad, V64, VM>;
+let cs2 = 1 in {
+  let cs = 0 in defm VFRMINDFST : RVF1m<"vfrmin.d.fst", 0xad, V64, VM>;
+  let cs = 1 in defm VFRMINDLST : RVF1m<"vfrmin.d.lst", 0xad, V64, VM>;
+}
+let cx = 1 in {
+  let cs = 0 in defm VFRMAXSFST : RVF1m<"vfrmax.s.fst", 0xad, V64, VM>;
+  let cs = 1 in defm VFRMAXSLST : RVF1m<"vfrmax.s.lst", 0xad, V64, VM>;
+  let cs2 = 1 in {
+    let cs = 0 in defm VFRMINSFST : RVF1m<"vfrmin.s.fst", 0xad, V64, VM>;
+    let cs = 1 in defm VFRMINSLST : RVF1m<"vfrmin.s.lst", 0xad, V64, VM>;
+  }
+}
+
+// Section 8.14.7 - VRAND (Vector Reduction And)
+defm VRAND : RVF1m<"vrand", 0x88, V64, VM>;
+
+// Section 8.14.8 - VROR (Vector Reduction Or)
+defm VROR : RVF1m<"vror", 0x98, V64, VM>;
+
+// Section 8.14.9 - VRXOR (Vector Reduction Exclusive Or)
+defm VRXOR : RVF1m<"vrxor", 0x89, V64, VM>;
+
+//-----------------------------------------------------------------------------
+// Section 8.15 - Vector Iterative Operation Instructions
+//-----------------------------------------------------------------------------
+
+// Section 8.15.1 - VFIA (Vector Floating Iteration Add)
+let cx = 0 in defm VFIAD : RVI2m<"vfia.d", 0xce, V64, I64>;
+let cx = 1 in defm VFIAS : RVI2m<"vfia.s", 0xce, V64, F32>;
+
+// Section 8.15.2 - VFIS (Vector Floating Iteration Subtract)
+let cx = 0 in defm VFISD : RVI2m<"vfis.d", 0xde, V64, I64>;
+let cx = 1 in defm VFISS : RVI2m<"vfis.s", 0xde, V64, F32>;
+
+// Section 8.15.3 - VFIM (Vector Floating Iteration Multiply)
+let cx = 0 in defm VFIMD : RVI2m<"vfim.d", 0xcf, V64, I64>;
+let cx = 1 in defm VFIMS : RVI2m<"vfim.s", 0xcf, V64, F32>;
+
+// Section 8.15.4 - VFIAM (Vector Floating Iteration Add and Multiply)
+let cx = 0 in defm VFIAMD : RVI3m<"vfiam.d", 0xee, V64, I64>;
+let cx = 1 in defm VFIAMS : RVI3m<"vfiam.s", 0xee, V64, F32>;
+
+// Section 8.15.5 - VFISM (Vector Floating Iteration Subtract and Multiply)
+let cx = 0 in defm VFISMD : RVI3m<"vfism.d", 0xfe, V64, I64>;
+let cx = 1 in defm VFISMS : RVI3m<"vfism.s", 0xfe, V64, F32>;
+
+// Section 8.15.6 - VFIMA (Vector Floating Iteration Multiply and Add)
+let cx = 0 in defm VFIMAD : RVI3m<"vfima.d", 0xef, V64, I64>;
+let cx = 1 in defm VFIMAS : RVI3m<"vfima.s", 0xef, V64, F32>;
+
+// Section 8.15.7 - VFIMS (Vector Floating Iteration Multiply and Subtract)
+let cx = 0 in defm VFIMSD : RVI3m<"vfims.d", 0xff, V64, I64>;
+let cx = 1 in defm VFIMSS : RVI3m<"vfims.s", 0xff, V64, F32>;
+
+//-----------------------------------------------------------------------------
+// Section 8.16 - Vector Merger Operation Instructions
+//-----------------------------------------------------------------------------
+
+// Section 8.16.1 - VMRG (Vector Merge)
+let cx = 0 in defm VMRG : RVm<"vmrg", 0xd6, V64, I64, VM>;
+// FIXME: vmrg.w should be called as pvmrg, but following assembly manual.
+let cx = 1 in defm VMRGW : RVm<"vmrg.w", 0xd6, V64, I64, VM512>;
+def : MnemonicAlias<"vmrg.l", "vmrg">;
+
+// Section 8.16.2 - VSHF (Vector Shuffle)
+defm VSHF : RVSHFm<"vshf", 0xbc, V64>;
+
+// Section 8.16.3 - VCP (Vector Compress)
+defm VCP : RV1m<"vcp", 0x8d, V64, VM>;
+
+// Section 8.16.4 - VEX (Vector Expand)
+defm VEX : RV1m<"vex", 0x9d, V64, VM>;
+
+//-----------------------------------------------------------------------------
+// Section 8.17 - Vector Mask Operation Instructions
+//-----------------------------------------------------------------------------
+
+// Section 8.17.1 - VFMK (Vector Form Mask)
+defm VFMKL : RVMKm<"vfmk.l.", 0xb4, V64, VM>;
+def : MnemonicAlias<"vfmk.l", "vfmk.l.at">;
+
+// Section 8.17.2 - VFMS (Vector Form Mask Single)
+defm VFMKW : RVMKm<"vfmk.w.", 0xb5, V64, VM>;
+let isCodeGenOnly = 1 in defm PVFMKWLO : RVMKm<"vfmk.w.", 0xb5, V64, VM>;
+let cx = 1 in defm PVFMKWUP : RVMKm<"pvfmk.w.up.", 0xb5, V64, VM>;
+def : MnemonicAlias<"vfmk.w", "vfmk.w.at">;
+def : MnemonicAlias<"pvfmk.w.up", "pvfmk.w.up.at">;
+def : MnemonicAlias<"pvfmk.w.lo", "vfmk.w.at">;
+foreach CC = [ "af", "gt", "lt", "ne", "eq", "ge", "le", "at" ] in {
+  def : MnemonicAlias<"pvfmk.w.lo."#CC, "vfmk.w."#CC>;
+}
+
+// Section 8.17.3 - VFMF (Vector Form Mask Floating Point)
+defm VFMKD : RVMKm<"vfmk.d.", 0xb6, V64, VM>;
+let cx2 = 1 in defm PVFMKSLO : RVMKm<"pvfmk.s.lo.", 0xb6, V64, VM>;
+let cx = 1 in {
+  defm PVFMKSUP : RVMKm<"pvfmk.s.up.", 0xb6, V64, VM>;
+  let isCodeGenOnly = 1 in defm VFMKS : RVMKm<"vfmk.s.", 0xb6, V64, VM>;
+}
+def : MnemonicAlias<"vfmk.d", "vfmk.d.at">;
+def : MnemonicAlias<"pvfmk.s.lo", "pvfmk.s.lo.at">;
+def : MnemonicAlias<"pvfmk.s.up", "pvfmk.s.up.at">;
+def : MnemonicAlias<"vfmk.s", "pvfmk.s.up.at">;
+foreach CC = [ "af", "gt", "lt", "ne", "eq", "ge", "le", "at", "num", "nan",
+               "gtnan", "ltnan", "nenan", "eqnan", "genan", "lenan" ] in {
+  def : MnemonicAlias<"vfmk.s."#CC, "pvfmk.s.up."#CC>;
+}
+
+// Section 8.17.4 - ANDM (And VM)
+defm ANDM : RVM2m<"andm", 0x84, VM>;
+
+// Section 8.17.5 - ORM (Or VM)
+defm ORM : RVM2m<"orm", 0x85, VM>;
+
+// Section 8.17.6 - XORM (Exclusive Or VM)
+defm XORM : RVM2m<"xorm", 0x86, VM>;
+
+// Section 8.17.7 - EQVM (Equivalence VM)
+defm EQVM : RVM2m<"eqvm", 0x87, VM>;
+
+// Section 8.17.8 - NNDM (Negate And VM)
+defm NNDM : RVM2m<"nndm", 0x94, VM>;
+
+// Section 8.17.9 - NEGM (Negate VM)
+defm NEGM : RVM1m<"negm", 0x95, VM>;
+
+// Section 8.17.10 - PCVM (Population Count of VM)
+defm PCVM : RVMSm<"pcvm", 0xa4, VM>;
+
+// Section 8.17.11 - LZVM (Leading Zero of VM)
+defm LZVM : RVMSm<"lzvm", 0xa5, VM>;
+
+// Section 8.17.12 - TOVM (Trailing One of VM)
+defm TOVM : RVMSm<"tovm", 0xa6, VM>;
+
+//-----------------------------------------------------------------------------
+// Section 8.18 - Vector Control Instructions
+//-----------------------------------------------------------------------------
+
+// Section 8.18.1 - LVL (Load VL)
+let sx = 0, cz = 0, sz = 0, hasSideEffects = 0, Defs = [VL] in {
+  def LVLr : RR<0xbf, (outs), (ins I64:$sy), "lvl $sy">;
+  let cy = 0 in def LVLi : RR<0xbf, (outs), (ins simm7:$sy), "lvl $sy">;
+}
+
+// Section 8.18.2 - SVL (Save VL)
+let cy = 0, sy = 0, cz = 0, sz = 0, hasSideEffects = 0, Uses = [VL] in
+def SVL : RR<0x2f, (outs I64:$sx), (ins), "svl $sx">;
+
+// Section 8.18.3 - SMVL (Save Maximum Vector Length)
+let cy = 0, sy = 0, cz = 0, sz = 0, hasSideEffects = 0 in
+def SMVL : RR<0x2e, (outs I64:$sx), (ins), "smvl $sx">;
+
+// Section 8.18.4 - LVIX (Load Vector Data Index)
+let sx = 0, cz = 0, sz = 0, hasSideEffects = 0, Defs = [VIX] in {
+  def LVIXr : RR<0xaf, (outs), (ins I64:$sy), "lvix $sy">;
+  let cy = 0 in def LVIXi : RR<0xaf, (outs), (ins uimm6:$sy), "lvix $sy">;
+}

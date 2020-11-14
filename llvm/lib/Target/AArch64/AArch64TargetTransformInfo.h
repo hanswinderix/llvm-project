@@ -147,6 +147,7 @@ public:
 
   TTI::MemCmpExpansionOptions enableMemCmpExpansion(bool OptSize,
                                                     bool IsZeroCmp) const;
+  bool useNeonVector(const Type *Ty) const;
 
   int getMemoryOpCost(unsigned Opcode, Type *Src, MaybeAlign Alignment,
                       unsigned AddressSpace,
@@ -221,17 +222,7 @@ public:
   shouldConsiderAddressTypePromotion(const Instruction &I,
                                      bool &AllowPromotionWithoutCommonHeader);
 
-  bool shouldExpandReduction(const IntrinsicInst *II) const {
-    switch (II->getIntrinsicID()) {
-    case Intrinsic::vector_reduce_fmul:
-      // We don't have legalization support for ordered FMUL reductions.
-      return !II->getFastMathFlags().allowReassoc();
-
-    default:
-      // Don't expand anything else, let legalization deal with it.
-      return false;
-    }
-  }
+  bool shouldExpandReduction(const IntrinsicInst *II) const { return false; }
 
   unsigned getGISelRematGlobalCost() const {
     return 2;

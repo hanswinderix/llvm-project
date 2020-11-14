@@ -169,36 +169,6 @@ Operation *StandardOpsDialect::materializeConstant(OpBuilder &builder,
   return builder.create<ConstantOp>(loc, type, value);
 }
 
-void mlir::printDimAndSymbolList(Operation::operand_iterator begin,
-                                 Operation::operand_iterator end,
-                                 unsigned numDims, OpAsmPrinter &p) {
-  Operation::operand_range operands(begin, end);
-  p << '(' << operands.take_front(numDims) << ')';
-  if (operands.size() != numDims)
-    p << '[' << operands.drop_front(numDims) << ']';
-}
-
-// Parses dimension and symbol list, and sets 'numDims' to the number of
-// dimension operands parsed.
-// Returns 'false' on success and 'true' on error.
-ParseResult mlir::parseDimAndSymbolList(OpAsmParser &parser,
-                                        SmallVectorImpl<Value> &operands,
-                                        unsigned &numDims) {
-  SmallVector<OpAsmParser::OperandType, 8> opInfos;
-  if (parser.parseOperandList(opInfos, OpAsmParser::Delimiter::Paren))
-    return failure();
-  // Store number of dimensions for validation by caller.
-  numDims = opInfos.size();
-
-  // Parse the optional symbol operands.
-  auto indexTy = parser.getBuilder().getIndexType();
-  if (parser.parseOperandList(opInfos,
-                              OpAsmParser::Delimiter::OptionalSquare) ||
-      parser.resolveOperands(opInfos, indexTy, operands))
-    return failure();
-  return success();
-}
-
 /// Matches a ConstantIndexOp.
 /// TODO: This should probably just be a general matcher that uses m_Constant
 /// and checks the operation for an index type.
@@ -404,90 +374,37 @@ static LogicalResult verifyOpWithOffsetSizesAndStrides(OpType op) {
 //===----------------------------------------------------------------------===//
 
 template <typename AllocLikeOp>
-static void printAllocLikeOp(OpAsmPrinter &p, AllocLikeOp op, StringRef name) {
-  static_assert(llvm::is_one_of<AllocLikeOp, AllocOp, AllocaOp>::value,
-                "applies to only alloc or alloca");
-  p << name;
-
-  // Print dynamic dimension operands.
-  MemRefType type = op.getType();
-  printDimAndSymbolList(op.operand_begin(), op.operand_end(),
-                        type.getNumDynamicDims(), p);
-  p.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{"map"});
-  p << " : " << type;
-}
-
-static void print(OpAsmPrinter &p, AllocOp op) {
-  printAllocLikeOp(p, op, "alloc");
-}
-
-static void print(OpAsmPrinter &p, AllocaOp op) {
-  printAllocLikeOp(p, op, "alloca");
-}
-
-static ParseResult parseAllocLikeOp(OpAsmParser &parser,
-                                    OperationState &result) {
-  MemRefType type;
-
-  // Parse the dimension operands and optional symbol operands, followed by a
-  // memref type.
-  unsigned numDimOperands;
-  if (parseDimAndSymbolList(parser, result.operands, numDimOperands) ||
-      parser.parseOptionalAttrDict(result.attributes) ||
-      parser.parseColonType(type))
-    return failure();
-
-  // Check numDynamicDims against number of question marks in memref type.
-  // Note: this check remains here (instead of in verify()), because the
-  // partition between dim operands and symbol operands is lost after parsing.
-  // Verification still checks that the total number of operands matches
-  // the number of symbols in the affine map, plus the number of dynamic
-  // dimensions in the memref.
-  if (numDimOperands != type.getNumDynamicDims())
-    return parser.emitError(parser.getNameLoc())
-           << "dimension operand count does not equal memref dynamic dimension "
-              "count";
-  result.types.push_back(type);
-  return success();
-}
-
-template <typename AllocLikeOp>
-static LogicalResult verify(AllocLikeOp op) {
+static LogicalResult verifyAllocLikeOp(AllocLikeOp op) {
   static_assert(llvm::is_one_of<AllocLikeOp, AllocOp, AllocaOp>::value,
                 "applies to only alloc or alloca");
   auto memRefType = op.getResult().getType().template dyn_cast<MemRefType>();
   if (!memRefType)
     return op.emitOpError("result must be a memref");
 
+  if (static_cast<int64_t>(op.dynamicSizes().size()) !=
+      memRefType.getNumDynamicDims())
+    return op.emitOpError("dimension operand count does not equal memref "
+                          "dynamic dimension count");
+
   unsigned numSymbols = 0;
-  if (!memRefType.getAffineMaps().empty()) {
-    // Store number of symbols used in affine map (used in subsequent check).
-    AffineMap affineMap = memRefType.getAffineMaps()[0];
-    numSymbols = affineMap.getNumSymbols();
-  }
-
-  // Check that the total number of operands matches the number of symbols in
-  // the affine map, plus the number of dynamic dimensions specified in the
-  // memref type.
-  unsigned numDynamicDims = memRefType.getNumDynamicDims();
-  if (op.getNumOperands() != numDynamicDims + numSymbols)
+  if (!memRefType.getAffineMaps().empty())
+    numSymbols = memRefType.getAffineMaps().front().getNumSymbols();
+  if (op.symbolOperands().size() != numSymbols)
     return op.emitOpError(
-        "operand count does not equal dimension plus symbol operand count");
+        "symbol operand count does not equal memref symbol count");
 
-  // Verify that all operands are of type Index.
-  for (auto operandType : op.getOperandTypes())
-    if (!operandType.isIndex())
-      return op.emitOpError("requires operands to be of type Index");
+  return success();
+}
 
-  if (std::is_same<AllocLikeOp, AllocOp>::value)
-    return success();
+static LogicalResult verify(AllocOp op) { return verifyAllocLikeOp(op); }
 
+static LogicalResult verify(AllocaOp op) {
   // An alloca op needs to have an ancestor with an allocation scope trait.
-  if (!op.template getParentWithTrait<OpTrait::AutomaticAllocationScope>())
+  if (!op.getParentWithTrait<OpTrait::AutomaticAllocationScope>())
     return op.emitOpError(
         "requires an ancestor op with AutomaticAllocationScope trait");
 
-  return success();
+  return verifyAllocLikeOp(op);
 }
 
 namespace {
@@ -2169,7 +2086,7 @@ static void printGlobalMemrefOpTypeAndInitialValue(OpAsmPrinter &p,
   p << type;
   if (!op.isExternal()) {
     p << " = ";
-    if (op.isUnitialized())
+    if (op.isUninitialized())
       p << "uninitialized";
     else
       p.printAttributeWithoutType(initialValue);
@@ -2386,7 +2303,9 @@ bool MemRefCastOp::areCastCompatible(Type a, Type b) {
 }
 
 OpFoldResult MemRefCastOp::fold(ArrayRef<Attribute> operands) {
-  return impl::foldCastOp(*this);
+  if (Value folded = impl::foldCastOp(*this))
+    return folded;
+  return succeeded(foldMemRefCast(*this)) ? getResult() : Value();
 }
 
 //===----------------------------------------------------------------------===//
@@ -2882,6 +2801,113 @@ OpFoldResult SignedDivIOp::fold(ArrayRef<Attribute> operands) {
   });
 
   // Fold out division by one. Assumes all tensors of all ones are splats.
+  if (auto rhs = operands[1].dyn_cast_or_null<IntegerAttr>()) {
+    if (rhs.getValue() == 1)
+      return lhs();
+  } else if (auto rhs = operands[1].dyn_cast_or_null<SplatElementsAttr>()) {
+    if (rhs.getSplatValue<IntegerAttr>().getValue() == 1)
+      return lhs();
+  }
+
+  return overflowOrDiv0 ? Attribute() : result;
+}
+
+//===----------------------------------------------------------------------===//
+// SignedFloorDivIOp
+//===----------------------------------------------------------------------===//
+
+static APInt signedCeilNonnegInputs(APInt a, APInt b, bool &overflow) {
+  // Returns (a-1)/b + 1
+  APInt one(a.getBitWidth(), 1, true); // Signed value 1.
+  APInt val = a.ssub_ov(one, overflow).sdiv_ov(b, overflow);
+  return val.sadd_ov(one, overflow);
+}
+
+OpFoldResult SignedFloorDivIOp::fold(ArrayRef<Attribute> operands) {
+  assert(operands.size() == 2 && "binary operation takes two operands");
+
+  // Don't fold if it would overflow or if it requires a division by zero.
+  bool overflowOrDiv0 = false;
+  auto result = constFoldBinaryOp<IntegerAttr>(operands, [&](APInt a, APInt b) {
+    if (overflowOrDiv0 || !b) {
+      overflowOrDiv0 = true;
+      return a;
+    }
+    unsigned bits = a.getBitWidth();
+    APInt zero = APInt::getNullValue(bits);
+    if (a.sge(zero) && b.sgt(zero)) {
+      // Both positive (or a is zero), return a / b.
+      return a.sdiv_ov(b, overflowOrDiv0);
+    } else if (a.sle(zero) && b.slt(zero)) {
+      // Both negative (or a is zero), return -a / -b.
+      APInt posA = zero.ssub_ov(a, overflowOrDiv0);
+      APInt posB = zero.ssub_ov(b, overflowOrDiv0);
+      return posA.sdiv_ov(posB, overflowOrDiv0);
+    } else if (a.slt(zero) && b.sgt(zero)) {
+      // A is negative, b is positive, return - ceil(-a, b).
+      APInt posA = zero.ssub_ov(a, overflowOrDiv0);
+      APInt ceil = signedCeilNonnegInputs(posA, b, overflowOrDiv0);
+      return zero.ssub_ov(ceil, overflowOrDiv0);
+    } else {
+      // A is positive, b is negative, return - ceil(a, -b).
+      APInt posB = zero.ssub_ov(b, overflowOrDiv0);
+      APInt ceil = signedCeilNonnegInputs(a, posB, overflowOrDiv0);
+      return zero.ssub_ov(ceil, overflowOrDiv0);
+    }
+  });
+
+  // Fold out floor division by one. Assumes all tensors of all ones are
+  // splats.
+  if (auto rhs = operands[1].dyn_cast_or_null<IntegerAttr>()) {
+    if (rhs.getValue() == 1)
+      return lhs();
+  } else if (auto rhs = operands[1].dyn_cast_or_null<SplatElementsAttr>()) {
+    if (rhs.getSplatValue<IntegerAttr>().getValue() == 1)
+      return lhs();
+  }
+
+  return overflowOrDiv0 ? Attribute() : result;
+}
+
+//===----------------------------------------------------------------------===//
+// SignedCeilDivIOp
+//===----------------------------------------------------------------------===//
+
+OpFoldResult SignedCeilDivIOp::fold(ArrayRef<Attribute> operands) {
+  assert(operands.size() == 2 && "binary operation takes two operands");
+
+  // Don't fold if it would overflow or if it requires a division by zero.
+  bool overflowOrDiv0 = false;
+  auto result = constFoldBinaryOp<IntegerAttr>(operands, [&](APInt a, APInt b) {
+    if (overflowOrDiv0 || !b) {
+      overflowOrDiv0 = true;
+      return a;
+    }
+    unsigned bits = a.getBitWidth();
+    APInt zero = APInt::getNullValue(bits);
+    if (a.sgt(zero) && b.sgt(zero)) {
+      // Both positive, return ceil(a, b).
+      return signedCeilNonnegInputs(a, b, overflowOrDiv0);
+    } else if (a.slt(zero) && b.slt(zero)) {
+      // Both negative, return ceil(-a, -b).
+      APInt posA = zero.ssub_ov(a, overflowOrDiv0);
+      APInt posB = zero.ssub_ov(b, overflowOrDiv0);
+      return signedCeilNonnegInputs(posA, posB, overflowOrDiv0);
+    } else if (a.slt(zero) && b.sgt(zero)) {
+      // A is negative, b is positive, return - ( -a / b).
+      APInt posA = zero.ssub_ov(a, overflowOrDiv0);
+      APInt div = posA.sdiv_ov(b, overflowOrDiv0);
+      return zero.ssub_ov(div, overflowOrDiv0);
+    } else {
+      // A is positive (or zero), b is negative, return - (a / -b).
+      APInt posB = zero.ssub_ov(b, overflowOrDiv0);
+      APInt div = a.sdiv_ov(posB, overflowOrDiv0);
+      return zero.ssub_ov(div, overflowOrDiv0);
+    }
+  });
+
+  // Fold out floor division by one. Assumes all tensors of all ones are
+  // splats.
   if (auto rhs = operands[1].dyn_cast_or_null<IntegerAttr>()) {
     if (rhs.getValue() == 1)
       return lhs();

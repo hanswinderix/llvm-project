@@ -241,6 +241,9 @@ namespace CallingConv {
     /// The remainder matches the regular calling convention.
     WASM_EmscriptenInvoke = 99,
 
+    /// Calling convention used for AMD graphics targets.
+    AMDGPU_Gfx = 100,
+
     /// Calling convention used for Sancus entry functions.
     SANCUS_ENTRY = 1001,
     SANCUS_DISPATCH = 1002,

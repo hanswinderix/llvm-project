@@ -288,7 +288,7 @@ void SancusTransformation::createDispatchBody(Module &M, Function *D) {
 void SancusTransformation::createSancusModuleStruct(Module &M) {
   LLVMContext &Ctx = M.getContext();
   auto TyName = "struct.SancusModule";
-  auto SancusModuleTy = M.getTypeByName(TyName);
+  auto SancusModuleTy = StructType::getTypeByName(Ctx, TyName);
 
   if (SancusModuleTy == nullptr) {
     SancusModuleTy = StructType::create(Ctx, 

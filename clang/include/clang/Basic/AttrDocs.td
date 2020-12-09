@@ -79,7 +79,7 @@ relative ordering of values is important. For example:
 initialization being the opposite.
 
 This attribute is only supported for C++ and Objective-C++ and is ignored in
-other language modes.
+other language modes. Currently, this attribute is not implemented on z/OS.
   }];
 }
 
@@ -3508,6 +3508,29 @@ a caller of ``fetch_or_zero`` can provide null.
   }];
 }
 
+def TypeNullableResultDocs : Documentation {
+  let Category = NullabilityDocs;
+  let Content = [{
+The ``_Nullable_result`` nullability qualifier means that a value of the
+``_Nullable_result`` pointer can be ``nil``, just like ``_Nullable``. Where this
+attribute differs from ``_Nullable`` is when it's used on a parameter to a
+completion handler in a Swift async method. For instance, here:
+
+  .. code-block:: objc
+
+    -(void)fetchSomeDataWithID:(int)identifier
+             completionHandler:(void (^)(Data *_Nullable_result result, NSError *error))completionHandler;
+
+This method asynchronously calls ``completionHandler`` when the data is
+available, or calls it with an error. ``_Nullable_result`` indicates to the
+Swift importer that this is the uncommon case where ``result`` can get ``nil``
+even if no error has occured, and will therefore import it as a Swift optional
+type. Otherwise, if ``result`` was annotated with ``_Nullable``, the Swift
+importer will assume that ``result`` will always be non-nil unless an error
+occured.
+}];
+}
+
 def TypeNullUnspecifiedDocs : Documentation {
   let Category = NullabilityDocs;
   let Content = [{
@@ -3626,6 +3649,40 @@ def SwiftDocs : DocumentationCategory<"Customizing Swift Import"> {
 Clang supports additional attributes for customizing how APIs are imported into
 Swift.
   }];
+}
+
+def SwiftAsyncNameDocs : Documentation {
+  let Category = SwiftDocs;
+  let Heading = "swift_async_name";
+  let Content = [{
+The ``swift_async_name`` attribute provides the name of the ``async`` overload for
+the given declaration in Swift. If this attribute is absent, the name is
+transformed according to the algorithm built into the Swift compiler.
+
+The argument is a string literal that contains the Swift name of the function or
+method. The name may be a compound Swift name. The function or method with such
+an attribute must have more than zero parameters, as its last parameter is
+assumed to be a callback that's eliminated in the Swift ``async`` name.
+
+  .. code-block:: objc
+
+    @interface URL
+    + (void) loadContentsFrom:(URL *)url callback:(void (^)(NSData *))data __attribute__((__swift_async_name__("URL.loadContentsFrom(_:)")))
+    @end
+  }];
+}
+
+def SwiftAttrDocs : Documentation {
+  let Category = SwiftDocs;
+  let Heading = "swift_attr";
+  let Content = [{
+The ``swift_attr`` provides a Swift-specific annotation for the declaration
+to which the attribute appertains to. It can be used on any declaration
+in Clang. This kind of annotation is ignored by Clang as it doesn't have any
+semantic meaning in languages supported by Clang. The Swift compiler can
+interpret these annotations according to its own rules when importing C or
+Objective-C declarations.
+}];
 }
 
 def SwiftBridgeDocs : Documentation {
@@ -3937,10 +3994,6 @@ option.
     foo (int x); // stack protection will be disabled for foo.
 
     int bar(int y); // bar can be built with the stack protector.
-
-A callee that has a stack protector will not be inlined into a
-``__attribute__((no_stack_protector))`` caller, and vice-versa, even if the
-callee is marked ``__attribute__((always_inline))``.
 
     }];
 }
@@ -4344,6 +4397,37 @@ value of type ``T``.
 Making indirect results explicit in the signature allows C functions to
 directly construct objects into them without relying on language
 optimizations like C++'s named return value optimization (NRVO).
+  }];
+}
+
+def SwiftAsyncDocs : Documentation {
+  let Category = SwiftDocs;
+  let Heading = "swift_async";
+  let Content = [{
+The ``swift_async`` attribute specifies if and how a particular function or
+Objective-C method is imported into a swift async method. For instance:
+
+.. code-block:: objc
+
+  @interface MyClass : NSObject
+  -(void)notActuallyAsync:(int)p1 withCompletionHandler:(void (^)())handler
+      __attribute__((swift_async(none)));
+
+  -(void)actuallyAsync:(int)p1 callThisAsync:(void (^)())fun
+      __attribute__((swift_async(swift_private, 1)));
+  @end
+
+Here, ``notActuallyAsync:withCompletionHandler`` would have been imported as
+``async`` (because it's last parameter's selector piece is
+``withCompletionHandler``) if not for the ``swift_async(none)`` attribute.
+Conversely, ``actuallyAsync:callThisAsync`` wouldn't have been imported as
+``async`` if not for the ``swift_async`` attribute because it doesn't match the
+naming convention.
+
+When using ``swift_async`` to enable importing, the first argument to the
+attribute is either ``swift_private`` or ``not_swift_private`` to indicate
+whether the function/method is private to the current framework, and the second
+argument is the index of the completion handler parameter.
   }];
 }
 

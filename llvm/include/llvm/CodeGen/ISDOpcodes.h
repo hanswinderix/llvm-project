@@ -1012,6 +1012,9 @@ enum NodeType {
   /// DEBUGTRAP - Trap intended to get the attention of a debugger.
   DEBUGTRAP,
 
+  /// UBSANTRAP - Trap with an immediate describing the kind of sanitizer failure.
+  UBSANTRAP,
+
   /// PREFETCH - This corresponds to a prefetch intrinsic. The first operand
   /// is the chain.  The other operands are the address to prefetch,
   /// read / write specifier, locality specifier and instruction / data cache
@@ -1105,6 +1108,10 @@ enum NodeType {
   /// for some others (e.g. PowerPC, PowerPC64) that would be compile-time
   /// known nonzero constant. The only operand here is the chain.
   GET_DYNAMIC_AREA_OFFSET,
+
+  /// Pseudo probe for AutoFDO, as a place holder in a basic block to improve
+  /// the sample counts quality.
+  PSEUDO_PROBE,
 
   /// VSCALE(IMM) - Returns the runtime scaling factor used to calculate the
   /// number of elements within a scalable vector. IMM is a constant integer

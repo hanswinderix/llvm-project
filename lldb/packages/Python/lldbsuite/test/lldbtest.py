@@ -868,6 +868,11 @@ class Base(unittest2.TestCase):
         # List of log files produced by the current test.
         self.log_files = []
 
+        # Create the build directory.
+        # The logs are stored in the build directory, so we have to create it
+        # before creating the first log file.
+        self.makeBuildDir()
+
         session_file = self.getLogBasenameForCurrentTest()+".log"
         self.log_files.append(session_file)
 
@@ -929,8 +934,6 @@ class Base(unittest2.TestCase):
                 self.framework_dir = os.path.dirname(framework)
                 self.lib_lldb = lib
                 self.darwinWithFramework = self.platformIsDarwin()
-
-        self.makeBuildDir()
 
     def setAsync(self, value):
         """ Sets async mode to True/False and ensures it is reset after the testcase completes."""
@@ -1156,45 +1159,12 @@ class Base(unittest2.TestCase):
     def getRerunArgs(self):
         return " -f %s.%s" % (self.__class__.__name__, self._testMethodName)
 
-    def getLogBasenameForCurrentTest(self, prefix=None):
+    def getLogBasenameForCurrentTest(self, prefix="Incomplete"):
         """
         returns a partial path that can be used as the beginning of the name of multiple
         log files pertaining to this test
-
-        <session-dir>/<arch>-<compiler>-<test-file>.<test-class>.<test-method>
         """
-        dname = os.path.join(configuration.test_src_root,
-                             os.environ["LLDB_SESSION_DIRNAME"])
-        if not os.path.isdir(dname):
-            os.mkdir(dname)
-
-        components = []
-        if prefix is not None:
-            components.append(prefix)
-        for c in configuration.session_file_format:
-            if c == 'f':
-                components.append(self.__class__.__module__)
-            elif c == 'n':
-                components.append(self.__class__.__name__)
-            elif c == 'c':
-                compiler = self.getCompiler()
-
-                if compiler[1] == ':':
-                    compiler = compiler[2:]
-                if os.path.altsep is not None:
-                    compiler = compiler.replace(os.path.altsep, os.path.sep)
-                path_components = [x for x in compiler.split(os.path.sep) if x != ""]
-
-                # Add at most 4 path components to avoid generating very long
-                # filenames
-                components.extend(path_components[-4:])
-            elif c == 'a':
-                components.append(self.getArchitecture())
-            elif c == 'm':
-                components.append(self.testMethodName)
-        fname = "-".join(components)
-
-        return os.path.join(dname, fname)
+        return os.path.join(self.getBuildDir(), prefix)
 
     def dumpSessionInfo(self):
         """
@@ -1254,7 +1224,7 @@ class Base(unittest2.TestCase):
         # process the log files
         if prefix != 'Success' or lldbtest_config.log_success:
             # keep all log files, rename them to include prefix
-            src_log_basename = self.getLogBasenameForCurrentTest(None)
+            src_log_basename = self.getLogBasenameForCurrentTest()
             dst_log_basename = self.getLogBasenameForCurrentTest(prefix)
             for src in self.log_files:
                 if os.path.isfile(src):
@@ -1317,6 +1287,30 @@ class Base(unittest2.TestCase):
             return False
 
         return " sve " in cpuinfo
+
+    def hasLinuxVmFlags(self):
+        """ Check that the target machine has "VmFlags" lines in
+        its /proc/{pid}/smaps files."""
+
+        triple = self.dbg.GetSelectedPlatform().GetTriple()
+        if not re.match(".*-.*-linux", triple):
+            return False
+
+        self.runCmd('platform process list')
+        pid = None
+        for line in self.res.GetOutput().splitlines():
+            if 'lldb-server' in line:
+                pid = line.split(' ')[0]
+                break
+
+        if pid is None:
+            return False
+
+        smaps_path = self.getBuildArtifact('smaps')
+        self.runCmd('platform get-file "/proc/{}/smaps" {}'.format(pid, smaps_path))
+
+        with open(smaps_path, 'r') as f:
+            return "VmFlags" in f.read()
 
     def getArchitecture(self):
         """Returns the architecture in effect the test suite is running with."""

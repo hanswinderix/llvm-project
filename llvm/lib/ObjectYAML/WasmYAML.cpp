@@ -61,6 +61,7 @@ static void sectionMapping(IO &IO, WasmYAML::NameSection &Section) {
   commonSectionMapping(IO, Section);
   IO.mapRequired("Name", Section.Name);
   IO.mapOptional("FunctionNames", Section.FunctionNames);
+  IO.mapOptional("GlobalNames", Section.GlobalNames);
 }
 
 static void sectionMapping(IO &IO, WasmYAML::LinkingSection &Section) {
@@ -471,6 +472,7 @@ void ScalarEnumerationTraits<WasmYAML::ComdatKind>::enumeration(
 #define ECase(X) IO.enumCase(Kind, #X, wasm::WASM_COMDAT_##X);
   ECase(FUNCTION);
   ECase(DATA);
+  ECase(SECTION);
 #undef ECase
 }
 

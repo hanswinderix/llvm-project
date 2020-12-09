@@ -67,10 +67,15 @@ struct WasmLimits {
   uint64_t Maximum;
 };
 
-struct WasmTable {
-  uint32_t Index;
+struct WasmTableType {
   uint8_t ElemType;
   WasmLimits Limits;
+};
+
+struct WasmTable {
+  uint32_t Index;
+  WasmTableType Type;
+  StringRef SymbolName; // from the "linking" section
 };
 
 struct WasmInitExpr {
@@ -115,7 +120,7 @@ struct WasmImport {
   union {
     uint32_t SigIndex;
     WasmGlobalType Global;
-    WasmTable Table;
+    WasmTableType Table;
     WasmLimits Memory;
     WasmEventType Event;
   };
@@ -195,7 +200,13 @@ struct WasmSymbolInfo {
   };
 };
 
-struct WasmFunctionName {
+enum class NameType {
+  FUNCTION,
+  GLOBAL
+};
+
+struct WasmDebugName {
+  NameType Type;
   uint32_t Index;
   StringRef Name;
 };
@@ -252,6 +263,7 @@ enum : unsigned {
   WASM_OPCODE_END = 0x0b,
   WASM_OPCODE_CALL = 0x10,
   WASM_OPCODE_LOCAL_GET = 0x20,
+  WASM_OPCODE_LOCAL_SET = 0x21,
   WASM_OPCODE_GLOBAL_GET = 0x23,
   WASM_OPCODE_GLOBAL_SET = 0x24,
   WASM_OPCODE_I32_STORE = 0x36,
@@ -303,6 +315,7 @@ enum : uint8_t {
 enum : unsigned {
   WASM_NAMES_FUNCTION = 0x1,
   WASM_NAMES_LOCAL = 0x2,
+  WASM_NAMES_GLOBAL = 0x7,
 };
 
 // Kind codes used in the custom "linking" section
@@ -317,6 +330,8 @@ enum : unsigned {
 enum : unsigned {
   WASM_COMDAT_DATA = 0x0,
   WASM_COMDAT_FUNCTION = 0x1,
+  // GLOBAL, EVENT, and TABLE are in here but LLVM doesn't use them yet.
+  WASM_COMDAT_SECTION = 0x5,
 };
 
 // Kind codes used in the custom "linking" section in the WASM_SYMBOL_TABLE

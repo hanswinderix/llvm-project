@@ -57,7 +57,6 @@
 #include "llvm/ADT/TinyPtrVector.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/ADT/iterator_range.h"
-#include "llvm/Support/AlignOf.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
@@ -2087,6 +2086,10 @@ public:
   /// is a fixed-length representation of the SVE builtin for a specific
   /// vector-length.
   bool areCompatibleSveTypes(QualType FirstType, QualType SecondType);
+
+  /// Return true if the given vector types are lax-compatible SVE vector types,
+  /// false otherwise.
+  bool areLaxCompatibleSveTypes(QualType FirstType, QualType SecondType);
 
   /// Return true if the type has been explicitly qualified with ObjC ownership.
   /// A type may be implicitly qualified with ownership under ObjC ARC, and in

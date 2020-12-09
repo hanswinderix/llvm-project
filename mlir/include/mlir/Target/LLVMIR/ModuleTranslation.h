@@ -17,7 +17,7 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/Transforms/LegalizeForExport.h"
 #include "mlir/IR/Block.h"
-#include "mlir/IR/Module.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Target/LLVMIR/TypeTranslation.h"
 
@@ -91,7 +91,15 @@ protected:
                                             llvm::IRBuilder<> &builder);
   virtual LogicalResult convertOmpParallel(Operation &op,
                                            llvm::IRBuilder<> &builder);
-
+  virtual LogicalResult convertOmpMaster(Operation &op,
+                                         llvm::IRBuilder<> &builder);
+  void convertOmpOpRegions(Region &region,
+                           DenseMap<Value, llvm::Value *> &valueMapping,
+                           DenseMap<Block *, llvm::BasicBlock *> &blockMapping,
+                           llvm::Instruction *codeGenIPBBTI,
+                           llvm::BasicBlock &continuationIP,
+                           llvm::IRBuilder<> &builder,
+                           LogicalResult &bodyGenStatus);
   /// Converts the type from MLIR LLVM dialect to LLVM.
   llvm::Type *convertType(LLVMType type);
 

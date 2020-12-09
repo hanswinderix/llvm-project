@@ -18,10 +18,10 @@
 #include "mlir/Dialect/SPIRV/SPIRVTypes.h"
 #include "mlir/Dialect/SPIRV/TargetAndABI.h"
 #include "mlir/IR/Builders.h"
-#include "mlir/IR/Function.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/FunctionImplementation.h"
 #include "mlir/IR/OpImplementation.h"
-#include "mlir/IR/StandardTypes.h"
 #include "mlir/Interfaces/CallInterfaces.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/bit.h"
@@ -641,7 +641,7 @@ static Type getElementType(Type type, Attribute indices, OpAsmParser &parser,
   return getElementType(type, indices, errorFn);
 }
 
-/// Returns true if the given `block` only contains one `spv._merge` op.
+/// Returns true if the given `block` only contains one `spv.mlir.merge` op.
 static inline bool isMergeBlock(Block &block) {
   return !block.empty() && std::next(block.begin()) == block.end() &&
          isa<spirv::MergeOp>(block.front());
@@ -1036,7 +1036,7 @@ static LogicalResult verify(spirv::AccessChainOp accessChainOp) {
 }
 
 //===----------------------------------------------------------------------===//
-// spv._address_of
+// spv.mlir.addressof
 //===----------------------------------------------------------------------===//
 
 void spirv::AddressOfOp::build(OpBuilder &builder, OperationState &state,
@@ -1754,8 +1754,9 @@ static ParseResult parseFuncOp(OpAsmParser &parser, OperationState &state) {
 
   // Parse the optional function body.
   auto *body = state.addRegion();
-  return parser.parseOptionalRegion(
+  OptionalParseResult result = parser.parseOptionalRegion(
       *body, entryArgs, entryArgs.empty() ? ArrayRef<Type>() : argTypes);
+  return failure(result.hasValue() && failed(*result));
 }
 
 static void print(spirv::FuncOp fnOp, OpAsmPrinter &printer) {
@@ -2320,7 +2321,7 @@ static LogicalResult verify(spirv::LoopOp loopOp) {
   Block &merge = region.back();
   if (!isMergeBlock(merge))
     return loopOp.emitOpError(
-        "last block must be the merge block with only one 'spv._merge' op");
+        "last block must be the merge block with only one 'spv.mlir.merge' op");
 
   if (std::next(region.begin()) == region.end())
     return loopOp.emitOpError(
@@ -2397,12 +2398,12 @@ void spirv::LoopOp::addEntryAndMergeBlock() {
   body().push_back(mergeBlock);
   OpBuilder builder = OpBuilder::atBlockEnd(mergeBlock);
 
-  // Add a spv._merge op into the merge block.
+  // Add a spv.mlir.merge op into the merge block.
   builder.create<spirv::MergeOp>(getLoc());
 }
 
 //===----------------------------------------------------------------------===//
-// spv._merge
+// spv.mlir.merge
 //===----------------------------------------------------------------------===//
 
 static LogicalResult verify(spirv::MergeOp mergeOp) {
@@ -2571,7 +2572,7 @@ static LogicalResult verify(spirv::ModuleOp moduleOp) {
 }
 
 //===----------------------------------------------------------------------===//
-// spv._reference_of
+// spv.mlir.referenceof
 //===----------------------------------------------------------------------===//
 
 static LogicalResult verify(spirv::ReferenceOfOp referenceOfOp) {
@@ -2697,7 +2698,7 @@ static LogicalResult verify(spirv::SelectionOp selectionOp) {
   // The last block is the merge block.
   if (!isMergeBlock(region.back()))
     return selectionOp.emitOpError(
-        "last block must be the merge block with only one 'spv._merge' op");
+        "last block must be the merge block with only one 'spv.mlir.merge' op");
 
   if (std::next(region.begin()) == region.end())
     return selectionOp.emitOpError("must have a selection header block");
@@ -2723,7 +2724,7 @@ void spirv::SelectionOp::addMergeBlock() {
   body().push_back(mergeBlock);
   OpBuilder builder = OpBuilder::atBlockEnd(mergeBlock);
 
-  // Add a spv._merge op into the merge block.
+  // Add a spv.mlir.merge op into the merge block.
   builder.create<spirv::MergeOp>(getLoc());
 }
 
@@ -3390,6 +3391,87 @@ static LogicalResult verify(spirv::SpecConstantCompositeOp constOp) {
              << cType.getElementType(index) << ", but provided "
              << constituentSpecConstOp.default_value().getType();
   }
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// spv.mlir.yield
+//===----------------------------------------------------------------------===//
+
+static LogicalResult verify(spirv::YieldOp yieldOp) {
+  Operation *parentOp = yieldOp.getParentOp();
+
+  if (!parentOp || !isa<spirv::SpecConstantOperationOp>(parentOp))
+    return yieldOp.emitOpError(
+        "expected parent op to be 'spv.SpecConstantOperation'");
+
+  Block &block = parentOp->getRegion(0).getBlocks().front();
+  Operation &enclosedOp = block.getOperations().front();
+
+  if (yieldOp.getOperand().getDefiningOp() != &enclosedOp)
+    return yieldOp.emitOpError(
+        "expected operand to be defined by preceeding op");
+
+  return success();
+}
+
+static ParseResult parseSpecConstantOperationOp(OpAsmParser &parser,
+                                                OperationState &state) {
+  // TODO: For now, only generic form is supported.
+  return failure();
+}
+
+static void print(spirv::SpecConstantOperationOp op, OpAsmPrinter &printer) {
+  // TODO
+  printer.printGenericOp(op);
+}
+
+static LogicalResult verify(spirv::SpecConstantOperationOp constOp) {
+  Block &block = constOp.getRegion().getBlocks().front();
+
+  if (block.getOperations().size() != 2)
+    return constOp.emitOpError("expected exactly 2 nested ops");
+
+  Operation &yieldOp = block.getOperations().back();
+
+  if (!isa<spirv::YieldOp>(yieldOp))
+    return constOp.emitOpError("expected terminator to be a yield op");
+
+  Operation &enclosedOp = block.getOperations().front();
+
+  // TODO Add a `UsableInSpecConstantOp` trait and mark ops from the list below
+  // with it instead.
+  if (!isa<spirv::SConvertOp, spirv::UConvertOp, spirv::FConvertOp,
+           spirv::SNegateOp, spirv::NotOp, spirv::IAddOp, spirv::ISubOp,
+           spirv::IMulOp, spirv::UDivOp, spirv::SDivOp, spirv::UModOp,
+           spirv::SRemOp, spirv::SModOp, spirv::ShiftRightLogicalOp,
+           spirv::ShiftRightArithmeticOp, spirv::ShiftLeftLogicalOp,
+           spirv::BitwiseOrOp, spirv::BitwiseXorOp, spirv::BitwiseAndOp,
+           spirv::CompositeExtractOp, spirv::CompositeInsertOp,
+           spirv::LogicalOrOp, spirv::LogicalAndOp, spirv::LogicalNotOp,
+           spirv::LogicalEqualOp, spirv::LogicalNotEqualOp, spirv::SelectOp,
+           spirv::IEqualOp, spirv::INotEqualOp, spirv::ULessThanOp,
+           spirv::SLessThanOp, spirv::UGreaterThanOp, spirv::SGreaterThanOp,
+           spirv::ULessThanEqualOp, spirv::SLessThanEqualOp,
+           spirv::UGreaterThanEqualOp, spirv::SGreaterThanEqualOp>(enclosedOp))
+    return constOp.emitOpError("invalid enclosed op");
+
+  if (enclosedOp.getNumOperands() != constOp.getOperands().size())
+    return constOp.emitOpError("invalid number of operands; expected ")
+           << enclosedOp.getNumOperands() << ", actual "
+           << constOp.getOperands().size();
+
+  if (enclosedOp.getNumOperands() != constOp.getRegion().getNumArguments())
+    return constOp.emitOpError("invalid number of region arguments; expected ")
+           << enclosedOp.getNumOperands() << ", actual "
+           << constOp.getRegion().getNumArguments();
+
+  for (auto operand : constOp.getOperands())
+    if (!isa<spirv::ConstantOp, spirv::SpecConstantOp,
+             spirv::SpecConstantCompositeOp, spirv::SpecConstantOperationOp>(
+            operand.getDefiningOp()))
+      return constOp.emitOpError("invalid operand");
 
   return success();
 }

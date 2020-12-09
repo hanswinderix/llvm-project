@@ -3964,7 +3964,9 @@ void Driver::BuildJobs(Compilation &C) const {
         // CSV format.
         std::string Buffer;
         llvm::raw_string_ostream Out(Buffer);
-        Out << llvm::sys::path::filename(Cmd.getExecutable()) << ',';
+        llvm::sys::printArg(Out, llvm::sys::path::filename(Cmd.getExecutable()),
+                            /*Quote*/ true);
+        Out << ',';
         if (Cmd.getOutputFilenames().empty())
           Out << "\"\"";
         else
@@ -4692,9 +4694,16 @@ static bool HasPreprocessOutput(const Action &JA) {
 
 const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
                                        const char *BaseInput,
-                                       StringRef BoundArch, bool AtTopLevel,
+                                       StringRef OrigBoundArch, bool AtTopLevel,
                                        bool MultipleArchs,
                                        StringRef OffloadingPrefix) const {
+  std::string BoundArch = OrigBoundArch.str();
+#if defined(_WIN32)
+  // BoundArch may contains ':', which is invalid in file names on Windows,
+  // therefore replace it with '%'.
+  std::replace(BoundArch.begin(), BoundArch.end(), ':', '@');
+#endif
+
   llvm::PrettyStackTraceString CrashInfo("Computing output path");
   // Output to a user requested destination?
   if (AtTopLevel && !isa<DsymutilJobAction>(JA) && !isa<VerifyJobAction>(JA)) {
@@ -5204,7 +5213,11 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
         break;
       case llvm::Triple::riscv32:
       case llvm::Triple::riscv64:
-        TC = std::make_unique<toolchains::RISCVToolChain>(*this, Target, Args);
+        if (toolchains::RISCVToolChain::hasGCCToolchain(*this, Args))
+          TC =
+              std::make_unique<toolchains::RISCVToolChain>(*this, Target, Args);
+        else
+          TC = std::make_unique<toolchains::BareMetal>(*this, Target, Args);
         break;
       case llvm::Triple::ve:
         TC = std::make_unique<toolchains::VEToolChain>(*this, Target, Args);

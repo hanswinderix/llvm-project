@@ -1856,7 +1856,7 @@ private:
 
   llvm::BasicBlock *TerminateLandingPad = nullptr;
   llvm::BasicBlock *TerminateHandler = nullptr;
-  llvm::BasicBlock *TrapBB = nullptr;
+  llvm::SmallVector<llvm::BasicBlock *, 2> TrapBBs;
 
   /// Terminate funclets keyed by parent funclet pad.
   llvm::MapVector<llvm::Value *, llvm::BasicBlock *> TerminateFunclets;
@@ -4120,10 +4120,7 @@ public:
                                llvm::AtomicOrdering &AO,
                                llvm::SyncScope::ID &SSID);
 
-private:
   enum class MSVCIntrin;
-
-public:
   llvm::Value *EmitMSVCBuiltinExpr(MSVCIntrin BuiltinID, const CallExpr *E);
 
   llvm::Value *EmitBuiltinAvailable(const VersionTuple &Version);
@@ -4304,7 +4301,7 @@ public:
   void registerGlobalDtorWithAtExit(llvm::Constant *dtorStub);
 
   /// Call unatexit() with function dtorStub.
-  llvm::Value *unregisterGlobalDtorWithUnAtExit(llvm::Function *dtorStub);
+  llvm::Value *unregisterGlobalDtorWithUnAtExit(llvm::Constant *dtorStub);
 
   /// Emit code in this function to perform a guarded variable
   /// initialization.  Guarded initializations are used when it's not
@@ -4468,7 +4465,7 @@ public:
 
   /// Create a basic block that will call the trap intrinsic, and emit a
   /// conditional branch to it, for the -ftrapv checks.
-  void EmitTrapCheck(llvm::Value *Checked);
+  void EmitTrapCheck(llvm::Value *Checked, SanitizerHandler CheckHandlerID);
 
   /// Emit a call to trap or debugtrap and attach function attribute
   /// "trap-func-name" if specified.

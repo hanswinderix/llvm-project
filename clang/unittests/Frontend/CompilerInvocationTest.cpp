@@ -88,7 +88,9 @@ TEST_F(CommandLineTest, BoolOptionDefaultTruePresentNone) {
   ASSERT_FALSE(Diags->hasErrorOccurred());
   ASSERT_TRUE(Invocation.getCodeGenOpts().Autolink);
 
-  // TODO: Test argument generation.
+  Invocation.generateCC1CommandLine(GeneratedArgs, *this);
+  ASSERT_THAT(GeneratedArgs, Not(Contains(StrEq("-fautolink"))));
+  ASSERT_THAT(GeneratedArgs, Not(Contains(StrEq("-fno-autolink"))));
 }
 
 TEST_F(CommandLineTest, BoolOptionDefaultTruePresentNegChange) {
@@ -98,7 +100,9 @@ TEST_F(CommandLineTest, BoolOptionDefaultTruePresentNegChange) {
   ASSERT_FALSE(Diags->hasErrorOccurred());
   ASSERT_FALSE(Invocation.getCodeGenOpts().Autolink);
 
-  // TODO: Test argument generation.
+  Invocation.generateCC1CommandLine(GeneratedArgs, *this);
+  ASSERT_THAT(GeneratedArgs, Contains(StrEq("-fno-autolink")));
+  ASSERT_THAT(GeneratedArgs, Not(Contains(StrEq("-fautolink"))));
 }
 
 TEST_F(CommandLineTest, BoolOptionDefaultTruePresentPosReset) {
@@ -120,7 +124,9 @@ TEST_F(CommandLineTest, BoolOptionDefaultFalsePresentNone) {
   ASSERT_FALSE(Diags->hasErrorOccurred());
   ASSERT_FALSE(Invocation.getCodeGenOpts().NoInlineLineTables);
 
-  // TODO: Test argument generation.
+  Invocation.generateCC1CommandLine(GeneratedArgs, *this);
+  ASSERT_THAT(GeneratedArgs, Not(Contains(StrEq("-ginline-line-tables"))));
+  ASSERT_THAT(GeneratedArgs, Not(Contains(StrEq("-gno-inline-line-tables"))));
 }
 
 TEST_F(CommandLineTest, BoolOptionDefaultFalsePresentNegChange) {
@@ -130,7 +136,9 @@ TEST_F(CommandLineTest, BoolOptionDefaultFalsePresentNegChange) {
   ASSERT_FALSE(Diags->hasErrorOccurred());
   ASSERT_TRUE(Invocation.getCodeGenOpts().NoInlineLineTables);
 
-  // TODO: Test argument generation.
+  Invocation.generateCC1CommandLine(GeneratedArgs, *this);
+  ASSERT_THAT(GeneratedArgs, Contains(StrEq("-gno-inline-line-tables")));
+  ASSERT_THAT(GeneratedArgs, Not(Contains(StrEq("-ginline-line-tables"))));
 }
 
 TEST_F(CommandLineTest, BoolOptionDefaultFalsePresentPosReset) {
@@ -152,7 +160,9 @@ TEST_F(CommandLineTest, BoolOptionDefaultFalsePresentNoneX) {
   ASSERT_FALSE(Diags->hasErrorOccurred());
   ASSERT_FALSE(Invocation.getCodeGenOpts().CodeViewGHash);
 
-  // TODO: Test argument generation.
+  Invocation.generateCC1CommandLine(GeneratedArgs, *this);
+  ASSERT_THAT(GeneratedArgs, Not(Contains(StrEq("-gcodeview-ghash"))));
+  ASSERT_THAT(GeneratedArgs, Not(Contains(StrEq("-gno-codeview-ghash"))));
 }
 
 TEST_F(CommandLineTest, BoolOptionDefaultFalsePresentPosChange) {
@@ -162,7 +172,9 @@ TEST_F(CommandLineTest, BoolOptionDefaultFalsePresentPosChange) {
   ASSERT_FALSE(Diags->hasErrorOccurred());
   ASSERT_TRUE(Invocation.getCodeGenOpts().CodeViewGHash);
 
-  // TODO: Test argument generation.
+  Invocation.generateCC1CommandLine(GeneratedArgs, *this);
+  ASSERT_THAT(GeneratedArgs, Contains(StrEq("-gcodeview-ghash")));
+  ASSERT_THAT(GeneratedArgs, Not(Contains(StrEq("-gno-codeview-ghash"))));
 }
 
 TEST_F(CommandLineTest, BoolOptionDefaultFalsePresentNegReset) {
@@ -177,8 +189,16 @@ TEST_F(CommandLineTest, BoolOptionDefaultFalsePresentNegReset) {
 // The flag with positive spelling can set the keypath to true.
 // The flag with negative spelling can set the keypath to false.
 
-// NOTE: The following tests need to be updated when we start enabling the new
-// pass manager by default.
+static constexpr unsigned PassManagerDefault =
+    !static_cast<unsigned>(LLVM_ENABLE_NEW_PASS_MANAGER);
+
+static constexpr const char *PassManagerResetByFlag =
+    LLVM_ENABLE_NEW_PASS_MANAGER ? "-fno-legacy-pass-manager"
+                                 : "-flegacy-pass-manager";
+
+static constexpr const char *PassManagerChangedByFlag =
+    LLVM_ENABLE_NEW_PASS_MANAGER ? "-flegacy-pass-manager"
+                                 : "-fno-legacy-pass-manager";
 
 TEST_F(CommandLineTest, BoolOptionDefaultArbitraryTwoFlagsPresentNone) {
   const char *Args = {""};
@@ -186,39 +206,36 @@ TEST_F(CommandLineTest, BoolOptionDefaultArbitraryTwoFlagsPresentNone) {
   CompilerInvocation::CreateFromArgs(Invocation, Args, *Diags);
 
   ASSERT_FALSE(Diags->hasErrorOccurred());
-  ASSERT_FALSE(Invocation.getCodeGenOpts().ExperimentalNewPassManager);
+  ASSERT_EQ(Invocation.getCodeGenOpts().LegacyPassManager, PassManagerDefault);
 
   Invocation.generateCC1CommandLine(GeneratedArgs, *this);
-  ASSERT_THAT(GeneratedArgs,
-              Not(Contains(StrEq("-fexperimental-new-pass-manager"))));
+
+  ASSERT_THAT(GeneratedArgs, Not(Contains(StrEq(PassManagerResetByFlag))));
+  ASSERT_THAT(GeneratedArgs, Not(Contains(StrEq(PassManagerChangedByFlag))));
 }
 
-TEST_F(CommandLineTest, BoolOptionDefaultArbitraryTwoFlagsPresentPos) {
-  const char *Args[] = {"-fexperimental-new-pass-manager"};
+TEST_F(CommandLineTest, BoolOptionDefaultArbitraryTwoFlagsPresentChange) {
+  const char *Args[] = {PassManagerChangedByFlag};
 
   CompilerInvocation::CreateFromArgs(Invocation, Args, *Diags);
   ASSERT_FALSE(Diags->hasErrorOccurred());
-  ASSERT_TRUE(Invocation.getCodeGenOpts().ExperimentalNewPassManager);
+  ASSERT_EQ(Invocation.getCodeGenOpts().LegacyPassManager, !PassManagerDefault);
 
   Invocation.generateCC1CommandLine(GeneratedArgs, *this);
-  ASSERT_THAT(GeneratedArgs,
-              Contains(StrEq("-fexperimental-new-pass-manager")));
-  ASSERT_THAT(GeneratedArgs,
-              Not(Contains(StrEq("-fno-experimental-new-pass-manager"))));
+  ASSERT_THAT(GeneratedArgs, Contains(StrEq(PassManagerChangedByFlag)));
+  ASSERT_THAT(GeneratedArgs, Not(Contains(StrEq(PassManagerResetByFlag))));
 }
 
-TEST_F(CommandLineTest, BoolOptionDefaultArbitraryTwoFlagsPresentNeg) {
-  const char *Args[] = {"-fno-experimental-new-pass-manager"};
+TEST_F(CommandLineTest, BoolOptionDefaultArbitraryTwoFlagsPresentReset) {
+  const char *Args[] = {PassManagerResetByFlag};
 
   CompilerInvocation::CreateFromArgs(Invocation, Args, *Diags);
   ASSERT_FALSE(Diags->hasErrorOccurred());
-  ASSERT_FALSE(Invocation.getCodeGenOpts().ExperimentalNewPassManager);
+  ASSERT_EQ(Invocation.getCodeGenOpts().LegacyPassManager, PassManagerDefault);
 
   Invocation.generateCC1CommandLine(GeneratedArgs, *this);
-  ASSERT_THAT(GeneratedArgs,
-              Contains(StrEq("-fno-experimental-new-pass-manager")));
-  ASSERT_THAT(GeneratedArgs,
-              Not(Contains(StrEq("-fexperimental-new-pass-manager"))));
+  ASSERT_THAT(GeneratedArgs, Not(Contains(StrEq(PassManagerResetByFlag))));
+  ASSERT_THAT(GeneratedArgs, Not(Contains(StrEq(PassManagerChangedByFlag))));
 }
 
 TEST_F(CommandLineTest, CanGenerateCC1CommandLineFlag) {

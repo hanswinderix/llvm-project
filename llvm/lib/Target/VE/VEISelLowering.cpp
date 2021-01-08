@@ -13,6 +13,7 @@
 
 #include "VEISelLowering.h"
 #include "MCTargetDesc/VEMCExpr.h"
+#include "VEInstrBuilder.h"
 #include "VEMachineFunctionInfo.h"
 #include "VERegisterInfo.h"
 #include "VETargetMachine.h"
@@ -73,8 +74,6 @@ bool VETargetLowering::CanLowerReturn(
 static const MVT AllVectorVTs[] = {MVT::v256i32, MVT::v512i32, MVT::v256i64,
                                    MVT::v256f32, MVT::v512f32, MVT::v256f64};
 
-static const MVT AllMaskVTs[] = {MVT::v256i1, MVT::v512i1};
-
 void VETargetLowering::initRegisterClasses() {
   // Set up the register classes.
   addRegisterClass(MVT::i32, &VE::I32RegClass);
@@ -86,8 +85,8 @@ void VETargetLowering::initRegisterClasses() {
   if (Subtarget->enableVPU()) {
     for (MVT VecVT : AllVectorVTs)
       addRegisterClass(VecVT, &VE::V64RegClass);
-    for (MVT MaskVT : AllMaskVTs)
-      addRegisterClass(MaskVT, &VE::VMRegClass);
+    addRegisterClass(MVT::v256i1, &VE::VMRegClass);
+    addRegisterClass(MVT::v512i1, &VE::VM512RegClass);
   }
 }
 
@@ -137,6 +136,10 @@ void VETargetLowering::initSPUActions() {
   /// Stack {
   setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i32, Custom);
   setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i64, Custom);
+
+  // Use the default implementation.
+  setOperationAction(ISD::STACKSAVE, MVT::Other, Expand);
+  setOperationAction(ISD::STACKRESTORE, MVT::Other, Expand);
   /// } Stack
 
   /// Branch {
@@ -250,7 +253,40 @@ void VETargetLowering::initSPUActions() {
   // Use custom inserter for ATOMIC_FENCE.
   setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Custom);
 
-  /// } Atomic isntructions
+  // Other atomic instructions.
+  for (MVT VT : MVT::integer_valuetypes()) {
+    // Support i8/i16 atomic swap.
+    setOperationAction(ISD::ATOMIC_SWAP, VT, Custom);
+
+    // FIXME: Support "atmam" instructions.
+    setOperationAction(ISD::ATOMIC_LOAD_ADD, VT, Expand);
+    setOperationAction(ISD::ATOMIC_LOAD_SUB, VT, Expand);
+    setOperationAction(ISD::ATOMIC_LOAD_AND, VT, Expand);
+    setOperationAction(ISD::ATOMIC_LOAD_OR, VT, Expand);
+
+    // VE doesn't have follwing instructions.
+    setOperationAction(ISD::ATOMIC_CMP_SWAP_WITH_SUCCESS, VT, Expand);
+    setOperationAction(ISD::ATOMIC_LOAD_CLR, VT, Expand);
+    setOperationAction(ISD::ATOMIC_LOAD_XOR, VT, Expand);
+    setOperationAction(ISD::ATOMIC_LOAD_NAND, VT, Expand);
+    setOperationAction(ISD::ATOMIC_LOAD_MIN, VT, Expand);
+    setOperationAction(ISD::ATOMIC_LOAD_MAX, VT, Expand);
+    setOperationAction(ISD::ATOMIC_LOAD_UMIN, VT, Expand);
+    setOperationAction(ISD::ATOMIC_LOAD_UMAX, VT, Expand);
+  }
+
+  /// } Atomic instructions
+
+  /// SJLJ instructions {
+  setOperationAction(ISD::EH_SJLJ_LONGJMP, MVT::Other, Custom);
+  setOperationAction(ISD::EH_SJLJ_SETJMP, MVT::i32, Custom);
+  setOperationAction(ISD::EH_SJLJ_SETUP_DISPATCH, MVT::Other, Custom);
+  if (TM.Options.ExceptionModel == ExceptionHandling::SjLj)
+    setLibcallName(RTLIB::UNWIND_RESUME, "_Unwind_SjLj_Resume");
+  /// } SJLJ instructions
+
+  // Intrinsic instructions
+  setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::Other, Custom);
 }
 
 void VETargetLowering::initVPUActions() {
@@ -290,6 +326,7 @@ VETargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
   for (unsigned i = 0; i != RVLocs.size(); ++i) {
     CCValAssign &VA = RVLocs[i];
     assert(VA.isRegLoc() && "Can only return in registers!");
+    assert(!VA.needsCustom() && "Unexpected custom lowering");
     SDValue OutVal = OutVals[i];
 
     // Integer return values must be sign or zero extended by the callee.
@@ -324,8 +361,6 @@ VETargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
     default:
       llvm_unreachable("Unknown loc info!");
     }
-
-    assert(!VA.needsCustom() && "Unexpected custom lowering");
 
     Chain = DAG.getCopyToReg(Chain, DL, VA.getLocReg(), OutVal, Flag);
 
@@ -366,6 +401,7 @@ SDValue VETargetLowering::LowerFormalArguments(
 
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
     CCValAssign &VA = ArgLocs[i];
+    assert(!VA.needsCustom() && "Unexpected custom lowering");
     if (VA.isRegLoc()) {
       // This argument is passed in a register.
       // All integer register arguments are promoted by the caller to i64.
@@ -374,11 +410,6 @@ SDValue VETargetLowering::LowerFormalArguments(
       unsigned VReg =
           MF.addLiveIn(VA.getLocReg(), getRegClassFor(VA.getLocVT()));
       SDValue Arg = DAG.getCopyFromReg(Chain, DL, VReg, VA.getLocVT());
-
-      // Get the high bits for i32 struct elements.
-      if (VA.getValVT() == MVT::i32 && VA.needsCustom())
-        Arg = DAG.getNode(ISD::SRL, DL, VA.getLocVT(), Arg,
-                          DAG.getConstant(32, DL, MVT::i32));
 
       // The caller promoted the argument, so insert an Assert?ext SDNode so we
       // won't promote the value again in this function.
@@ -710,6 +741,7 @@ SDValue VETargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   // Copy all of the result registers out of their specified physreg.
   for (unsigned i = 0; i != RVLocs.size(); ++i) {
     CCValAssign &VA = RVLocs[i];
+    assert(!VA.needsCustom() && "Unexpected custom lowering");
     unsigned Reg = VA.getLocReg();
 
     // When returning 'inreg {i32, i32 }', two consecutive i32 arguments can
@@ -726,11 +758,6 @@ SDValue VETargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
       Chain = RV.getValue(1);
       InGlue = Chain.getValue(2);
     }
-
-    // Get the high bits for i32 struct elements.
-    if (VA.getValVT() == MVT::i32 && VA.needsCustom())
-      RV = DAG.getNode(ISD::SRL, DL, VA.getLocVT(), RV,
-                       DAG.getConstant(32, DL, MVT::i32));
 
     // The callee promoted the return value, so insert an Assert?ext SDNode so
     // we won't promote the value again in this function.
@@ -845,16 +872,20 @@ const char *VETargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch ((VEISD::NodeType)Opcode) {
   case VEISD::FIRST_NUMBER:
     break;
-    TARGET_NODE_CASE(Lo)
-    TARGET_NODE_CASE(Hi)
+    TARGET_NODE_CASE(CALL)
+    TARGET_NODE_CASE(EH_SJLJ_LONGJMP)
+    TARGET_NODE_CASE(EH_SJLJ_SETJMP)
+    TARGET_NODE_CASE(EH_SJLJ_SETUP_DISPATCH)
     TARGET_NODE_CASE(GETFUNPLT)
     TARGET_NODE_CASE(GETSTACKTOP)
     TARGET_NODE_CASE(GETTLSADDR)
-    TARGET_NODE_CASE(MEMBARRIER)
-    TARGET_NODE_CASE(CALL)
-    TARGET_NODE_CASE(VEC_BROADCAST)
-    TARGET_NODE_CASE(RET_FLAG)
     TARGET_NODE_CASE(GLOBAL_BASE_REG)
+    TARGET_NODE_CASE(Hi)
+    TARGET_NODE_CASE(Lo)
+    TARGET_NODE_CASE(MEMBARRIER)
+    TARGET_NODE_CASE(RET_FLAG)
+    TARGET_NODE_CASE(TS1AM)
+    TARGET_NODE_CASE(VEC_BROADCAST)
 
     // Register the VVP_* SDNodes.
 #define ADD_VVP_OP(VVP_NAME, ...) TARGET_NODE_CASE(VVP_NAME)
@@ -1038,6 +1069,116 @@ SDValue VETargetLowering::lowerATOMIC_FENCE(SDValue Op,
 
   // MEMBARRIER is a compiler barrier; it codegens to a no-op.
   return DAG.getNode(VEISD::MEMBARRIER, DL, MVT::Other, Op.getOperand(0));
+}
+
+TargetLowering::AtomicExpansionKind
+VETargetLowering::shouldExpandAtomicRMWInIR(AtomicRMWInst *AI) const {
+  // We have TS1AM implementation for i8/i16/i32/i64, so use it.
+  if (AI->getOperation() == AtomicRMWInst::Xchg) {
+    return AtomicExpansionKind::None;
+  }
+  // FIXME: Support "ATMAM" instruction for LOAD_ADD/SUB/AND/OR.
+
+  // Otherwise, expand it using compare and exchange instruction to not call
+  // __sync_fetch_and_* functions.
+  return AtomicExpansionKind::CmpXChg;
+}
+
+static SDValue prepareTS1AM(SDValue Op, SelectionDAG &DAG, SDValue &Flag,
+                            SDValue &Bits) {
+  SDLoc DL(Op);
+  AtomicSDNode *N = cast<AtomicSDNode>(Op);
+  SDValue Ptr = N->getOperand(1);
+  SDValue Val = N->getOperand(2);
+  EVT PtrVT = Ptr.getValueType();
+  bool Byte = N->getMemoryVT() == MVT::i8;
+  //   Remainder = AND Ptr, 3
+  //   Flag = 1 << Remainder  ; If Byte is true (1 byte swap flag)
+  //   Flag = 3 << Remainder  ; If Byte is false (2 bytes swap flag)
+  //   Bits = Remainder << 3
+  //   NewVal = Val << Bits
+  SDValue Const3 = DAG.getConstant(3, DL, PtrVT);
+  SDValue Remainder = DAG.getNode(ISD::AND, DL, PtrVT, {Ptr, Const3});
+  SDValue Mask = Byte ? DAG.getConstant(1, DL, MVT::i32)
+                      : DAG.getConstant(3, DL, MVT::i32);
+  Flag = DAG.getNode(ISD::SHL, DL, MVT::i32, {Mask, Remainder});
+  Bits = DAG.getNode(ISD::SHL, DL, PtrVT, {Remainder, Const3});
+  return DAG.getNode(ISD::SHL, DL, Val.getValueType(), {Val, Bits});
+}
+
+static SDValue finalizeTS1AM(SDValue Op, SelectionDAG &DAG, SDValue Data,
+                             SDValue Bits) {
+  SDLoc DL(Op);
+  EVT VT = Data.getValueType();
+  bool Byte = cast<AtomicSDNode>(Op)->getMemoryVT() == MVT::i8;
+  //   NewData = Data >> Bits
+  //   Result = NewData & 0xff   ; If Byte is true (1 byte)
+  //   Result = NewData & 0xffff ; If Byte is false (2 bytes)
+
+  SDValue NewData = DAG.getNode(ISD::SRL, DL, VT, Data, Bits);
+  return DAG.getNode(ISD::AND, DL, VT,
+                     {NewData, DAG.getConstant(Byte ? 0xff : 0xffff, DL, VT)});
+}
+
+SDValue VETargetLowering::lowerATOMIC_SWAP(SDValue Op,
+                                           SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  AtomicSDNode *N = cast<AtomicSDNode>(Op);
+
+  if (N->getMemoryVT() == MVT::i8) {
+    // For i8, use "ts1am"
+    //   Input:
+    //     ATOMIC_SWAP Ptr, Val, Order
+    //
+    //   Output:
+    //     Remainder = AND Ptr, 3
+    //     Flag = 1 << Remainder   ; 1 byte swap flag for TS1AM inst.
+    //     Bits = Remainder << 3
+    //     NewVal = Val << Bits
+    //
+    //     Aligned = AND Ptr, -4
+    //     Data = TS1AM Aligned, Flag, NewVal
+    //
+    //     NewData = Data >> Bits
+    //     Result = NewData & 0xff ; 1 byte result
+    SDValue Flag;
+    SDValue Bits;
+    SDValue NewVal = prepareTS1AM(Op, DAG, Flag, Bits);
+
+    SDValue Ptr = N->getOperand(1);
+    SDValue Aligned = DAG.getNode(ISD::AND, DL, Ptr.getValueType(),
+                                  {Ptr, DAG.getConstant(-4, DL, MVT::i64)});
+    SDValue TS1AM = DAG.getAtomic(VEISD::TS1AM, DL, N->getMemoryVT(),
+                                  DAG.getVTList(Op.getNode()->getValueType(0),
+                                                Op.getNode()->getValueType(1)),
+                                  {N->getChain(), Aligned, Flag, NewVal},
+                                  N->getMemOperand());
+
+    SDValue Result = finalizeTS1AM(Op, DAG, TS1AM, Bits);
+    SDValue Chain = TS1AM.getValue(1);
+    return DAG.getMergeValues({Result, Chain}, DL);
+  }
+  if (N->getMemoryVT() == MVT::i16) {
+    // For i16, use "ts1am"
+    SDValue Flag;
+    SDValue Bits;
+    SDValue NewVal = prepareTS1AM(Op, DAG, Flag, Bits);
+
+    SDValue Ptr = N->getOperand(1);
+    SDValue Aligned = DAG.getNode(ISD::AND, DL, Ptr.getValueType(),
+                                  {Ptr, DAG.getConstant(-4, DL, MVT::i64)});
+    SDValue TS1AM = DAG.getAtomic(VEISD::TS1AM, DL, N->getMemoryVT(),
+                                  DAG.getVTList(Op.getNode()->getValueType(0),
+                                                Op.getNode()->getValueType(1)),
+                                  {N->getChain(), Aligned, Flag, NewVal},
+                                  N->getMemOperand());
+
+    SDValue Result = finalizeTS1AM(Op, DAG, TS1AM, Bits);
+    SDValue Chain = TS1AM.getValue(1);
+    return DAG.getMergeValues({Result, Chain}, DL);
+  }
+  // Otherwise, let llvm legalize it.
+  return Op;
 }
 
 SDValue VETargetLowering::lowerGlobalAddress(SDValue Op,
@@ -1358,6 +1499,100 @@ SDValue VETargetLowering::lowerDYNAMIC_STACKALLOC(SDValue Op,
   return DAG.getMergeValues(Ops, DL);
 }
 
+SDValue VETargetLowering::lowerEH_SJLJ_LONGJMP(SDValue Op,
+                                               SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  return DAG.getNode(VEISD::EH_SJLJ_LONGJMP, DL, MVT::Other, Op.getOperand(0),
+                     Op.getOperand(1));
+}
+
+SDValue VETargetLowering::lowerEH_SJLJ_SETJMP(SDValue Op,
+                                              SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  return DAG.getNode(VEISD::EH_SJLJ_SETJMP, DL,
+                     DAG.getVTList(MVT::i32, MVT::Other), Op.getOperand(0),
+                     Op.getOperand(1));
+}
+
+SDValue VETargetLowering::lowerEH_SJLJ_SETUP_DISPATCH(SDValue Op,
+                                                      SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  return DAG.getNode(VEISD::EH_SJLJ_SETUP_DISPATCH, DL, MVT::Other,
+                     Op.getOperand(0));
+}
+
+static SDValue lowerFRAMEADDR(SDValue Op, SelectionDAG &DAG,
+                              const VETargetLowering &TLI,
+                              const VESubtarget *Subtarget) {
+  SDLoc DL(Op);
+  MachineFunction &MF = DAG.getMachineFunction();
+  EVT PtrVT = TLI.getPointerTy(MF.getDataLayout());
+
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  MFI.setFrameAddressIsTaken(true);
+
+  unsigned Depth = Op.getConstantOperandVal(0);
+  const VERegisterInfo *RegInfo = Subtarget->getRegisterInfo();
+  unsigned FrameReg = RegInfo->getFrameRegister(MF);
+  SDValue FrameAddr =
+      DAG.getCopyFromReg(DAG.getEntryNode(), DL, FrameReg, PtrVT);
+  while (Depth--)
+    FrameAddr = DAG.getLoad(Op.getValueType(), DL, DAG.getEntryNode(),
+                            FrameAddr, MachinePointerInfo());
+  return FrameAddr;
+}
+
+static SDValue lowerRETURNADDR(SDValue Op, SelectionDAG &DAG,
+                               const VETargetLowering &TLI,
+                               const VESubtarget *Subtarget) {
+  MachineFunction &MF = DAG.getMachineFunction();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  MFI.setReturnAddressIsTaken(true);
+
+  if (TLI.verifyReturnAddressArgumentIsConstant(Op, DAG))
+    return SDValue();
+
+  SDValue FrameAddr = lowerFRAMEADDR(Op, DAG, TLI, Subtarget);
+
+  SDLoc DL(Op);
+  EVT VT = Op.getValueType();
+  SDValue Offset = DAG.getConstant(8, DL, VT);
+  return DAG.getLoad(VT, DL, DAG.getEntryNode(),
+                     DAG.getNode(ISD::ADD, DL, VT, FrameAddr, Offset),
+                     MachinePointerInfo());
+}
+
+SDValue VETargetLowering::lowerINTRINSIC_WO_CHAIN(SDValue Op,
+                                                  SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  unsigned IntNo = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
+  switch (IntNo) {
+  default: // Don't custom lower most intrinsics.
+    return SDValue();
+  case Intrinsic::eh_sjlj_lsda: {
+    MachineFunction &MF = DAG.getMachineFunction();
+    MVT VT = Op.getSimpleValueType();
+    const VETargetMachine *TM =
+        static_cast<const VETargetMachine *>(&DAG.getTarget());
+
+    // Create GCC_except_tableXX string.  The real symbol for that will be
+    // generated in EHStreamer::emitExceptionTable() later.  So, we just
+    // borrow it's name here.
+    TM->getStrList()->push_back(std::string(
+        (Twine("GCC_except_table") + Twine(MF.getFunctionNumber())).str()));
+    SDValue Addr =
+        DAG.getTargetExternalSymbol(TM->getStrList()->back().c_str(), VT, 0);
+    if (isPositionIndependent()) {
+      Addr = makeHiLoPair(Addr, VEMCExpr::VK_VE_GOTOFF_HI32,
+                          VEMCExpr::VK_VE_GOTOFF_LO32, DAG);
+      SDValue GlobalBase = DAG.getNode(VEISD::GLOBAL_BASE_REG, DL, VT);
+      return DAG.getNode(ISD::ADD, DL, VT, GlobalBase, Addr);
+    }
+    return makeHiLoPair(Addr, VEMCExpr::VK_VE_HI32, VEMCExpr::VK_VE_LO32, DAG);
+  }
+  }
+}
+
 static SDValue getSplatValue(SDNode *N) {
   if (auto *BuildVec = dyn_cast<BuildVectorSDNode>(N)) {
     return BuildVec->getSplatValue();
@@ -1390,20 +1625,34 @@ SDValue VETargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
     llvm_unreachable("Should not custom lower this!");
   case ISD::ATOMIC_FENCE:
     return lowerATOMIC_FENCE(Op, DAG);
+  case ISD::ATOMIC_SWAP:
+    return lowerATOMIC_SWAP(Op, DAG);
   case ISD::BlockAddress:
     return lowerBlockAddress(Op, DAG);
   case ISD::ConstantPool:
     return lowerConstantPool(Op, DAG);
   case ISD::DYNAMIC_STACKALLOC:
     return lowerDYNAMIC_STACKALLOC(Op, DAG);
+  case ISD::EH_SJLJ_LONGJMP:
+    return lowerEH_SJLJ_LONGJMP(Op, DAG);
+  case ISD::EH_SJLJ_SETJMP:
+    return lowerEH_SJLJ_SETJMP(Op, DAG);
+  case ISD::EH_SJLJ_SETUP_DISPATCH:
+    return lowerEH_SJLJ_SETUP_DISPATCH(Op, DAG);
+  case ISD::FRAMEADDR:
+    return lowerFRAMEADDR(Op, DAG, *this, Subtarget);
   case ISD::GlobalAddress:
     return lowerGlobalAddress(Op, DAG);
   case ISD::GlobalTLSAddress:
     return lowerGlobalTLSAddress(Op, DAG);
+  case ISD::INTRINSIC_WO_CHAIN:
+    return lowerINTRINSIC_WO_CHAIN(Op, DAG);
   case ISD::JumpTable:
     return lowerJumpTable(Op, DAG);
   case ISD::LOAD:
     return lowerLOAD(Op, DAG);
+  case ISD::RETURNADDR:
+    return lowerRETURNADDR(Op, DAG, *this, Subtarget);
   case ISD::BUILD_VECTOR:
     return lowerBUILD_VECTOR(Op, DAG);
   case ISD::STORE:
@@ -1419,6 +1668,19 @@ SDValue VETargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   }
 }
 /// } Custom Lower
+
+void VETargetLowering::ReplaceNodeResults(SDNode *N,
+                                          SmallVectorImpl<SDValue> &Results,
+                                          SelectionDAG &DAG) const {
+  switch (N->getOpcode()) {
+  case ISD::ATOMIC_SWAP:
+    // Let LLVM expand atomic swap instruction through LowerOperation.
+    return;
+  default:
+    LLVM_DEBUG(N->dumpr(&DAG));
+    llvm_unreachable("Do not know how to custom type legalize this operation!");
+  }
+}
 
 /// JumpTable for VE.
 ///
@@ -1475,6 +1737,677 @@ SDValue VETargetLowering::getPICJumpTableRelocBase(SDValue Table,
                               VEMCExpr::VK_VE_GOTOFF_LO32, DAG);
   SDValue GlobalBase = DAG.getNode(VEISD::GLOBAL_BASE_REG, DL, PtrTy);
   return DAG.getNode(ISD::ADD, DL, PtrTy, GlobalBase, HiLo);
+}
+
+Register VETargetLowering::prepareMBB(MachineBasicBlock &MBB,
+                                      MachineBasicBlock::iterator I,
+                                      MachineBasicBlock *TargetBB,
+                                      const DebugLoc &DL) const {
+  MachineFunction *MF = MBB.getParent();
+  MachineRegisterInfo &MRI = MF->getRegInfo();
+  const VEInstrInfo *TII = Subtarget->getInstrInfo();
+
+  const TargetRegisterClass *RC = &VE::I64RegClass;
+  Register Tmp1 = MRI.createVirtualRegister(RC);
+  Register Tmp2 = MRI.createVirtualRegister(RC);
+  Register Result = MRI.createVirtualRegister(RC);
+
+  if (isPositionIndependent()) {
+    // Create following instructions for local linkage PIC code.
+    //     lea %Tmp1, TargetBB@gotoff_lo
+    //     and %Tmp2, %Tmp1, (32)0
+    //     lea.sl %Result, TargetBB@gotoff_hi(%Tmp2, %s15) ; %s15 is GOT
+    BuildMI(MBB, I, DL, TII->get(VE::LEAzii), Tmp1)
+        .addImm(0)
+        .addImm(0)
+        .addMBB(TargetBB, VEMCExpr::VK_VE_GOTOFF_LO32);
+    BuildMI(MBB, I, DL, TII->get(VE::ANDrm), Tmp2)
+        .addReg(Tmp1, getKillRegState(true))
+        .addImm(M0(32));
+    BuildMI(MBB, I, DL, TII->get(VE::LEASLrri), Result)
+        .addReg(VE::SX15)
+        .addReg(Tmp2, getKillRegState(true))
+        .addMBB(TargetBB, VEMCExpr::VK_VE_GOTOFF_HI32);
+  } else {
+    // Create following instructions for non-PIC code.
+    //     lea     %Tmp1, TargetBB@lo
+    //     and     %Tmp2, %Tmp1, (32)0
+    //     lea.sl  %Result, TargetBB@hi(%Tmp2)
+    BuildMI(MBB, I, DL, TII->get(VE::LEAzii), Tmp1)
+        .addImm(0)
+        .addImm(0)
+        .addMBB(TargetBB, VEMCExpr::VK_VE_LO32);
+    BuildMI(MBB, I, DL, TII->get(VE::ANDrm), Tmp2)
+        .addReg(Tmp1, getKillRegState(true))
+        .addImm(M0(32));
+    BuildMI(MBB, I, DL, TII->get(VE::LEASLrii), Result)
+        .addReg(Tmp2, getKillRegState(true))
+        .addImm(0)
+        .addMBB(TargetBB, VEMCExpr::VK_VE_HI32);
+  }
+  return Result;
+}
+
+Register VETargetLowering::prepareSymbol(MachineBasicBlock &MBB,
+                                         MachineBasicBlock::iterator I,
+                                         StringRef Symbol, const DebugLoc &DL,
+                                         bool IsLocal = false,
+                                         bool IsCall = false) const {
+  MachineFunction *MF = MBB.getParent();
+  MachineRegisterInfo &MRI = MF->getRegInfo();
+  const VEInstrInfo *TII = Subtarget->getInstrInfo();
+
+  const TargetRegisterClass *RC = &VE::I64RegClass;
+  Register Result = MRI.createVirtualRegister(RC);
+
+  if (isPositionIndependent()) {
+    if (IsCall && !IsLocal) {
+      // Create following instructions for non-local linkage PIC code function
+      // calls.  These instructions uses IC and magic number -24, so we expand
+      // them in VEAsmPrinter.cpp from GETFUNPLT pseudo instruction.
+      //     lea %Reg, Symbol@plt_lo(-24)
+      //     and %Reg, %Reg, (32)0
+      //     sic %s16
+      //     lea.sl %Result, Symbol@plt_hi(%Reg, %s16) ; %s16 is PLT
+      BuildMI(MBB, I, DL, TII->get(VE::GETFUNPLT), Result)
+          .addExternalSymbol("abort");
+    } else if (IsLocal) {
+      Register Tmp1 = MRI.createVirtualRegister(RC);
+      Register Tmp2 = MRI.createVirtualRegister(RC);
+      // Create following instructions for local linkage PIC code.
+      //     lea %Tmp1, Symbol@gotoff_lo
+      //     and %Tmp2, %Tmp1, (32)0
+      //     lea.sl %Result, Symbol@gotoff_hi(%Tmp2, %s15) ; %s15 is GOT
+      BuildMI(MBB, I, DL, TII->get(VE::LEAzii), Tmp1)
+          .addImm(0)
+          .addImm(0)
+          .addExternalSymbol(Symbol.data(), VEMCExpr::VK_VE_GOTOFF_LO32);
+      BuildMI(MBB, I, DL, TII->get(VE::ANDrm), Tmp2)
+          .addReg(Tmp1, getKillRegState(true))
+          .addImm(M0(32));
+      BuildMI(MBB, I, DL, TII->get(VE::LEASLrri), Result)
+          .addReg(VE::SX15)
+          .addReg(Tmp2, getKillRegState(true))
+          .addExternalSymbol(Symbol.data(), VEMCExpr::VK_VE_GOTOFF_HI32);
+    } else {
+      Register Tmp1 = MRI.createVirtualRegister(RC);
+      Register Tmp2 = MRI.createVirtualRegister(RC);
+      // Create following instructions for not local linkage PIC code.
+      //     lea %Tmp1, Symbol@got_lo
+      //     and %Tmp2, %Tmp1, (32)0
+      //     lea.sl %Tmp3, Symbol@gotoff_hi(%Tmp2, %s15) ; %s15 is GOT
+      //     ld %Result, 0(%Tmp3)
+      Register Tmp3 = MRI.createVirtualRegister(RC);
+      BuildMI(MBB, I, DL, TII->get(VE::LEAzii), Tmp1)
+          .addImm(0)
+          .addImm(0)
+          .addExternalSymbol(Symbol.data(), VEMCExpr::VK_VE_GOT_LO32);
+      BuildMI(MBB, I, DL, TII->get(VE::ANDrm), Tmp2)
+          .addReg(Tmp1, getKillRegState(true))
+          .addImm(M0(32));
+      BuildMI(MBB, I, DL, TII->get(VE::LEASLrri), Tmp3)
+          .addReg(VE::SX15)
+          .addReg(Tmp2, getKillRegState(true))
+          .addExternalSymbol(Symbol.data(), VEMCExpr::VK_VE_GOT_HI32);
+      BuildMI(MBB, I, DL, TII->get(VE::LDrii), Result)
+          .addReg(Tmp3, getKillRegState(true))
+          .addImm(0)
+          .addImm(0);
+    }
+  } else {
+    Register Tmp1 = MRI.createVirtualRegister(RC);
+    Register Tmp2 = MRI.createVirtualRegister(RC);
+    // Create following instructions for non-PIC code.
+    //     lea     %Tmp1, Symbol@lo
+    //     and     %Tmp2, %Tmp1, (32)0
+    //     lea.sl  %Result, Symbol@hi(%Tmp2)
+    BuildMI(MBB, I, DL, TII->get(VE::LEAzii), Tmp1)
+        .addImm(0)
+        .addImm(0)
+        .addExternalSymbol(Symbol.data(), VEMCExpr::VK_VE_LO32);
+    BuildMI(MBB, I, DL, TII->get(VE::ANDrm), Tmp2)
+        .addReg(Tmp1, getKillRegState(true))
+        .addImm(M0(32));
+    BuildMI(MBB, I, DL, TII->get(VE::LEASLrii), Result)
+        .addReg(Tmp2, getKillRegState(true))
+        .addImm(0)
+        .addExternalSymbol(Symbol.data(), VEMCExpr::VK_VE_HI32);
+  }
+  return Result;
+}
+
+void VETargetLowering::setupEntryBlockForSjLj(MachineInstr &MI,
+                                              MachineBasicBlock *MBB,
+                                              MachineBasicBlock *DispatchBB,
+                                              int FI, int Offset) const {
+  DebugLoc DL = MI.getDebugLoc();
+  const VEInstrInfo *TII = Subtarget->getInstrInfo();
+
+  Register LabelReg =
+      prepareMBB(*MBB, MachineBasicBlock::iterator(MI), DispatchBB, DL);
+
+  // Store an address of DispatchBB to a given jmpbuf[1] where has next IC
+  // referenced by longjmp (throw) later.
+  MachineInstrBuilder MIB = BuildMI(*MBB, MI, DL, TII->get(VE::STrii));
+  addFrameReference(MIB, FI, Offset); // jmpbuf[1]
+  MIB.addReg(LabelReg, getKillRegState(true));
+}
+
+MachineBasicBlock *
+VETargetLowering::emitEHSjLjSetJmp(MachineInstr &MI,
+                                   MachineBasicBlock *MBB) const {
+  DebugLoc DL = MI.getDebugLoc();
+  MachineFunction *MF = MBB->getParent();
+  const TargetInstrInfo *TII = Subtarget->getInstrInfo();
+  const TargetRegisterInfo *TRI = Subtarget->getRegisterInfo();
+  MachineRegisterInfo &MRI = MF->getRegInfo();
+
+  const BasicBlock *BB = MBB->getBasicBlock();
+  MachineFunction::iterator I = ++MBB->getIterator();
+
+  // Memory Reference.
+  SmallVector<MachineMemOperand *, 2> MMOs(MI.memoperands_begin(),
+                                           MI.memoperands_end());
+  Register BufReg = MI.getOperand(1).getReg();
+
+  Register DstReg;
+
+  DstReg = MI.getOperand(0).getReg();
+  const TargetRegisterClass *RC = MRI.getRegClass(DstReg);
+  assert(TRI->isTypeLegalForClass(*RC, MVT::i32) && "Invalid destination!");
+  (void)TRI;
+  Register MainDestReg = MRI.createVirtualRegister(RC);
+  Register RestoreDestReg = MRI.createVirtualRegister(RC);
+
+  // For `v = call @llvm.eh.sjlj.setjmp(buf)`, we generate following
+  // instructions.  SP/FP must be saved in jmpbuf before `llvm.eh.sjlj.setjmp`.
+  //
+  // ThisMBB:
+  //   buf[3] = %s17 iff %s17 is used as BP
+  //   buf[1] = RestoreMBB as IC after longjmp
+  //   # SjLjSetup RestoreMBB
+  //
+  // MainMBB:
+  //   v_main = 0
+  //
+  // SinkMBB:
+  //   v = phi(v_main, MainMBB, v_restore, RestoreMBB)
+  //   ...
+  //
+  // RestoreMBB:
+  //   %s17 = buf[3] = iff %s17 is used as BP
+  //   v_restore = 1
+  //   goto SinkMBB
+
+  MachineBasicBlock *ThisMBB = MBB;
+  MachineBasicBlock *MainMBB = MF->CreateMachineBasicBlock(BB);
+  MachineBasicBlock *SinkMBB = MF->CreateMachineBasicBlock(BB);
+  MachineBasicBlock *RestoreMBB = MF->CreateMachineBasicBlock(BB);
+  MF->insert(I, MainMBB);
+  MF->insert(I, SinkMBB);
+  MF->push_back(RestoreMBB);
+  RestoreMBB->setHasAddressTaken();
+
+  // Transfer the remainder of BB and its successor edges to SinkMBB.
+  SinkMBB->splice(SinkMBB->begin(), MBB,
+                  std::next(MachineBasicBlock::iterator(MI)), MBB->end());
+  SinkMBB->transferSuccessorsAndUpdatePHIs(MBB);
+
+  // ThisMBB:
+  Register LabelReg =
+      prepareMBB(*MBB, MachineBasicBlock::iterator(MI), RestoreMBB, DL);
+
+  // Store BP in buf[3] iff this function is using BP.
+  const VEFrameLowering *TFI = Subtarget->getFrameLowering();
+  if (TFI->hasBP(*MF)) {
+    MachineInstrBuilder MIB = BuildMI(*MBB, MI, DL, TII->get(VE::STrii));
+    MIB.addReg(BufReg);
+    MIB.addImm(0);
+    MIB.addImm(24);
+    MIB.addReg(VE::SX17);
+    MIB.setMemRefs(MMOs);
+  }
+
+  // Store IP in buf[1].
+  MachineInstrBuilder MIB = BuildMI(*MBB, MI, DL, TII->get(VE::STrii));
+  MIB.add(MI.getOperand(1)); // we can preserve the kill flags here.
+  MIB.addImm(0);
+  MIB.addImm(8);
+  MIB.addReg(LabelReg, getKillRegState(true));
+  MIB.setMemRefs(MMOs);
+
+  // SP/FP are already stored in jmpbuf before `llvm.eh.sjlj.setjmp`.
+
+  // Insert setup.
+  MIB =
+      BuildMI(*ThisMBB, MI, DL, TII->get(VE::EH_SjLj_Setup)).addMBB(RestoreMBB);
+
+  const VERegisterInfo *RegInfo = Subtarget->getRegisterInfo();
+  MIB.addRegMask(RegInfo->getNoPreservedMask());
+  ThisMBB->addSuccessor(MainMBB);
+  ThisMBB->addSuccessor(RestoreMBB);
+
+  // MainMBB:
+  BuildMI(MainMBB, DL, TII->get(VE::LEAzii), MainDestReg)
+      .addImm(0)
+      .addImm(0)
+      .addImm(0);
+  MainMBB->addSuccessor(SinkMBB);
+
+  // SinkMBB:
+  BuildMI(*SinkMBB, SinkMBB->begin(), DL, TII->get(VE::PHI), DstReg)
+      .addReg(MainDestReg)
+      .addMBB(MainMBB)
+      .addReg(RestoreDestReg)
+      .addMBB(RestoreMBB);
+
+  // RestoreMBB:
+  // Restore BP from buf[3] iff this function is using BP.  The address of
+  // buf is in SX10.
+  // FIXME: Better to not use SX10 here
+  if (TFI->hasBP(*MF)) {
+    MachineInstrBuilder MIB =
+        BuildMI(RestoreMBB, DL, TII->get(VE::LDrii), VE::SX17);
+    MIB.addReg(VE::SX10);
+    MIB.addImm(0);
+    MIB.addImm(24);
+    MIB.setMemRefs(MMOs);
+  }
+  BuildMI(RestoreMBB, DL, TII->get(VE::LEAzii), RestoreDestReg)
+      .addImm(0)
+      .addImm(0)
+      .addImm(1);
+  BuildMI(RestoreMBB, DL, TII->get(VE::BRCFLa_t)).addMBB(SinkMBB);
+  RestoreMBB->addSuccessor(SinkMBB);
+
+  MI.eraseFromParent();
+  return SinkMBB;
+}
+
+MachineBasicBlock *
+VETargetLowering::emitEHSjLjLongJmp(MachineInstr &MI,
+                                    MachineBasicBlock *MBB) const {
+  DebugLoc DL = MI.getDebugLoc();
+  MachineFunction *MF = MBB->getParent();
+  const TargetInstrInfo *TII = Subtarget->getInstrInfo();
+  MachineRegisterInfo &MRI = MF->getRegInfo();
+
+  // Memory Reference.
+  SmallVector<MachineMemOperand *, 2> MMOs(MI.memoperands_begin(),
+                                           MI.memoperands_end());
+  Register BufReg = MI.getOperand(0).getReg();
+
+  Register Tmp = MRI.createVirtualRegister(&VE::I64RegClass);
+  // Since FP is only updated here but NOT referenced, it's treated as GPR.
+  Register FP = VE::SX9;
+  Register SP = VE::SX11;
+
+  MachineInstrBuilder MIB;
+
+  MachineBasicBlock *ThisMBB = MBB;
+
+  // For `call @llvm.eh.sjlj.longjmp(buf)`, we generate following instructions.
+  //
+  // ThisMBB:
+  //   %fp = load buf[0]
+  //   %jmp = load buf[1]
+  //   %s10 = buf        ; Store an address of buf to SX10 for RestoreMBB
+  //   %sp = load buf[2] ; generated by llvm.eh.sjlj.setjmp.
+  //   jmp %jmp
+
+  // Reload FP.
+  MIB = BuildMI(*ThisMBB, MI, DL, TII->get(VE::LDrii), FP);
+  MIB.addReg(BufReg);
+  MIB.addImm(0);
+  MIB.addImm(0);
+  MIB.setMemRefs(MMOs);
+
+  // Reload IP.
+  MIB = BuildMI(*ThisMBB, MI, DL, TII->get(VE::LDrii), Tmp);
+  MIB.addReg(BufReg);
+  MIB.addImm(0);
+  MIB.addImm(8);
+  MIB.setMemRefs(MMOs);
+
+  // Copy BufReg to SX10 for later use in setjmp.
+  // FIXME: Better to not use SX10 here
+  BuildMI(*ThisMBB, MI, DL, TII->get(VE::ORri), VE::SX10)
+      .addReg(BufReg)
+      .addImm(0);
+
+  // Reload SP.
+  MIB = BuildMI(*ThisMBB, MI, DL, TII->get(VE::LDrii), SP);
+  MIB.add(MI.getOperand(0)); // we can preserve the kill flags here.
+  MIB.addImm(0);
+  MIB.addImm(16);
+  MIB.setMemRefs(MMOs);
+
+  // Jump.
+  BuildMI(*ThisMBB, MI, DL, TII->get(VE::BCFLari_t))
+      .addReg(Tmp, getKillRegState(true))
+      .addImm(0);
+
+  MI.eraseFromParent();
+  return ThisMBB;
+}
+
+MachineBasicBlock *
+VETargetLowering::emitSjLjDispatchBlock(MachineInstr &MI,
+                                        MachineBasicBlock *BB) const {
+  DebugLoc DL = MI.getDebugLoc();
+  MachineFunction *MF = BB->getParent();
+  MachineFrameInfo &MFI = MF->getFrameInfo();
+  MachineRegisterInfo &MRI = MF->getRegInfo();
+  const VEInstrInfo *TII = Subtarget->getInstrInfo();
+  int FI = MFI.getFunctionContextIndex();
+
+  // Get a mapping of the call site numbers to all of the landing pads they're
+  // associated with.
+  DenseMap<unsigned, SmallVector<MachineBasicBlock *, 2>> CallSiteNumToLPad;
+  unsigned MaxCSNum = 0;
+  for (auto &MBB : *MF) {
+    if (!MBB.isEHPad())
+      continue;
+
+    MCSymbol *Sym = nullptr;
+    for (const auto &MI : MBB) {
+      if (MI.isDebugInstr())
+        continue;
+
+      assert(MI.isEHLabel() && "expected EH_LABEL");
+      Sym = MI.getOperand(0).getMCSymbol();
+      break;
+    }
+
+    if (!MF->hasCallSiteLandingPad(Sym))
+      continue;
+
+    for (unsigned CSI : MF->getCallSiteLandingPad(Sym)) {
+      CallSiteNumToLPad[CSI].push_back(&MBB);
+      MaxCSNum = std::max(MaxCSNum, CSI);
+    }
+  }
+
+  // Get an ordered list of the machine basic blocks for the jump table.
+  std::vector<MachineBasicBlock *> LPadList;
+  SmallPtrSet<MachineBasicBlock *, 32> InvokeBBs;
+  LPadList.reserve(CallSiteNumToLPad.size());
+
+  for (unsigned CSI = 1; CSI <= MaxCSNum; ++CSI) {
+    for (auto &LP : CallSiteNumToLPad[CSI]) {
+      LPadList.push_back(LP);
+      InvokeBBs.insert(LP->pred_begin(), LP->pred_end());
+    }
+  }
+
+  assert(!LPadList.empty() &&
+         "No landing pad destinations for the dispatch jump table!");
+
+  // The %fn_context is allocated like below (from --print-after=sjljehprepare):
+  //   %fn_context = alloca { i8*, i64, [4 x i64], i8*, i8*, [5 x i8*] }
+  //
+  // This `[5 x i8*]` is jmpbuf, so jmpbuf[1] is FI+72.
+  // First `i64` is callsite, so callsite is FI+8.
+  static const int OffsetIC = 72;
+  static const int OffsetCS = 8;
+
+  // Create the MBBs for the dispatch code like following:
+  //
+  // ThisMBB:
+  //   Prepare DispatchBB address and store it to buf[1].
+  //   ...
+  //
+  // DispatchBB:
+  //   %s15 = GETGOT iff isPositionIndependent
+  //   %callsite = load callsite
+  //   brgt.l.t #size of callsites, %callsite, DispContBB
+  //
+  // TrapBB:
+  //   Call abort.
+  //
+  // DispContBB:
+  //   %breg = address of jump table
+  //   %pc = load and calculate next pc from %breg and %callsite
+  //   jmp %pc
+
+  // Shove the dispatch's address into the return slot in the function context.
+  MachineBasicBlock *DispatchBB = MF->CreateMachineBasicBlock();
+  DispatchBB->setIsEHPad(true);
+
+  // Trap BB will causes trap like `assert(0)`.
+  MachineBasicBlock *TrapBB = MF->CreateMachineBasicBlock();
+  DispatchBB->addSuccessor(TrapBB);
+
+  MachineBasicBlock *DispContBB = MF->CreateMachineBasicBlock();
+  DispatchBB->addSuccessor(DispContBB);
+
+  // Insert MBBs.
+  MF->push_back(DispatchBB);
+  MF->push_back(DispContBB);
+  MF->push_back(TrapBB);
+
+  // Insert code to call abort in the TrapBB.
+  Register Abort = prepareSymbol(*TrapBB, TrapBB->end(), "abort", DL,
+                                 /* Local */ false, /* Call */ true);
+  BuildMI(TrapBB, DL, TII->get(VE::BSICrii), VE::SX10)
+      .addReg(Abort, getKillRegState(true))
+      .addImm(0)
+      .addImm(0);
+
+  // Insert code into the entry block that creates and registers the function
+  // context.
+  setupEntryBlockForSjLj(MI, BB, DispatchBB, FI, OffsetIC);
+
+  // Create the jump table and associated information
+  unsigned JTE = getJumpTableEncoding();
+  MachineJumpTableInfo *JTI = MF->getOrCreateJumpTableInfo(JTE);
+  unsigned MJTI = JTI->createJumpTableIndex(LPadList);
+
+  const VERegisterInfo &RI = TII->getRegisterInfo();
+  // Add a register mask with no preserved registers.  This results in all
+  // registers being marked as clobbered.
+  BuildMI(DispatchBB, DL, TII->get(VE::NOP))
+      .addRegMask(RI.getNoPreservedMask());
+
+  if (isPositionIndependent()) {
+    // Force to generate GETGOT, since current implementation doesn't store GOT
+    // register.
+    BuildMI(DispatchBB, DL, TII->get(VE::GETGOT), VE::SX15);
+  }
+
+  // IReg is used as an index in a memory operand and therefore can't be SP
+  const TargetRegisterClass *RC = &VE::I64RegClass;
+  Register IReg = MRI.createVirtualRegister(RC);
+  addFrameReference(BuildMI(DispatchBB, DL, TII->get(VE::LDLZXrii), IReg), FI,
+                    OffsetCS);
+  if (LPadList.size() < 64) {
+    BuildMI(DispatchBB, DL, TII->get(VE::BRCFLir_t))
+        .addImm(VECC::CC_ILE)
+        .addImm(LPadList.size())
+        .addReg(IReg)
+        .addMBB(TrapBB);
+  } else {
+    assert(LPadList.size() <= 0x7FFFFFFF && "Too large Landing Pad!");
+    Register TmpReg = MRI.createVirtualRegister(RC);
+    BuildMI(DispatchBB, DL, TII->get(VE::LEAzii), TmpReg)
+        .addImm(0)
+        .addImm(0)
+        .addImm(LPadList.size());
+    BuildMI(DispatchBB, DL, TII->get(VE::BRCFLrr_t))
+        .addImm(VECC::CC_ILE)
+        .addReg(TmpReg, getKillRegState(true))
+        .addReg(IReg)
+        .addMBB(TrapBB);
+  }
+
+  Register BReg = MRI.createVirtualRegister(RC);
+  Register Tmp1 = MRI.createVirtualRegister(RC);
+  Register Tmp2 = MRI.createVirtualRegister(RC);
+
+  if (isPositionIndependent()) {
+    // Create following instructions for local linkage PIC code.
+    //     lea    %Tmp1, .LJTI0_0@gotoff_lo
+    //     and    %Tmp2, %Tmp1, (32)0
+    //     lea.sl %BReg, .LJTI0_0@gotoff_hi(%Tmp2, %s15) ; %s15 is GOT
+    BuildMI(DispContBB, DL, TII->get(VE::LEAzii), Tmp1)
+        .addImm(0)
+        .addImm(0)
+        .addJumpTableIndex(MJTI, VEMCExpr::VK_VE_GOTOFF_LO32);
+    BuildMI(DispContBB, DL, TII->get(VE::ANDrm), Tmp2)
+        .addReg(Tmp1, getKillRegState(true))
+        .addImm(M0(32));
+    BuildMI(DispContBB, DL, TII->get(VE::LEASLrri), BReg)
+        .addReg(VE::SX15)
+        .addReg(Tmp2, getKillRegState(true))
+        .addJumpTableIndex(MJTI, VEMCExpr::VK_VE_GOTOFF_HI32);
+  } else {
+    // Create following instructions for non-PIC code.
+    //     lea     %Tmp1, .LJTI0_0@lo
+    //     and     %Tmp2, %Tmp1, (32)0
+    //     lea.sl  %BReg, .LJTI0_0@hi(%Tmp2)
+    BuildMI(DispContBB, DL, TII->get(VE::LEAzii), Tmp1)
+        .addImm(0)
+        .addImm(0)
+        .addJumpTableIndex(MJTI, VEMCExpr::VK_VE_LO32);
+    BuildMI(DispContBB, DL, TII->get(VE::ANDrm), Tmp2)
+        .addReg(Tmp1, getKillRegState(true))
+        .addImm(M0(32));
+    BuildMI(DispContBB, DL, TII->get(VE::LEASLrii), BReg)
+        .addReg(Tmp2, getKillRegState(true))
+        .addImm(0)
+        .addJumpTableIndex(MJTI, VEMCExpr::VK_VE_HI32);
+  }
+
+  switch (JTE) {
+  case MachineJumpTableInfo::EK_BlockAddress: {
+    // Generate simple block address code for no-PIC model.
+    //     sll %Tmp1, %IReg, 3
+    //     lds %TReg, 0(%Tmp1, %BReg)
+    //     bcfla %TReg
+
+    Register TReg = MRI.createVirtualRegister(RC);
+    Register Tmp1 = MRI.createVirtualRegister(RC);
+
+    BuildMI(DispContBB, DL, TII->get(VE::SLLri), Tmp1)
+        .addReg(IReg, getKillRegState(true))
+        .addImm(3);
+    BuildMI(DispContBB, DL, TII->get(VE::LDrri), TReg)
+        .addReg(BReg, getKillRegState(true))
+        .addReg(Tmp1, getKillRegState(true))
+        .addImm(0);
+    BuildMI(DispContBB, DL, TII->get(VE::BCFLari_t))
+        .addReg(TReg, getKillRegState(true))
+        .addImm(0);
+    break;
+  }
+  case MachineJumpTableInfo::EK_Custom32: {
+    // Generate block address code using differences from the function pointer
+    // for PIC model.
+    //     sll %Tmp1, %IReg, 2
+    //     ldl.zx %OReg, 0(%Tmp1, %BReg)
+    //     Prepare function address in BReg2.
+    //     adds.l %TReg, %BReg2, %OReg
+    //     bcfla %TReg
+
+    assert(isPositionIndependent());
+    Register OReg = MRI.createVirtualRegister(RC);
+    Register TReg = MRI.createVirtualRegister(RC);
+    Register Tmp1 = MRI.createVirtualRegister(RC);
+
+    BuildMI(DispContBB, DL, TII->get(VE::SLLri), Tmp1)
+        .addReg(IReg, getKillRegState(true))
+        .addImm(2);
+    BuildMI(DispContBB, DL, TII->get(VE::LDLZXrri), OReg)
+        .addReg(BReg, getKillRegState(true))
+        .addReg(Tmp1, getKillRegState(true))
+        .addImm(0);
+    Register BReg2 =
+        prepareSymbol(*DispContBB, DispContBB->end(),
+                      DispContBB->getParent()->getName(), DL, /* Local */ true);
+    BuildMI(DispContBB, DL, TII->get(VE::ADDSLrr), TReg)
+        .addReg(OReg, getKillRegState(true))
+        .addReg(BReg2, getKillRegState(true));
+    BuildMI(DispContBB, DL, TII->get(VE::BCFLari_t))
+        .addReg(TReg, getKillRegState(true))
+        .addImm(0);
+    break;
+  }
+  default:
+    llvm_unreachable("Unexpected jump table encoding");
+  }
+
+  // Add the jump table entries as successors to the MBB.
+  SmallPtrSet<MachineBasicBlock *, 8> SeenMBBs;
+  for (auto &LP : LPadList)
+    if (SeenMBBs.insert(LP).second)
+      DispContBB->addSuccessor(LP);
+
+  // N.B. the order the invoke BBs are processed in doesn't matter here.
+  SmallVector<MachineBasicBlock *, 64> MBBLPads;
+  const MCPhysReg *SavedRegs = MF->getRegInfo().getCalleeSavedRegs();
+  for (MachineBasicBlock *MBB : InvokeBBs) {
+    // Remove the landing pad successor from the invoke block and replace it
+    // with the new dispatch block.
+    // Keep a copy of Successors since it's modified inside the loop.
+    SmallVector<MachineBasicBlock *, 8> Successors(MBB->succ_rbegin(),
+                                                   MBB->succ_rend());
+    // FIXME: Avoid quadratic complexity.
+    for (auto MBBS : Successors) {
+      if (MBBS->isEHPad()) {
+        MBB->removeSuccessor(MBBS);
+        MBBLPads.push_back(MBBS);
+      }
+    }
+
+    MBB->addSuccessor(DispatchBB);
+
+    // Find the invoke call and mark all of the callee-saved registers as
+    // 'implicit defined' so that they're spilled.  This prevents code from
+    // moving instructions to before the EH block, where they will never be
+    // executed.
+    for (auto &II : reverse(*MBB)) {
+      if (!II.isCall())
+        continue;
+
+      DenseMap<Register, bool> DefRegs;
+      for (auto &MOp : II.operands())
+        if (MOp.isReg())
+          DefRegs[MOp.getReg()] = true;
+
+      MachineInstrBuilder MIB(*MF, &II);
+      for (unsigned RI = 0; SavedRegs[RI]; ++RI) {
+        Register Reg = SavedRegs[RI];
+        if (!DefRegs[Reg])
+          MIB.addReg(Reg, RegState::ImplicitDefine | RegState::Dead);
+      }
+
+      break;
+    }
+  }
+
+  // Mark all former landing pads as non-landing pads.  The dispatch is the only
+  // landing pad now.
+  for (auto &LP : MBBLPads)
+    LP->setIsEHPad(false);
+
+  // The instruction is gone now.
+  MI.eraseFromParent();
+  return BB;
+}
+
+MachineBasicBlock *
+VETargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
+                                              MachineBasicBlock *BB) const {
+  switch (MI.getOpcode()) {
+  default:
+    llvm_unreachable("Unknown Custom Instruction!");
+  case VE::EH_SjLj_LongJmp:
+    return emitEHSjLjLongJmp(MI, BB);
+  case VE::EH_SjLj_SetJmp:
+    return emitEHSjLjSetJmp(MI, BB);
+  case VE::EH_SjLj_Setup_Dispatch:
+    return emitSjLjDispatchBlock(MI, BB);
+  }
 }
 
 static bool isI32Insn(const SDNode *User, const SDNode *N) {

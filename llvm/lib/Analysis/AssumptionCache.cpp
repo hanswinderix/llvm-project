@@ -163,15 +163,11 @@ void AssumptionCache::unregisterAssumption(CallInst *CI) {
       AffectedValues.erase(AVI);
   }
 
-  AssumeHandles.erase(
-      remove_if(AssumeHandles, [CI](ResultElem &RE) { return CI == RE; }),
-      AssumeHandles.end());
+  erase_value(AssumeHandles, CI);
 }
 
 void AssumptionCache::AffectedValueCallbackVH::deleted() {
-  auto AVI = AC->AffectedValues.find(getValPtr());
-  if (AVI != AC->AffectedValues.end())
-    AC->AffectedValues.erase(AVI);
+  AC->AffectedValues.erase(getValPtr());
   // 'this' now dangles!
 }
 

@@ -307,10 +307,8 @@ struct InstructionMapper {
       // repeated substring.
       mapToIllegalUnsigned(It, CanOutlineWithPrevInstr, UnsignedVecForMBB,
                            InstrListForMBB);
-      InstrList.insert(InstrList.end(), InstrListForMBB.begin(),
-                       InstrListForMBB.end());
-      UnsignedVec.insert(UnsignedVec.end(), UnsignedVecForMBB.begin(),
-                         UnsignedVecForMBB.end());
+      llvm::append_range(InstrList, InstrListForMBB);
+      llvm::append_range(UnsignedVec, UnsignedVecForMBB);
     }
   }
 
@@ -547,11 +545,10 @@ void MachineOutliner::findCandidates(
       // That is, one must either
       // * End before the other starts
       // * Start after the other ends
-      if (std::all_of(
-              CandidatesForRepeatedSeq.begin(), CandidatesForRepeatedSeq.end(),
-              [&StartIdx, &EndIdx](const Candidate &C) {
-                return (EndIdx < C.getStartIdx() || StartIdx > C.getEndIdx());
-              })) {
+      if (llvm::all_of(CandidatesForRepeatedSeq, [&StartIdx,
+                                                  &EndIdx](const Candidate &C) {
+            return (EndIdx < C.getStartIdx() || StartIdx > C.getEndIdx());
+          })) {
         // It doesn't overlap with anything, so we can outline it.
         // Each sequence is over [StartIt, EndIt].
         // Save the candidate and its location.

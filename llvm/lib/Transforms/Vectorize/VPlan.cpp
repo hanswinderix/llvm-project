@@ -119,46 +119,6 @@ VPUser *VPRecipeBase::toVPUser() {
   return nullptr;
 }
 
-VPValue *VPRecipeBase::toVPValue() {
-  if (auto *V = dyn_cast<VPInstruction>(this))
-    return V;
-  if (auto *V = dyn_cast<VPReductionRecipe>(this))
-    return V;
-  if (auto *V = dyn_cast<VPWidenMemoryInstructionRecipe>(this))
-    return V;
-  if (auto *V = dyn_cast<VPWidenCallRecipe>(this))
-    return V;
-  if (auto *V = dyn_cast<VPWidenSelectRecipe>(this))
-    return V;
-  if (auto *V = dyn_cast<VPWidenGEPRecipe>(this))
-    return V;
-  if (auto *V = dyn_cast<VPWidenRecipe>(this))
-    return V;
-  if (auto *V = dyn_cast<VPReplicateRecipe>(this))
-    return V;
-  return nullptr;
-}
-
-const VPValue *VPRecipeBase::toVPValue() const {
-  if (auto *V = dyn_cast<VPInstruction>(this))
-    return V;
-  if (auto *V = dyn_cast<VPReductionRecipe>(this))
-    return V;
-  if (auto *V = dyn_cast<VPWidenMemoryInstructionRecipe>(this))
-    return V;
-  if (auto *V = dyn_cast<VPWidenCallRecipe>(this))
-    return V;
-  if (auto *V = dyn_cast<VPWidenSelectRecipe>(this))
-    return V;
-  if (auto *V = dyn_cast<VPWidenGEPRecipe>(this))
-    return V;
-  if (auto *V = dyn_cast<VPWidenRecipe>(this))
-    return V;
-  if (auto *V = dyn_cast<VPReplicateRecipe>(this))
-    return V;
-  return nullptr;
-}
-
 // Get the top-most entry block of \p Start. This is the entry block of the
 // containing VPlan. This function is templated to support both const and non-const blocks
 template <typename T> static T *getPlanEntry(T *Start) {
@@ -376,8 +336,8 @@ void VPBasicBlock::execute(VPTransformState *State) {
 
 void VPBasicBlock::dropAllReferences(VPValue *NewValue) {
   for (VPRecipeBase &R : Recipes) {
-    if (auto *VPV = R.toVPValue())
-      VPV->replaceAllUsesWith(NewValue);
+    for (auto *Def : R.definedValues())
+      Def->replaceAllUsesWith(NewValue);
 
     if (auto *User = R.toVPUser())
       for (unsigned I = 0, E = User->getNumOperands(); I != E; I++)
@@ -957,7 +917,7 @@ void VPReductionRecipe::print(raw_ostream &O, const Twine &Indent,
   printAsOperand(O, SlotTracker);
   O << " = ";
   getChainOp()->printAsOperand(O, SlotTracker);
-  O << " + reduce." << Instruction::getOpcodeName(RdxDesc->getRecurrenceBinOp())
+  O << " + reduce." << Instruction::getOpcodeName(RdxDesc->getOpcode())
     << " (";
   getVecOp()->printAsOperand(O, SlotTracker);
   if (getCondOp()) {
@@ -993,10 +953,10 @@ void VPWidenMemoryInstructionRecipe::print(raw_ostream &O, const Twine &Indent,
   O << "\"WIDEN ";
 
   if (!isStore()) {
-    printAsOperand(O, SlotTracker);
+    getVPValue()->printAsOperand(O, SlotTracker);
     O << " = ";
   }
-  O << Instruction::getOpcodeName(getUnderlyingInstr()->getOpcode()) << " ";
+  O << Instruction::getOpcodeName(Ingredient.getOpcode()) << " ";
 
   printOperands(O, SlotTracker);
 }

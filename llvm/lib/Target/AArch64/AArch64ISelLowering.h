@@ -305,6 +305,10 @@ enum NodeType : unsigned {
   PTEST,
   PTRUE,
 
+  BITREVERSE_MERGE_PASSTHRU,
+  BSWAP_MERGE_PASSTHRU,
+  CTLZ_MERGE_PASSTHRU,
+  CTPOP_MERGE_PASSTHRU,
   DUP_MERGE_PASSTHRU,
   INDEX_VECTOR,
 
@@ -907,8 +911,7 @@ private:
   SDValue LowerShiftRightParts(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVSETCC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerCTPOP(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerF128Call(SDValue Op, SelectionDAG &DAG,
-                        RTLIB::Libcall Call) const;
+  SDValue LowerCTTZ(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFCOPYSIGN(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFP_EXTEND(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFP_ROUND(SDValue Op, SelectionDAG &DAG) const;

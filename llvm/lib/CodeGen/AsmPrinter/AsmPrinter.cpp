@@ -483,10 +483,8 @@ MCSymbol *AsmPrinter::getSymbolPreferLocal(const GlobalValue &GV) const {
   if (TM.getTargetTriple().isOSBinFormatELF() && GV.canBenefitFromLocalAlias()) {
     const Module &M = *GV.getParent();
     if (TM.getRelocationModel() != Reloc::Static &&
-        M.getPIELevel() == PIELevel::Default)
-      if (GV.isDSOLocal() || (TM.getTargetTriple().isX86() &&
-                              GV.getParent()->noSemanticInterposition()))
-        return getSymbolWithGlobalValueBase(&GV, "$local");
+        M.getPIELevel() == PIELevel::Default && GV.isDSOLocal())
+      return getSymbolWithGlobalValueBase(&GV, "$local");
   }
   return TM.getSymbol(&GV);
 }
@@ -534,8 +532,8 @@ void AsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
 
   GVSym->redefineIfPossible();
   if (GVSym->isDefined() || GVSym->isVariable())
-    report_fatal_error("symbol '" + Twine(GVSym->getName()) +
-                       "' is already defined");
+    OutContext.reportError(SMLoc(), "symbol '" + Twine(GVSym->getName()) +
+                                        "' is already defined");
 
   if (MAI->hasDotTypeDotSizeDirective())
     OutStreamer->emitSymbolAttribute(EmittedSym, MCSA_ELF_TypeObject);
@@ -950,6 +948,8 @@ static bool emitDebugValueComment(const MachineInstr *MI, AsmPrinter &AP) {
   } else if (MI->getDebugOperand(0).isTargetIndex()) {
     auto Op = MI->getDebugOperand(0);
     OS << "!target-index(" << Op.getIndex() << "," << Op.getOffset() << ")";
+    // NOTE: Want this comment at start of line, don't emit with AddComment.
+    AP.OutStreamer->emitRawComment(OS.str());
     return true;
   } else {
     Register Reg;
@@ -1972,8 +1972,7 @@ void AsmPrinter::emitConstantPool() {
       unsigned NewOffset = alignTo(Offset, CPE.getAlign());
       OutStreamer->emitZeros(NewOffset - Offset);
 
-      Type *Ty = CPE.getType();
-      Offset = NewOffset + getDataLayout().getTypeAllocSize(Ty);
+      Offset = NewOffset + CPE.getSizeInBytes(getDataLayout());
 
       OutStreamer->emitLabel(Sym);
       if (CPE.isMachineConstantPoolEntry())

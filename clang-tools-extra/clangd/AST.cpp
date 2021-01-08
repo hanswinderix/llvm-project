@@ -350,8 +350,7 @@ public:
       return true;
 
     if (auto *AT = D->getType()->getContainedAutoType()) {
-      if (!AT->getDeducedType().isNull())
-        DeducedType = AT->getDeducedType();
+      DeducedType = AT->desugar();
     }
     return true;
   }
@@ -368,7 +367,7 @@ public:
     // Loc of auto in return type (c++14).
     auto CurLoc = D->getReturnTypeSourceRange().getBegin();
     // Loc of "auto" in operator auto()
-    if (CurLoc.isInvalid() && dyn_cast<CXXConversionDecl>(D))
+    if (CurLoc.isInvalid() && isa<CXXConversionDecl>(D))
       CurLoc = D->getTypeSourceInfo()->getTypeLoc().getBeginLoc();
     // Loc of "auto" in function with trailing return type (c++11).
     if (CurLoc.isInvalid())

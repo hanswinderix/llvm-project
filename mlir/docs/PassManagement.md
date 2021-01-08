@@ -271,7 +271,7 @@ Passes can be added to a pass manager via `addPass`. The pass must either be an
 `op-specific` pass operating on the same operation type as `OpPassManager`, or
 an `op-agnostic` pass.
 
-An `OpPassManager` is generally creted by explicitly nesting a pipeline within
+An `OpPassManager` is generally created by explicitly nesting a pipeline within
 another existing `OpPassManager` via the `nest<>` method. This method takes the
 operation type that the nested pass manager will operate on. At the top-level, a
 `PassManager` acts as an `OpPassManager`. Nesting in this sense, corresponds to
@@ -1137,6 +1137,10 @@ module {
   }
 }
 ```
+
+The configuration dumped can be passed to `mlir-opt` by specifying
+`-run-reproducer` flag. This will result in parsing the first line configuration
+of the reproducer and adding those to the command line options.
 
 ### Local Reproducer Generation
 

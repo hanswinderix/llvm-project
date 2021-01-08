@@ -48,13 +48,13 @@ def AOp : NS_Op<"a_op", []> {
 // ---
 
 // DEF:      some-attr-kind AOp::aAttrAttr()
-// DEF-NEXT:   (*this)->getAttr("aAttr").cast<some-attr-kind>()
+// DEF-NEXT:   (*this)->getAttr("aAttr").template cast<some-attr-kind>()
 // DEF:      some-return-type AOp::aAttr() {
 // DEF-NEXT:   auto attr = aAttrAttr()
 // DEF-NEXT:   return attr.some-convert-from-storage();
 
 // DEF:      some-attr-kind AOp::bAttrAttr()
-// DEF-NEXT:   return (*this)->getAttr("bAttr").dyn_cast_or_null<some-attr-kind>()
+// DEF-NEXT:   return (*this)->getAttr("bAttr").template dyn_cast_or_null<some-attr-kind>()
 // DEF:      some-return-type AOp::bAttr() {
 // DEF-NEXT:   auto attr = bAttrAttr();
 // DEF-NEXT:   if (!attr)
@@ -62,7 +62,7 @@ def AOp : NS_Op<"a_op", []> {
 // DEF-NEXT:   return attr.some-convert-from-storage();
 
 // DEF:      some-attr-kind AOp::cAttrAttr()
-// DEF-NEXT:   return (*this)->getAttr("cAttr").dyn_cast_or_null<some-attr-kind>()
+// DEF-NEXT:   return (*this)->getAttr("cAttr").template dyn_cast_or_null<some-attr-kind>()
 // DEF:      ::llvm::Optional<some-return-type> AOp::cAttr() {
 // DEF-NEXT:   auto attr = cAttrAttr()
 // DEF-NEXT:   return attr ? ::llvm::Optional<some-return-type>(attr.some-convert-from-storage()) : (::llvm::None);
@@ -76,6 +76,12 @@ def AOp : NS_Op<"a_op", []> {
 // DEF-NEXT:   (*this)->setAttr("bAttr", attr);
 // DEF:      void AOp::cAttrAttr(some-attr-kind attr) {
 // DEF-NEXT:   (*this)->setAttr("cAttr", attr);
+
+// Test remove methods
+// ---
+
+// DEF: ::mlir::Attribute AOp::removeCAttrAttr() {
+// DEF-NEXT: return (*this)->removeAttr("cAttr");
 
 // Test build methods
 // ---
@@ -265,6 +271,9 @@ def UnitAttrOp : NS_Op<"unit_attr_op", []> {
 // DEF: bool UnitAttrOp::attr() {
 // DEF:   return {{.*}} != nullptr
 
+// DEF: ::mlir::Attribute UnitAttrOp::removeAttrAttr() {
+// DEF-NEXT:   (*this)->removeAttr("attr");
+
 // DEF: build(::mlir::OpBuilder &odsBuilder, ::mlir::OperationState &odsState, /*optional*/::mlir::UnitAttr attr)
 
 
@@ -279,9 +288,9 @@ def SomeTypedArrayAttr : TypedArrayAttrBase<SomeAttr, "SomeAttr array">;
 def Test_Dialect_2 : Dialect {
   let name = "dialect_2";
 }
-def MyStruct : StructAttr<"MyStruct", Test_Dialect_2, 
+def MyStruct : StructAttr<"MyStruct", Test_Dialect_2,
 [StructFieldAttr<"potatoes", I64ElementsAttr>]> {
-  let description = "A structure describing a number of potatoes.";
+  let summary = "A structure describing a number of potatoes.";
 }
 
 def StructAttrOp : NS_Op<"struct_attr_op", []> {

@@ -2094,7 +2094,7 @@ void SelectionDAGISel::SelectInlineAsmMemoryOperands(std::vector<SDValue> &Ops,
         InlineAsm::getFlagWord(InlineAsm::Kind_Mem, SelOps.size());
       NewFlags = InlineAsm::getFlagWordForMem(NewFlags, ConstraintID);
       Ops.push_back(CurDAG->getTargetConstant(NewFlags, DL, MVT::i32));
-      Ops.insert(Ops.end(), SelOps.begin(), SelOps.end());
+      llvm::append_range(Ops, SelOps);
       i += 2;
     }
   }
@@ -2353,7 +2353,7 @@ void SelectionDAGISel::UpdateChains(
 
       // If the node became dead and we haven't already seen it, delete it.
       if (ChainNode != NodeToMatch && ChainNode->use_empty() &&
-          !std::count(NowDeadNodes.begin(), NowDeadNodes.end(), ChainNode))
+          !llvm::is_contained(NowDeadNodes, ChainNode))
         NowDeadNodes.push_back(ChainNode);
     }
   }

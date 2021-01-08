@@ -71,6 +71,7 @@ public:
   StringRef NormalizedValuesScope;
   StringRef ImpliedCheck;
   StringRef ImpliedValue;
+  StringRef ShouldParse;
   StringRef Normalizer;
   StringRef Denormalizer;
   StringRef ValueMerger;
@@ -101,6 +102,8 @@ struct SimpleEnumValueTable {
 
   void emit(raw_ostream &OS) const {
     write_cstring(OS, StringRef(getOptionSpelling(R)));
+    OS << ", ";
+    OS << ShouldParse;
     OS << ", ";
     OS << ShouldAlwaysEmit;
     OS << ", ";
@@ -167,6 +170,7 @@ static MarshallingInfo createMarshallingInfo(const Record &R) {
   Ret.ImpliedValue =
       R.getValueAsOptionalString("ImpliedValue").getValueOr(Ret.DefaultValue);
 
+  Ret.ShouldParse = R.getValueAsString("ShouldParse");
   Ret.Normalizer = R.getValueAsString("Normalizer");
   Ret.Denormalizer = R.getValueAsString("Denormalizer");
   Ret.ValueMerger = R.getValueAsString("ValueMerger");
@@ -219,13 +223,12 @@ void EmitOptParser(RecordKeeper &Records, raw_ostream &OS) {
   PrefixesT Prefixes;
   Prefixes.insert(std::make_pair(PrefixKeyT(), "prefix_0"));
   unsigned CurPrefix = 0;
-  for (unsigned i = 0, e = Opts.size(); i != e; ++i) {
-    const Record &R = *Opts[i];
-    std::vector<StringRef> prf = R.getValueAsListOfStrings("Prefixes");
-    PrefixKeyT prfkey(prf.begin(), prf.end());
+  for (const Record &R : llvm::make_pointee_range(Opts)) {
+    std::vector<StringRef> RPrefixes = R.getValueAsListOfStrings("Prefixes");
+    PrefixKeyT PrefixKey(RPrefixes.begin(), RPrefixes.end());
     unsigned NewPrefix = CurPrefix + 1;
-    if (Prefixes.insert(std::make_pair(prfkey, (Twine("prefix_") +
-                                              Twine(NewPrefix)).str())).second)
+    std::string Prefix = (Twine("prefix_") + Twine(NewPrefix)).str();
+    if (Prefixes.insert(std::make_pair(PrefixKey, Prefix)).second)
       CurPrefix = NewPrefix;
   }
 
@@ -235,19 +238,16 @@ void EmitOptParser(RecordKeeper &Records, raw_ostream &OS) {
   OS << "// Prefixes\n\n";
   OS << "#ifdef PREFIX\n";
   OS << "#define COMMA ,\n";
-  for (PrefixesT::const_iterator I = Prefixes.begin(), E = Prefixes.end();
-                                  I != E; ++I) {
+  for (const auto &Prefix : Prefixes) {
     OS << "PREFIX(";
 
     // Prefix name.
-    OS << I->second;
+    OS << Prefix.second;
 
     // Prefix values.
     OS << ", {";
-    for (PrefixKeyT::const_iterator PI = I->first.begin(),
-                                    PE = I->first.end(); PI != PE; ++PI) {
-      OS << "\"" << *PI << "\" COMMA ";
-    }
+    for (StringRef PrefixKey : Prefix.first)
+      OS << "\"" << PrefixKey << "\" COMMA ";
     OS << "nullptr})\n";
   }
   OS << "#undef COMMA\n";
@@ -256,9 +256,7 @@ void EmitOptParser(RecordKeeper &Records, raw_ostream &OS) {
   OS << "/////////\n";
   OS << "// Groups\n\n";
   OS << "#ifdef OPTION\n";
-  for (unsigned i = 0, e = Groups.size(); i != e; ++i) {
-    const Record &R = *Groups[i];
-
+  for (const Record &R : llvm::make_pointee_range(Groups)) {
     // Start a single option entry.
     OS << "OPTION(";
 
@@ -305,8 +303,8 @@ void EmitOptParser(RecordKeeper &Records, raw_ostream &OS) {
 
   auto WriteOptRecordFields = [&](raw_ostream &OS, const Record &R) {
     // The option prefix;
-    std::vector<StringRef> prf = R.getValueAsListOfStrings("Prefixes");
-    OS << Prefixes[PrefixKeyT(prf.begin(), prf.end())] << ", ";
+    std::vector<StringRef> RPrefixes = R.getValueAsListOfStrings("Prefixes");
+    OS << Prefixes[PrefixKeyT(RPrefixes.begin(), RPrefixes.end())] << ", ";
 
     // The option string.
     emitNameUsingSpelling(OS, R);
@@ -343,8 +341,8 @@ void EmitOptParser(RecordKeeper &Records, raw_ostream &OS) {
       OS << "nullptr";
     } else {
       OS << "\"";
-      for (size_t i = 0, e = AliasArgs.size(); i != e; ++i)
-        OS << AliasArgs[i] << "\\0";
+      for (StringRef AliasArg : AliasArgs)
+        OS << AliasArg << "\\0";
       OS << "\"";
     }
 
@@ -394,9 +392,7 @@ void EmitOptParser(RecordKeeper &Records, raw_ostream &OS) {
   };
 
   std::vector<const Record *> OptsWithMarshalling;
-  for (unsigned I = 0, E = Opts.size(); I != E; ++I) {
-    const Record &R = *Opts[I];
-
+  for (const Record &R : llvm::make_pointee_range(Opts)) {
     // Start a single option entry.
     OS << "OPTION(";
     WriteOptRecordFields(OS, R);
@@ -462,8 +458,7 @@ void EmitOptParser(RecordKeeper &Records, raw_ostream &OS) {
   OS << "#ifdef OPTTABLE_ARG_INIT\n";
   OS << "//////////\n";
   OS << "// Option Values\n\n";
-  for (unsigned I = 0, E = Opts.size(); I != E; ++I) {
-    const Record &R = *Opts[I];
+  for (const Record &R : llvm::make_pointee_range(Opts)) {
     if (isa<UnsetInit>(R.getValueInit("ValuesCode")))
       continue;
     OS << "{\n";

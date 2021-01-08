@@ -334,3 +334,11 @@ namespace partially_dependent_template_args {
     }
   }
 }
+
+namespace fixed_size_parameter_pack {
+  template<typename ...T> struct A {
+    template<T ...> struct B {};
+  };
+  template<int ...Ns> void f(A<unsigned, char, long long>::B<0, Ns...>);
+  void g() { f<1, 2>({}); }
+}

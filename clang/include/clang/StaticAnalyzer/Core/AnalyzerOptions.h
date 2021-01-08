@@ -58,7 +58,7 @@ NumConstraints
 ///  analysis results.
 enum AnalysisDiagClients {
 #define ANALYSIS_DIAGNOSTICS(NAME, CMDFLAG, DESC, CREATFN) PD_##NAME,
-#include "clang/StaticAnalyzer/Core/Analyses.def"
+#include "clang/Analysis/PathDiagnosticConsumers.def"
 PD_NONE,
 NUM_ANALYSIS_DIAG_CLIENTS
 };
@@ -259,8 +259,7 @@ public:
   bool AnalyzerWerror : 1;
 
   /// The inlining stack depth limit.
-  // Cap the stack depth at 4 calls (5 stack frames, base + 4 calls).
-  unsigned InlineMaxStackDepth = 5;
+  unsigned InlineMaxStackDepth;
 
   /// The mode of function selection used during inlining.
   AnalysisInliningMode InliningMode = NoRedundancy;

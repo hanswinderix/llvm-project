@@ -2858,7 +2858,7 @@ void CXXNameMangler::mangleType(const BuiltinType *T) {
         << type_name;                                                          \
     break;
 #include "clang/Basic/AArch64SVEACLETypes.def"
-#define PPC_MMA_VECTOR_TYPE(Name, Id, Size) \
+#define PPC_VECTOR_TYPE(Name, Id, Size) \
   case BuiltinType::Id: \
     type_name = #Name; \
     Out << 'u' << type_name.size() << type_name; \
@@ -4843,6 +4843,7 @@ namespace {
 struct TemplateArgManglingInfo {
   TemplateDecl *ResolvedTemplate = nullptr;
   bool SeenPackExpansionIntoNonPack = false;
+  const NamedDecl *UnresolvedExpandedPack = nullptr;
 
   TemplateArgManglingInfo(TemplateName TN) {
     if (TemplateDecl *TD = TN.getAsTemplateDecl())
@@ -4859,21 +4860,32 @@ struct TemplateArgManglingInfo {
     if (!ResolvedTemplate || SeenPackExpansionIntoNonPack)
       return true;
 
+    // Move to the next parameter.
+    const NamedDecl *Param = UnresolvedExpandedPack;
+    if (!Param) {
+      assert(ParamIdx < ResolvedTemplate->getTemplateParameters()->size() &&
+             "no parameter for argument");
+      Param = ResolvedTemplate->getTemplateParameters()->getParam(ParamIdx);
+
+      // If we reach an expanded parameter pack whose argument isn't in pack
+      // form, that means Sema couldn't figure out which arguments belonged to
+      // it, because it contains a pack expansion. Track the expanded pack for
+      // all further template arguments until we hit that pack expansion.
+      if (Param->isParameterPack() && Arg.getKind() != TemplateArgument::Pack) {
+        assert(getExpandedPackSize(Param) &&
+               "failed to form pack argument for parameter pack");
+        UnresolvedExpandedPack = Param;
+      }
+    }
+
     // If we encounter a pack argument that is expanded into a non-pack
     // parameter, we can no longer track parameter / argument correspondence,
     // and need to use exact types from this point onwards.
-    assert(ParamIdx < ResolvedTemplate->getTemplateParameters()->size() &&
-           "no parameter for argument");
-    const NamedDecl *Param =
-        ResolvedTemplate->getTemplateParameters()->getParam(ParamIdx);
-    if (!Param->isParameterPack() && Arg.isPackExpansion()) {
+    if (Arg.isPackExpansion() &&
+        (!Param->isParameterPack() || UnresolvedExpandedPack)) {
       SeenPackExpansionIntoNonPack = true;
       return true;
     }
-
-    assert(Param->isParameterPack() ==
-               (Arg.getKind() == TemplateArgument::Pack) &&
-           "should have formed pack argument for pack parameter");
 
     // We need exact types for function template arguments because they might be
     // overloaded on template parameter type. As a special case, a member
@@ -4886,6 +4898,11 @@ struct TemplateArgManglingInfo {
 
     // Otherwise, we only need a correct type if the parameter has a deduced
     // type.
+    //
+    // Note: for an expanded parameter pack, getType() returns the type prior
+    // to expansion. We could ask for the expanded type with getExpansionType(),
+    // but it doesn't matter because substitution and expansion don't affect
+    // whether a deduced type appears in the type.
     auto *NTTP = dyn_cast<NonTypeTemplateParmDecl>(Param);
     return NTTP && NTTP->getType()->getContainedDeducedType();
   }

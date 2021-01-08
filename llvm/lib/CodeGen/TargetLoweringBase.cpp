@@ -135,7 +135,7 @@ void TargetLoweringBase::InitLibcalls(const Triple &TT) {
     setLibcallCallingConv((RTLIB::Libcall)LC, CallingConv::C);
 
   // For IEEE quad-precision libcall names, PPC uses "kf" instead of "tf".
-  if (TT.getArch() == Triple::ppc || TT.isPPC64()) {
+  if (TT.isPPC()) {
     setLibcallName(RTLIB::ADD_F128, "__addkf3");
     setLibcallName(RTLIB::SUB_F128, "__subkf3");
     setLibcallName(RTLIB::MUL_F128, "__mulkf3");
@@ -779,6 +779,8 @@ void TargetLoweringBase::initActions() {
     setOperationAction(ISD::SDIVFIXSAT, VT, Expand);
     setOperationAction(ISD::UDIVFIX, VT, Expand);
     setOperationAction(ISD::UDIVFIXSAT, VT, Expand);
+    setOperationAction(ISD::FP_TO_SINT_SAT, VT, Expand);
+    setOperationAction(ISD::FP_TO_UINT_SAT, VT, Expand);
 
     // Overflow operations default to expand
     setOperationAction(ISD::SADDO, VT, Expand);

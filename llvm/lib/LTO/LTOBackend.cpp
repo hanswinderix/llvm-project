@@ -176,9 +176,7 @@ static void RegisterPassPlugins(ArrayRef<std::string> PassPlugins,
   }
 }
 
-namespace {
-
-std::unique_ptr<TargetMachine>
+static std::unique_ptr<TargetMachine>
 createTargetMachine(const Config &Conf, const Target *TheTarget, Module &M) {
   StringRef TheTriple = M.getTargetTriple();
   SubtargetFeatures Features;
@@ -360,10 +358,10 @@ static void runOldPMPasses(const Config &Conf, Module &Mod, TargetMachine *TM,
   passes.run(Mod);
 }
 
-bool opt(const Config &Conf, TargetMachine *TM, unsigned Task, Module &Mod,
-         bool IsThinLTO, ModuleSummaryIndex *ExportSummary,
-         const ModuleSummaryIndex *ImportSummary,
-         const std::vector<uint8_t> &CmdArgs) {
+bool lto::opt(const Config &Conf, TargetMachine *TM, unsigned Task, Module &Mod,
+              bool IsThinLTO, ModuleSummaryIndex *ExportSummary,
+              const ModuleSummaryIndex *ImportSummary,
+              const std::vector<uint8_t> &CmdArgs) {
   if (EmbedBitcode == LTOBitcodeEmbedding::EmbedPostMergePreOptimized) {
     // FIXME: the motivation for capturing post-merge bitcode and command line
     // is replicating the compilation environment from bitcode, without needing
@@ -393,9 +391,9 @@ bool opt(const Config &Conf, TargetMachine *TM, unsigned Task, Module &Mod,
   return !Conf.PostOptModuleHook || Conf.PostOptModuleHook(Task, Mod);
 }
 
-void codegen(const Config &Conf, TargetMachine *TM, AddStreamFn AddStream,
-             unsigned Task, Module &Mod,
-             const ModuleSummaryIndex &CombinedIndex) {
+static void codegen(const Config &Conf, TargetMachine *TM,
+                    AddStreamFn AddStream, unsigned Task, Module &Mod,
+                    const ModuleSummaryIndex &CombinedIndex) {
   if (Conf.PreCodeGenModuleHook && !Conf.PreCodeGenModuleHook(Task, Mod))
     return;
 
@@ -430,6 +428,8 @@ void codegen(const Config &Conf, TargetMachine *TM, AddStreamFn AddStream,
   legacy::PassManager CodeGenPasses;
   CodeGenPasses.add(
       createImmutableModuleSummaryIndexWrapperPass(&CombinedIndex));
+  if (Conf.PreCodeGenPassesHook)
+    Conf.PreCodeGenPassesHook(CodeGenPasses);
   if (TM->addPassesToEmitFile(CodeGenPasses, *Stream->OS,
                               DwoOut ? &DwoOut->os() : nullptr,
                               Conf.CGFileType))
@@ -440,10 +440,11 @@ void codegen(const Config &Conf, TargetMachine *TM, AddStreamFn AddStream,
     DwoOut->keep();
 }
 
-void splitCodeGen(const Config &C, TargetMachine *TM, AddStreamFn AddStream,
-                  unsigned ParallelCodeGenParallelismLevel,
-                  std::unique_ptr<Module> Mod,
-                  const ModuleSummaryIndex &CombinedIndex) {
+static void splitCodeGen(const Config &C, TargetMachine *TM,
+                         AddStreamFn AddStream,
+                         unsigned ParallelCodeGenParallelismLevel,
+                         std::unique_ptr<Module> Mod,
+                         const ModuleSummaryIndex &CombinedIndex) {
   ThreadPool CodegenThreadPool(
       heavyweight_hardware_concurrency(ParallelCodeGenParallelismLevel));
   unsigned ThreadCount = 0;
@@ -491,7 +492,8 @@ void splitCodeGen(const Config &C, TargetMachine *TM, AddStreamFn AddStream,
   CodegenThreadPool.wait();
 }
 
-Expected<const Target *> initAndLookupTarget(const Config &C, Module &Mod) {
+static Expected<const Target *> initAndLookupTarget(const Config &C,
+                                                    Module &Mod) {
   if (!C.OverrideTriple.empty())
     Mod.setTargetTriple(C.OverrideTriple);
   else if (Mod.getTargetTriple().empty())
@@ -502,7 +504,6 @@ Expected<const Target *> initAndLookupTarget(const Config &C, Module &Mod) {
   if (!T)
     return make_error<StringError>(Msg, inconvertibleErrorCode());
   return T;
-}
 }
 
 Error lto::finalizeOptimizationRemarks(

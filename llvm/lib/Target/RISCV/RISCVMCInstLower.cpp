@@ -176,7 +176,7 @@ static bool lowerRISCVVMachineInstrToMCInst(const MachineInstr *MI,
       if (RISCV::VRM2RegClass.contains(Reg) ||
           RISCV::VRM4RegClass.contains(Reg) ||
           RISCV::VRM8RegClass.contains(Reg)) {
-        Reg = TRI->getSubReg(Reg, RISCV::sub_vrm2);
+        Reg = TRI->getSubReg(Reg, RISCV::sub_vrm1_0);
         assert(Reg && "Subregister does not exist");
       }
 
@@ -210,4 +210,13 @@ void llvm::LowerRISCVMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
     if (LowerRISCVMachineOperandToMCOperand(MO, MCOp, AP))
       OutMI.addOperand(MCOp);
   }
+
+  if (OutMI.getOpcode() == RISCV::PseudoReadVLENB) {
+    OutMI.setOpcode(RISCV::CSRRS);
+    OutMI.addOperand(MCOperand::createImm(
+        RISCVSysReg::lookupSysRegByName("VLENB")->Encoding));
+    OutMI.addOperand(MCOperand::createReg(RISCV::X0));
+    return;
+  }
+
 }

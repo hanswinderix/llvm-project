@@ -289,12 +289,6 @@ def ixlenimm_li : Operand<XLenVT> {
 // Standalone (codegen-only) immleaf patterns.
 def simm32     : ImmLeaf<XLenVT, [{return isInt<32>(Imm);}]>;
 def simm32hi20 : ImmLeaf<XLenVT, [{return isShiftedInt<20, 12>(Imm);}]>;
-// A mask value that won't affect significant shift bits.
-def immbottomxlenset : ImmLeaf<XLenVT, [{
-  if (Subtarget->is64Bit())
-    return countTrailingOnes<uint64_t>(Imm) >= 6;
-  return countTrailingOnes<uint64_t>(Imm) >= 5;
-}]>;
 
 // A 6-bit constant greater than 32.
 def uimm6gt32 : ImmLeaf<XLenVT, [{
@@ -329,6 +323,19 @@ def NegImm : SDNodeXForm<imm, [{
 // Return an immediate value minus 32.
 def ImmSub32 : SDNodeXForm<imm, [{
   return CurDAG->getTargetConstant(N->getSExtValue() - 32, SDLoc(N),
+                                   N->getValueType(0));
+}]>;
+
+// Return an immediate subtracted from XLen.
+def ImmSubFromXLen : SDNodeXForm<imm, [{
+  uint64_t XLen = Subtarget->getXLen();
+  return CurDAG->getTargetConstant(XLen - N->getZExtValue(), SDLoc(N),
+                                   N->getValueType(0));
+}]>;
+
+// Return an immediate subtracted from 32.
+def ImmSubFrom32 : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(32 - N->getZExtValue(), SDLoc(N),
                                    N->getValueType(0));
 }]>;
 
@@ -855,6 +862,13 @@ def SRLIWPat : PatFrag<(ops node:$A, node:$B),
   return MatchSRLIW(N);
 }]>;
 
+// Check that it is a SLLIUW (Shift Logical Left Immediate Unsigned i32
+// on RV64). Also used to optimize the same sequence without SLLIUW.
+def SLLIUWPat : PatFrag<(ops node:$A, node:$B),
+                        (and (shl node:$A, node:$B), imm), [{
+  return MatchSLLIUW(N);
+}]>;
+
 /// Immediates
 
 def : Pat<(simm12:$imm), (ADDI X0, simm12:$imm)>;
@@ -881,14 +895,21 @@ def : PatGprUimmLog2XLen<sra, SRAI>;
 // typically introduced when the legalizer promotes the shift amount and
 // zero-extends it). For RISC-V, the mask is unnecessary as shifts in the base
 // ISA only read the least significant 5 bits (RV32I) or 6 bits (RV64I).
+def shiftMaskXLen : PatFrag<(ops node:$lhs), (and node:$lhs, imm), [{
+  return isUnneededShiftMask(N, Subtarget->is64Bit() ? 6 : 5);
+}]>;
+def shiftMask32 : PatFrag<(ops node:$lhs), (and node:$lhs, imm), [{
+  return isUnneededShiftMask(N, 5);
+}]>;
+
 class shiftop<SDPatternOperator operator>
     : PatFrags<(ops node:$val, node:$count),
                [(operator node:$val, node:$count),
-                (operator node:$val, (and node:$count, immbottomxlenset))]>;
+                (operator node:$val, (shiftMaskXLen node:$count))]>;
 class shiftopw<SDPatternOperator operator>
     : PatFrags<(ops node:$val, node:$count),
                [(operator node:$val, node:$count),
-                (operator node:$val, (and node:$count, (XLenVT 31)))]>;
+                (operator node:$val, (shiftMask32 node:$count))]>;
 
 def : PatGprGpr<shiftop<shl>, SLL>;
 def : PatGprGpr<shiftop<srl>, SRL>;
@@ -1162,8 +1183,17 @@ def ADJCALLSTACKUP   : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
 
 /// RV64 patterns
 
-let Predicates = [IsRV64, NotHasStdExtZba] in
+let Predicates = [IsRV64, NotHasStdExtZba] in {
 def : Pat<(and GPR:$rs1, 0xffffffff), (SRLI (SLLI GPR:$rs1, 32), 32)>;
+
+// If we're shifting a 32-bit zero extended value left by 0-31 bits, use 2
+// shifts instead of 3. This can occur when unsigned is used to index an array.
+def : Pat<(shl (and GPR:$rs1, 0xffffffff), uimm5:$shamt),
+          (SRLI (SLLI GPR:$rs1, 32), (ImmSubFrom32 uimm5:$shamt))>;
+// shl/and can appear in the other order too.
+def : Pat<(SLLIUWPat GPR:$rs1, uimm5:$shamt),
+          (SRLI (SLLI GPR:$rs1, 32), (ImmSubFrom32 uimm5:$shamt))>;
+}
 
 let Predicates = [IsRV64] in {
 

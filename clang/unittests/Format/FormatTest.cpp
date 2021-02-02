@@ -8887,6 +8887,298 @@ TEST_F(FormatTest, BreaksLongDeclarations) {
                getLLVMStyle());
 }
 
+TEST_F(FormatTest, FormatsAccessModifiers) {
+  FormatStyle Style = getLLVMStyle();
+  EXPECT_EQ(Style.EmptyLineBeforeAccessModifier,
+            FormatStyle::ELBAMS_LogicalBlock);
+  verifyFormat("struct foo {\n"
+               "private:\n"
+               "  void f() {}\n"
+               "\n"
+               "private:\n"
+               "  int i;\n"
+               "\n"
+               "protected:\n"
+               "  int j;\n"
+               "};\n",
+               Style);
+  verifyFormat("struct foo {\n"
+               "private:\n"
+               "  void f() {}\n"
+               "\n"
+               "private:\n"
+               "  int i;\n"
+               "\n"
+               "protected:\n"
+               "  int j;\n"
+               "};\n",
+               "struct foo {\n"
+               "private:\n"
+               "  void f() {}\n"
+               "private:\n"
+               "  int i;\n"
+               "protected:\n"
+               "  int j;\n"
+               "};\n",
+               Style);
+  verifyFormat("struct foo { /* comment */\n"
+               "private:\n"
+               "  int i;\n"
+               "  // comment\n"
+               "private:\n"
+               "  int j;\n"
+               "};\n",
+               Style);
+  verifyFormat("struct foo {\n"
+               "#ifdef FOO\n"
+               "#endif\n"
+               "private:\n"
+               "  int i;\n"
+               "#ifdef FOO\n"
+               "private:\n"
+               "#endif\n"
+               "  int j;\n"
+               "};\n",
+               Style);
+  Style.EmptyLineBeforeAccessModifier = FormatStyle::ELBAMS_Never;
+  verifyFormat("struct foo {\n"
+               "private:\n"
+               "  void f() {}\n"
+               "private:\n"
+               "  int i;\n"
+               "protected:\n"
+               "  int j;\n"
+               "};\n",
+               Style);
+  verifyFormat("struct foo {\n"
+               "private:\n"
+               "  void f() {}\n"
+               "private:\n"
+               "  int i;\n"
+               "protected:\n"
+               "  int j;\n"
+               "};\n",
+               "struct foo {\n"
+               "\n"
+               "private:\n"
+               "  void f() {}\n"
+               "\n"
+               "private:\n"
+               "  int i;\n"
+               "\n"
+               "protected:\n"
+               "  int j;\n"
+               "};\n",
+               Style);
+  verifyFormat("struct foo { /* comment */\n"
+               "private:\n"
+               "  int i;\n"
+               "  // comment\n"
+               "private:\n"
+               "  int j;\n"
+               "};\n",
+               "struct foo { /* comment */\n"
+               "\n"
+               "private:\n"
+               "  int i;\n"
+               "  // comment\n"
+               "\n"
+               "private:\n"
+               "  int j;\n"
+               "};\n",
+               Style);
+  verifyFormat("struct foo {\n"
+               "#ifdef FOO\n"
+               "#endif\n"
+               "private:\n"
+               "  int i;\n"
+               "#ifdef FOO\n"
+               "private:\n"
+               "#endif\n"
+               "  int j;\n"
+               "};\n",
+               "struct foo {\n"
+               "#ifdef FOO\n"
+               "#endif\n"
+               "\n"
+               "private:\n"
+               "  int i;\n"
+               "#ifdef FOO\n"
+               "\n"
+               "private:\n"
+               "#endif\n"
+               "  int j;\n"
+               "};\n",
+               Style);
+  Style.EmptyLineBeforeAccessModifier = FormatStyle::ELBAMS_Always;
+  verifyFormat("struct foo {\n"
+               "private:\n"
+               "  void f() {}\n"
+               "\n"
+               "private:\n"
+               "  int i;\n"
+               "\n"
+               "protected:\n"
+               "  int j;\n"
+               "};\n",
+               Style);
+  verifyFormat("struct foo {\n"
+               "private:\n"
+               "  void f() {}\n"
+               "\n"
+               "private:\n"
+               "  int i;\n"
+               "\n"
+               "protected:\n"
+               "  int j;\n"
+               "};\n",
+               "struct foo {\n"
+               "private:\n"
+               "  void f() {}\n"
+               "private:\n"
+               "  int i;\n"
+               "protected:\n"
+               "  int j;\n"
+               "};\n",
+               Style);
+  verifyFormat("struct foo { /* comment */\n"
+               "private:\n"
+               "  int i;\n"
+               "  // comment\n"
+               "\n"
+               "private:\n"
+               "  int j;\n"
+               "};\n",
+               "struct foo { /* comment */\n"
+               "private:\n"
+               "  int i;\n"
+               "  // comment\n"
+               "\n"
+               "private:\n"
+               "  int j;\n"
+               "};\n",
+               Style);
+  verifyFormat("struct foo {\n"
+               "#ifdef FOO\n"
+               "#endif\n"
+               "\n"
+               "private:\n"
+               "  int i;\n"
+               "#ifdef FOO\n"
+               "\n"
+               "private:\n"
+               "#endif\n"
+               "  int j;\n"
+               "};\n",
+               "struct foo {\n"
+               "#ifdef FOO\n"
+               "#endif\n"
+               "private:\n"
+               "  int i;\n"
+               "#ifdef FOO\n"
+               "private:\n"
+               "#endif\n"
+               "  int j;\n"
+               "};\n",
+               Style);
+  Style.EmptyLineBeforeAccessModifier = FormatStyle::ELBAMS_Leave;
+  EXPECT_EQ("struct foo {\n"
+            "\n"
+            "private:\n"
+            "  void f() {}\n"
+            "\n"
+            "private:\n"
+            "  int i;\n"
+            "\n"
+            "protected:\n"
+            "  int j;\n"
+            "};\n",
+            format("struct foo {\n"
+                   "\n"
+                   "private:\n"
+                   "  void f() {}\n"
+                   "\n"
+                   "private:\n"
+                   "  int i;\n"
+                   "\n"
+                   "protected:\n"
+                   "  int j;\n"
+                   "};\n",
+                   Style));
+  verifyFormat("struct foo {\n"
+               "private:\n"
+               "  void f() {}\n"
+               "private:\n"
+               "  int i;\n"
+               "protected:\n"
+               "  int j;\n"
+               "};\n",
+               Style);
+  EXPECT_EQ("struct foo { /* comment */\n"
+            "\n"
+            "private:\n"
+            "  int i;\n"
+            "  // comment\n"
+            "\n"
+            "private:\n"
+            "  int j;\n"
+            "};\n",
+            format("struct foo { /* comment */\n"
+                   "\n"
+                   "private:\n"
+                   "  int i;\n"
+                   "  // comment\n"
+                   "\n"
+                   "private:\n"
+                   "  int j;\n"
+                   "};\n",
+                   Style));
+  verifyFormat("struct foo { /* comment */\n"
+               "private:\n"
+               "  int i;\n"
+               "  // comment\n"
+               "private:\n"
+               "  int j;\n"
+               "};\n",
+               Style);
+  EXPECT_EQ("struct foo {\n"
+            "#ifdef FOO\n"
+            "#endif\n"
+            "\n"
+            "private:\n"
+            "  int i;\n"
+            "#ifdef FOO\n"
+            "\n"
+            "private:\n"
+            "#endif\n"
+            "  int j;\n"
+            "};\n",
+            format("struct foo {\n"
+                   "#ifdef FOO\n"
+                   "#endif\n"
+                   "\n"
+                   "private:\n"
+                   "  int i;\n"
+                   "#ifdef FOO\n"
+                   "\n"
+                   "private:\n"
+                   "#endif\n"
+                   "  int j;\n"
+                   "};\n",
+                   Style));
+  verifyFormat("struct foo {\n"
+               "#ifdef FOO\n"
+               "#endif\n"
+               "private:\n"
+               "  int i;\n"
+               "#ifdef FOO\n"
+               "private:\n"
+               "#endif\n"
+               "  int j;\n"
+               "};\n",
+               Style);
+}
+
 TEST_F(FormatTest, FormatsArrays) {
   verifyFormat("aaaaaaaaaaaaaaaaaaaaaaaaa[aaaaaaaaaaaaaaaaaaaaaaaaa]\n"
                "                         [bbbbbbbbbbbbbbbbbbbbbbbbb] = c;");
@@ -9955,6 +10247,21 @@ TEST_F(FormatTest, SplitEmptyClass) {
   verifyFormat("template <typename T> class rep<std::complex<T>>\n"
                "{\n"
                "};",
+               Style);
+
+  verifyFormat("#include \"stdint.h\"\n"
+               "namespace rep {}",
+               Style);
+  verifyFormat("#include <stdint.h>\n"
+               "namespace rep {}",
+               Style);
+  verifyFormat("#include <stdint.h>\n"
+               "namespace rep {}",
+               "#include <stdint.h>\n"
+               "namespace rep {\n"
+               "\n"
+               "\n"
+               "}",
                Style);
 }
 
@@ -15350,6 +15657,16 @@ TEST_F(FormatTest, ParsesConfiguration) {
   CHECK_PARSE("BreakBeforeInheritanceComma: true", BreakInheritanceList,
               FormatStyle::BILS_BeforeComma);
 
+  Style.EmptyLineBeforeAccessModifier = FormatStyle::ELBAMS_LogicalBlock;
+  CHECK_PARSE("EmptyLineBeforeAccessModifier: Never",
+              EmptyLineBeforeAccessModifier, FormatStyle::ELBAMS_Never);
+  CHECK_PARSE("EmptyLineBeforeAccessModifier: Leave",
+              EmptyLineBeforeAccessModifier, FormatStyle::ELBAMS_Leave);
+  CHECK_PARSE("EmptyLineBeforeAccessModifier: LogicalBlock",
+              EmptyLineBeforeAccessModifier, FormatStyle::ELBAMS_LogicalBlock);
+  CHECK_PARSE("EmptyLineBeforeAccessModifier: Always",
+              EmptyLineBeforeAccessModifier, FormatStyle::ELBAMS_Always);
+
   Style.AlignAfterOpenBracket = FormatStyle::BAS_AlwaysBreak;
   CHECK_PARSE("AlignAfterOpenBracket: Align", AlignAfterOpenBracket,
               FormatStyle::BAS_Align);
@@ -15677,6 +15994,26 @@ TEST_F(FormatTest, ParsesConfiguration) {
               "      - 'CPPEVAL'\n"
               "    CanonicalDelimiter: 'cc'",
               RawStringFormats, ExpectedRawStringFormats);
+
+  CHECK_PARSE("SpacesInLineCommentPrefix:\n"
+              "  Minimum: 0\n"
+              "  Maximum: 0",
+              SpacesInLineCommentPrefix.Minimum, 0u);
+  EXPECT_EQ(Style.SpacesInLineCommentPrefix.Maximum, 0u);
+  Style.SpacesInLineCommentPrefix.Minimum = 1;
+  CHECK_PARSE("SpacesInLineCommentPrefix:\n"
+              "  Minimum: 2",
+              SpacesInLineCommentPrefix.Minimum, 0u);
+  CHECK_PARSE("SpacesInLineCommentPrefix:\n"
+              "  Maximum: -1",
+              SpacesInLineCommentPrefix.Maximum, -1u);
+  CHECK_PARSE("SpacesInLineCommentPrefix:\n"
+              "  Minimum: 2",
+              SpacesInLineCommentPrefix.Minimum, 2u);
+  CHECK_PARSE("SpacesInLineCommentPrefix:\n"
+              "  Maximum: 1",
+              SpacesInLineCommentPrefix.Maximum, 1u);
+  EXPECT_EQ(Style.SpacesInLineCommentPrefix.Minimum, 1u);
 }
 
 TEST_F(FormatTest, ParsesConfigurationWithLanguages) {

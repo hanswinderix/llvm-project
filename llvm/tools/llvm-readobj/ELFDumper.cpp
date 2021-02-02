@@ -769,7 +769,9 @@ Expected<StringRef> ELFDumper<ELFT>::getSymbolVersion(const Elf_Sym &Sym,
       getVersionMap();
   if (!MapOrErr)
     return MapOrErr.takeError();
-  return Obj.getSymbolVersionByIndex(Version, IsDefault, **MapOrErr);
+
+  return Obj.getSymbolVersionByIndex(Version, IsDefault, **MapOrErr,
+                                     Sym.st_shndx == ELF::SHN_UNDEF);
 }
 
 template <typename ELFT>
@@ -4384,8 +4386,8 @@ void GNUELFDumper<ELFT>::printVersionSymbolSection(const Elf_Shdr *Sec) {
     }
 
     bool IsDefault;
-    Expected<StringRef> NameOrErr =
-        this->Obj.getSymbolVersionByIndex(Ndx, IsDefault, *VersionMap);
+    Expected<StringRef> NameOrErr = this->Obj.getSymbolVersionByIndex(
+        Ndx, IsDefault, *VersionMap, /*IsSymHidden=*/None);
     if (!NameOrErr) {
       this->reportUniqueWarning("unable to get a version for entry " +
                                 Twine(I) + " of " + this->describe(*Sec) +
@@ -5139,8 +5141,7 @@ static const NoteType CoreNoteTypes[] = {
 };
 
 template <class ELFT>
-const StringRef getNoteTypeName(const typename ELFT::Note &Note,
-                                unsigned ELFType) {
+StringRef getNoteTypeName(const typename ELFT::Note &Note, unsigned ELFType) {
   uint32_t Type = Note.getType();
   auto FindNote = [&](ArrayRef<NoteType> V) -> StringRef {
     for (const NoteType &N : V)

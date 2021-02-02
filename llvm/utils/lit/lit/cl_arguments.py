@@ -1,10 +1,17 @@
 import argparse
+import enum
 import os
 import shlex
 import sys
 
 import lit.reports
 import lit.util
+
+
+class TestOrder(enum.Enum):
+    EARLY_TESTS_THEN_BY_NAME = enum.auto()
+    FAILING_FIRST = enum.auto()
+    RANDOM = enum.auto()
 
 
 def parse_args():
@@ -23,7 +30,7 @@ def parse_args():
             metavar="N",
             help="Number of workers used for testing",
             type=_positive_int,
-            default=lit.util.detectCPUs())
+            default=lit.util.usable_core_count())
     parser.add_argument("--config-prefix",
             dest="configPrefix",
             metavar="NAME",
@@ -187,13 +194,12 @@ def parse_args():
     if opts.echoAllCommands:
         opts.showOutput = True
 
-    # TODO(python3): Could be enum
     if opts.shuffle:
-        opts.order = 'random'
+        opts.order = TestOrder.RANDOM
     elif opts.incremental:
-        opts.order = 'failing-first'
+        opts.order = TestOrder.FAILING_FIRST
     else:
-        opts.order = 'default'
+        opts.order = TestOrder.EARLY_TESTS_THEN_BY_NAME
 
     if opts.numShards or opts.runShard:
         if not opts.numShards or not opts.runShard:

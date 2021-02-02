@@ -153,7 +153,7 @@ struct FormatStyle {
   ///    \endcode
   ///
   /// * ``ACS_AcrossEmptyLinesAndComments``
-  /// (in configuration: ``AcrossEmptyLinesAndComments``)
+  ///   (in configuration: ``AcrossEmptyLinesAndComments``)
   ///
   ///    Same as ACS_Consecutive, but also spans over lines only containing
   ///    comments and empty lines, e.g.
@@ -290,7 +290,7 @@ struct FormatStyle {
   ///    \endcode
   ///
   /// * ``ACS_AcrossEmptyLinesAndComments``
-  /// (in configuration: ``AcrossEmptyLinesAndComments``)
+  ///   (in configuration: ``AcrossEmptyLinesAndComments``)
   ///
   ///    Same as ACS_Consecutive, but also spans over lines only containing
   ///    comments and empty lines, e.g.
@@ -359,7 +359,7 @@ struct FormatStyle {
   ///    \endcode
   ///
   /// * ``ACS_AcrossEmptyLinesAndComments``
-  /// (in configuration: ``AcrossEmptyLinesAndComments``)
+  ///   (in configuration: ``AcrossEmptyLinesAndComments``)
   ///
   ///    Same as ACS_Consecutive, but also spans over lines only containing
   ///    comments and empty lines, e.g.
@@ -1885,6 +1885,68 @@ struct FormatStyle {
   /// Disables formatting completely.
   bool DisableFormat;
 
+  /// Different styles for empty line before access modifiers.
+  enum EmptyLineBeforeAccessModifierStyle : unsigned char {
+    /// Remove all empty lines before access modifiers.
+    /// \code
+    ///   struct foo {
+    ///   private:
+    ///     int i;
+    ///   protected:
+    ///     int j;
+    ///     /* comment */
+    ///   public:
+    ///     foo() {}
+    ///   private:
+    ///   protected:
+    ///   };
+    /// \endcode
+    ELBAMS_Never,
+    /// Keep existing empty lines before access modifiers.
+    ELBAMS_Leave,
+    /// Add empty line only when access modifier starts a new logical block.
+    /// Logical block is a group of one or more member fields or functions.
+    /// \code
+    ///   struct foo {
+    ///   private:
+    ///     int i;
+    ///
+    ///   protected:
+    ///     int j;
+    ///     /* comment */
+    ///   public:
+    ///     foo() {}
+    ///
+    ///   private:
+    ///   protected:
+    ///   };
+    /// \endcode
+    ELBAMS_LogicalBlock,
+    /// Always add empty line before access modifiers unless access modifier
+    /// is at the start of struct or class definition.
+    /// \code
+    ///   struct foo {
+    ///   private:
+    ///     int i;
+    ///
+    ///   protected:
+    ///     int j;
+    ///     /* comment */
+    ///
+    ///   public:
+    ///     foo() {}
+    ///
+    ///   private:
+    ///
+    ///   protected:
+    ///   };
+    /// \endcode
+    ELBAMS_Always,
+  };
+
+  /// Defines in which cases to put empty line before access modifiers.
+  EmptyLineBeforeAccessModifierStyle EmptyLineBeforeAccessModifier;
+
   /// If ``true``, clang-format detects whether function calls and
   /// definitions are formatted with one parameter per line.
   ///
@@ -2832,6 +2894,43 @@ struct FormatStyle {
   /// \endcode
   bool SpacesInCStyleCastParentheses;
 
+  /// Control of spaces within a single line comment
+  struct SpacesInLineComment {
+    /// The minimum number of spaces at the start of the comment.
+    unsigned Minimum;
+    /// The maximum number of spaces at the start of the comment.
+    unsigned Maximum;
+  };
+
+  /// How many spaces are allowed at the start of a line comment. To disable the
+  /// maximum set it to ``-1``, apart from that the maximum takes precedence
+  /// over the minimum.
+  /// \code Minimum = 1 Maximum = -1
+  /// // One space is forced
+  ///
+  /// //  but more spaces are possible
+  ///
+  /// Minimum = 0
+  /// Maximum = 0
+  /// //Forces to start every comment directly after the slashes
+  /// \endcode
+  ///
+  /// Note that in line comment sections the relative indent of the subsequent
+  /// lines is kept, that means the following:
+  /// \code
+  /// before:                                   after:
+  /// Minimum: 1
+  /// //if (b) {                                // if (b) {
+  /// //  return true;                          //   return true;
+  /// //}                                       // }
+  ///
+  /// Maximum: 0
+  /// /// List:                                 ///List:
+  /// ///  - Foo                                /// - Foo
+  /// ///    - Bar                              ///   - Bar
+  /// \endcode
+  SpacesInLineComment SpacesInLineCommentPrefix;
+
   /// If ``true``, spaces will be inserted after ``(`` and before ``)``.
   /// \code
   ///    true:                                  false:
@@ -3015,6 +3114,7 @@ struct FormatStyle {
            DeriveLineEnding == R.DeriveLineEnding &&
            DerivePointerAlignment == R.DerivePointerAlignment &&
            DisableFormat == R.DisableFormat &&
+           EmptyLineBeforeAccessModifier == R.EmptyLineBeforeAccessModifier &&
            ExperimentalAutoDetectBinPacking ==
                R.ExperimentalAutoDetectBinPacking &&
            FixNamespaceComments == R.FixNamespaceComments &&
@@ -3082,6 +3182,10 @@ struct FormatStyle {
            SpacesInConditionalStatement == R.SpacesInConditionalStatement &&
            SpacesInContainerLiterals == R.SpacesInContainerLiterals &&
            SpacesInCStyleCastParentheses == R.SpacesInCStyleCastParentheses &&
+           SpacesInLineCommentPrefix.Minimum ==
+               R.SpacesInLineCommentPrefix.Minimum &&
+           SpacesInLineCommentPrefix.Maximum ==
+               R.SpacesInLineCommentPrefix.Maximum &&
            SpacesInParentheses == R.SpacesInParentheses &&
            SpacesInSquareBrackets == R.SpacesInSquareBrackets &&
            SpaceBeforeSquareBrackets == R.SpaceBeforeSquareBrackets &&

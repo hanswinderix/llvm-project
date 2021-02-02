@@ -26,6 +26,7 @@ typedef struct CUstream_st *CUstream;
 typedef enum cudaError_enum {
   CUDA_SUCCESS = 0,
   CUDA_ERROR_INVALID_VALUE = 1,
+  CUDA_ERROR_INVALID_HANDLE = 400,
 } CUresult;
 
 typedef enum CUstream_flags_enum {
@@ -60,26 +61,26 @@ CUresult cuLaunchKernel(CUfunction, unsigned, unsigned, unsigned, unsigned,
                         unsigned, unsigned, unsigned, CUstream, void **,
                         void **);
 
-CUresult cuMemAlloc_v2(CUdeviceptr *, size_t);
-CUresult cuMemcpyDtoDAsync_v2(CUdeviceptr, CUdeviceptr, size_t, CUstream);
+CUresult cuMemAlloc(CUdeviceptr *, size_t);
+CUresult cuMemcpyDtoDAsync(CUdeviceptr, CUdeviceptr, size_t, CUstream);
 
-CUresult cuMemcpyDtoH_v2(void *, CUdeviceptr, size_t);
-CUresult cuMemcpyDtoHAsync_v2(void *, CUdeviceptr, size_t, CUstream);
-CUresult cuMemcpyHtoD_v2(CUdeviceptr, const void *, size_t);
-CUresult cuMemcpyHtoDAsync_v2(CUdeviceptr, const void *, size_t, CUstream);
+CUresult cuMemcpyDtoH(void *, CUdeviceptr, size_t);
+CUresult cuMemcpyDtoHAsync(void *, CUdeviceptr, size_t, CUstream);
+CUresult cuMemcpyHtoD(CUdeviceptr, const void *, size_t);
+CUresult cuMemcpyHtoDAsync(CUdeviceptr, const void *, size_t, CUstream);
 
-CUresult cuMemFree_v2(CUdeviceptr);
+CUresult cuMemFree(CUdeviceptr);
 CUresult cuModuleGetFunction(CUfunction *, CUmodule, const char *);
-CUresult cuModuleGetGlobal_v2(CUdeviceptr *, size_t *, CUmodule, const char *);
+CUresult cuModuleGetGlobal(CUdeviceptr *, size_t *, CUmodule, const char *);
 
 CUresult cuModuleUnload(CUmodule);
 CUresult cuStreamCreate(CUstream *, unsigned);
-CUresult cuStreamDestroy_v2(CUstream);
+CUresult cuStreamDestroy(CUstream);
 CUresult cuStreamSynchronize(CUstream);
 CUresult cuCtxSetCurrent(CUcontext);
-CUresult cuDevicePrimaryCtxRelease_v2(CUdevice);
+CUresult cuDevicePrimaryCtxRelease(CUdevice);
 CUresult cuDevicePrimaryCtxGetState(CUdevice, unsigned *, int *);
-CUresult cuDevicePrimaryCtxSetFlags_v2(CUdevice, unsigned);
+CUresult cuDevicePrimaryCtxSetFlags(CUdevice, unsigned);
 CUresult cuDevicePrimaryCtxRetain(CUcontext *, CUdevice);
 CUresult cuModuleLoadDataEx(CUmodule *, const void *, unsigned, void *,
                             void **);

@@ -327,7 +327,7 @@ the configuration (without a prefix: ``Auto``).
        int ee : 3;
 
   * ``ACS_AcrossEmptyLinesAndComments``
-  (in configuration: ``AcrossEmptyLinesAndComments``)
+    (in configuration: ``AcrossEmptyLinesAndComments``)
 
      Same as ACS_Consecutive, but also spans over lines only containing
      comments and empty lines, e.g.
@@ -401,7 +401,7 @@ the configuration (without a prefix: ``Auto``).
        bool c = false;
 
   * ``ACS_AcrossEmptyLinesAndComments``
-  (in configuration: ``AcrossEmptyLinesAndComments``)
+    (in configuration: ``AcrossEmptyLinesAndComments``)
 
      Same as ACS_Consecutive, but also spans over lines only containing
      comments and empty lines, e.g.
@@ -476,7 +476,7 @@ the configuration (without a prefix: ``Auto``).
        #define bar(y, z) (y + z)
 
   * ``ACS_AcrossEmptyLinesAndComments``
-  (in configuration: ``AcrossEmptyLinesAndComments``)
+    (in configuration: ``AcrossEmptyLinesAndComments``)
 
      Same as ACS_Consecutive, but also spans over lines only containing
      comments and empty lines, e.g.
@@ -2119,6 +2119,75 @@ the configuration (without a prefix: ``Auto``).
 **DisableFormat** (``bool``)
   Disables formatting completely.
 
+**EmptyLineBeforeAccessModifier** (``EmptyLineBeforeAccessModifierStyle``)
+  Defines in which cases to put empty line before access modifiers.
+
+  Possible values:
+
+  * ``ELBAMS_Never`` (in configuration: ``Never``)
+    Remove all empty lines before access modifiers.
+
+    .. code-block:: c++
+
+      struct foo {
+      private:
+        int i;
+      protected:
+        int j;
+        /* comment */
+      public:
+        foo() {}
+      private:
+      protected:
+      };
+
+  * ``ELBAMS_Leave`` (in configuration: ``Leave``)
+    Keep existing empty lines before access modifiers.
+
+  * ``ELBAMS_LogicalBlock`` (in configuration: ``LogicalBlock``)
+    Add empty line only when access modifier starts a new logical block.
+    Logical block is a group of one or more member fields or functions.
+
+    .. code-block:: c++
+
+      struct foo {
+      private:
+        int i;
+
+      protected:
+        int j;
+        /* comment */
+      public:
+        foo() {}
+
+      private:
+      protected:
+      };
+
+  * ``ELBAMS_Always`` (in configuration: ``Always``)
+    Always add empty line before access modifiers unless access modifier
+    is at the start of struct or class definition.
+
+    .. code-block:: c++
+
+      struct foo {
+      private:
+        int i;
+
+      protected:
+        int j;
+        /* comment */
+
+      public:
+        foo() {}
+
+      private:
+
+      protected:
+      };
+
+
+
 **ExperimentalAutoDetectBinPacking** (``bool``)
   If ``true``, clang-format detects whether function calls and
   definitions are formatted with one parameter per line.
@@ -3265,6 +3334,43 @@ the configuration (without a prefix: ``Auto``).
      true:                                  false:
      var arr = [ 1, 2, 3 ];         vs.     var arr = [1, 2, 3];
      f({a : 1, b : 2, c : 3});              f({a: 1, b: 2, c: 3});
+
+**SpacesInLineCommentPrefix** (``SpacesInLineComment``)
+  How many spaces are allowed at the start of a line comment. To disable the
+  maximum set it to ``-1``, apart from that the maximum takes precedence
+  over the minimum.
+  Minimum = 1 Maximum = -1
+  // One space is forced
+
+  //  but more spaces are possible
+
+  Minimum = 0
+  Maximum = 0
+  //Forces to start every comment directly after the slashes
+
+  Note that in line comment sections the relative indent of the subsequent
+  lines is kept, that means the following:
+
+  .. code-block:: c++
+
+  before:                                   after:
+  Minimum: 1
+  //if (b) {                                // if (b) {
+  //  return true;                          //   return true;
+  //}                                       // }
+
+  Maximum: 0
+  /// List:                                 ///List:
+  ///  - Foo                                /// - Foo
+  ///    - Bar                              ///   - Bar
+
+  Nested configuration flags:
+
+
+  * ``unsigned Minimum`` The minimum number of spaces at the start of the comment.
+
+  * ``unsigned Maximum`` The maximum number of spaces at the start of the comment.
+
 
 **SpacesInParentheses** (``bool``)
   If ``true``, spaces will be inserted after ``(`` and before ``)``.

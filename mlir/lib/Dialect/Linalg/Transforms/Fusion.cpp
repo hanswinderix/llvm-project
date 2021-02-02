@@ -61,9 +61,9 @@ using llvm::dbgs;
 // by `permutationMap`.
 static void inferShapeComponents(AffineMap permutationMap,
                                  ArrayRef<Range> loopRanges,
-                                 SmallVectorImpl<Value> &offsets,
-                                 SmallVectorImpl<Value> &sizes,
-                                 SmallVectorImpl<Value> &strides) {
+                                 SmallVectorImpl<OpFoldResult> &offsets,
+                                 SmallVectorImpl<OpFoldResult> &sizes,
+                                 SmallVectorImpl<OpFoldResult> &strides) {
   assert(permutationMap.isProjectedPermutation() &&
          "expected some subset of a permutation map");
   SmallVector<Range, 4> shapeRanges(permutationMap.getNumResults());
@@ -101,7 +101,7 @@ static LinalgOp cloneWithLoopRanges(OpBuilder &b, Location loc, LinalgOp op,
     AffineMap map = op.getIndexingMap(shapedOperandIdx);
     LLVM_DEBUG(llvm::dbgs() << "shapedOperandIdx: " << shapedOperandIdx
                             << " with indexingMap: " << map << "\n");
-    SmallVector<Value, 4> offsets, sizes, strides;
+    SmallVector<OpFoldResult, 4> offsets, sizes, strides;
     inferShapeComponents(map, loopRanges, offsets, sizes, strides);
     Value shape = en.value();
     Value sub = shape.getType().isa<MemRefType>()
@@ -731,45 +731,6 @@ collectFusableLoops(ArrayRef<LinalgOp> ops,
 
   return fusableLoops;
 }
-
-// /// For `consumer` with tensor semantics, find the Linalg operation on
-// tensors
-// /// producer the operand at position `consumerIdx`. This is a simple use-def
-// /// chain using the SSA value, but returned as an element of the
-// /// `LinalgDependenceGraphElem` to use the same analysis for both tensors and
-// /// buffers.
-// static Optional<LinalgDependenceGraph::LinalgDependenceGraphElem>
-// findFusableProducerForTensorOp(OpOperand &consumerOpOperand) {
-//   // For now only looking for cases where the operand is produced by another
-//   // Linalg structured operation.
-//   LinalgOp consumer = cast<LinalgOp>(consumerOpOperand.getOwner());
-//   if (!consumer || !consumer.hasTensorSemantics())
-//     return llvm::None;
-//   unsigned consumerIdx = consumerOpOperand.getOperandNumber();
-//   Value value = consumerOpOperand.get();
-//   if (auto linalgOp = value.getDefiningOp<LinalgOp>()) {
-//     return LinalgDependenceGraph::LinalgDependenceGraphElem{
-//         &(linalgOp
-//               .getOutputOpOperands()[value.cast<OpResult>().getResultNumber()]),
-//         &(consumer.getInputOpOperands()[consumerIdx]),
-//         LinalgDependenceGraph::DependenceType::RAW};
-//   }
-//   return llvm::None;
-// }
-
-// static Optional<LinalgDependenceGraph::LinalgDependenceGraphElem>
-// findFusableProducer(OpOperand &consumerOpOperand,
-//                     const LinalgDependenceGraph &dependenceGraph) {
-//   LinalgOp consumer = cast<LinalgOp>(consumerOpOperand.getOwner());
-//   if (!consumer)
-//     return llvm::None;
-//   if (consumer.hasBufferSemantics())
-//     return findFusableProducerForBufferOp(consumerOpOperand,
-//     dependenceGraph);
-//   if (consumer.hasTensorSemantics())
-//     return findFusableProducerForTensorOp(consumerOpOperand);
-//   return llvm::None;
-// }
 
 /// Find all dependences that are fusable.
 FusableOpDependencesTy mlir::linalg::findAllFusableDependences(

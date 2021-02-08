@@ -176,7 +176,7 @@ inline int64_t decodeSLEB128(const uint8_t *p, unsigned *n = nullptr,
       return 0;
     }
     Byte = *p;
-    int64_t Slice = Byte & 0x7f;
+    uint64_t Slice = Byte & 0x7f;
     if ((Shift >= 64 && Slice != (Value < 0 ? 0x7f : 0x00)) ||
         (Shift == 63 && Slice != 0 && Slice != 0x7f)) {
       if (error)
@@ -205,4 +205,4 @@ extern unsigned getSLEB128Size(int64_t Value);
 
 } // namespace llvm
 
-#endif // LLVM_SYSTEM_LEB128_H
+#endif // LLVM_SUPPORT_LEB128_H

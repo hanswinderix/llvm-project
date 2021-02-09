@@ -149,6 +149,8 @@ private:
   DenseMap<MachineInstr *, size_t> InstIds;
   /// The set of sensitive instructions
   SmallPtrSet<const MachineInstr *, 10> SensitivityInfo;
+  /// The set of sensitive values
+  SmallPtrSet<const Value *, 10> SensitivityInfo2;
 
   MachineFunction *MF;
   // The sensitivity analysis procedure determines whether canonicalization is
@@ -260,7 +262,7 @@ private:
   void VerifyControlFlowAnalysis();
 
   void ComputeReachingDefs();
-  void PeformSensitivityAnalysis();
+  void PerformSensitivityAnalysis();
 
   void DetectOuterSensitiveBranches();
   void AnalyzeLoops();
@@ -825,7 +827,7 @@ void MSP430NemesisDefenderPass::ReAnalyzeControlFlow(MachineBasicBlock &MBB) {
   BBI->IsAnalyzable = false;
   BBI->IsBranch = false;
   BBI->IsConditionalBranch = false;
-  // HasSecretDependentBranch is set in PeformSensitivityAnalysis, not in
+  // HasSecretDependentBranch is set in PerformSensitivityAnalysis, not in
   //  AnalyzeControlFlow
   //BBI->HasSecretDependentBranch = false;
   // IsPartOfSensitiveRegion is set during outer region analysis
@@ -1848,6 +1850,17 @@ void MSP430NemesisDefenderPass::Taint(MachineInstr * MI) {
 
   //LLVM_DEBUG(dbgs() << GetName(MI->getParent()) << ": Tainting " << *MI);
 
+  for (auto &MMO : MI->memoperands()) {
+    if (MMO->isStore()) {
+      if (const Value *Val = MMO->getValue()) {
+        SensitivityInfo2.insert(Val);
+      } else if (const PseudoSourceValue *PVal = MMO->getPseudoValue()) {
+        // See MachineOperand::print (lib/CodeGen/MachineOperand.cpp)
+        llvm_unreachable("Unhandled memory access");
+      }
+    }
+  }
+
   if (MI->isConditionalBranch()) {
     assert(MI->getParent() != nullptr);
     auto L = MLI->getLoopFor(MI->getParent());
@@ -1942,10 +1955,10 @@ MSP430NemesisDefenderPass::IsPartOfSensitiveRegion(const MachineInstr *MI) {
 // !TODO: Desperately needs optimization
 //         - Implement this as a worklist algo (needs a def-use chain)
 //         - Store the sensitivity info in MBBInfo instead of a MF-level set?
-void MSP430NemesisDefenderPass::PeformSensitivityAnalysis() {
+void MSP430NemesisDefenderPass::PerformSensitivityAnalysis() {
   size_t N = 0;
-  while (SensitivityInfo.size() > N) {
-    N = SensitivityInfo.size();
+  while ((SensitivityInfo.size() + SensitivityInfo2.size()) > N) {
+    N = SensitivityInfo.size() + SensitivityInfo2.size();
     for (auto &MBB : *MF) {
       // Ignore the canonical exit node. Code asserts because the reaching def
       // analysis has not been peformed on this node. (Fix this?)
@@ -1960,7 +1973,8 @@ void MSP430NemesisDefenderPass::PeformSensitivityAnalysis() {
         if (SensitivityInfo.find(&MI) == SensitivityInfo.end()) {
 
           if (MI.isInlineAsm()) {
-            llvm_unreachable("Inline assembly is not supported");
+            //TODO: llvm_unreachable("Inline assembly is not supported");
+            continue;
           }
 
           if (MI.isCall()) {
@@ -1970,11 +1984,30 @@ void MSP430NemesisDefenderPass::PeformSensitivityAnalysis() {
             //continue;
           }
 
+#if 0
+          if (MI.mayLoad()) {
+            Taint(&MI);
+          }
+#endif
+
           // Mark every conditional branch that is part of a sensitive region
           // senstive in turn. (except for loop latches, see Taint())
           if (MI.isConditionalBranch()) {
             if (IsPartOfSensitiveRegion(&MI)) {
               Taint(&MI);
+            }
+          }
+
+          for (auto &MMO : MI.memoperands()) {
+            if (MMO->isLoad()) {
+              if (const Value *Val = MMO->getValue()) {
+                if (SensitivityInfo2.find(Val) != SensitivityInfo2.end()) {
+                  Taint(&MI);
+                }
+              }
+            } else if (const PseudoSourceValue *PVal = MMO->getPseudoValue()) {
+              // See MachineOperand::print (lib/CodeGen/MachineOperand.cpp)
+              llvm_unreachable("Unhandled memory access");
             }
           }
 
@@ -3315,8 +3348,8 @@ void MSP430NemesisDefenderPass::CanonicalizeCFG() {
 }
 
 bool MSP430NemesisDefenderPass::runOnMachineFunction(MachineFunction &MF) {
-  if (skipFunction(MF.getFunction()))
-    return false;
+  //if (skipFunction(MF.getFunction()))
+  //  return false;
   if (!Enable)
     return false;
 
@@ -3357,7 +3390,7 @@ bool MSP430NemesisDefenderPass::runOnMachineFunction(MachineFunction &MF) {
   VerifyControlFlowAnalysis();
   ComputeReachingDefs();
 
-  PeformSensitivityAnalysis();
+  PerformSensitivityAnalysis();
 #if 0
   ClassifyBranches();
 #endif

@@ -400,6 +400,7 @@ udivmodhi4_<pm>:
   .globl __mspabi_remi_<pm>
   .p2align 1
   .type __mspabi_remi_<pm>,@function
+  .equiv __mspabi_remu_<pm>, __mspabi_remi_<pm> ; TODO support remu properly
 __mspabi_remi_<pm>:
   push  r10   ;
   cmp #0, r12 ;r3 As==00

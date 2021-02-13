@@ -330,11 +330,15 @@ sllvm_reti:
   reti
   )";
 
+    // TODO: Improve RTL internalization by actually hardening the
+    //       compiler-rt functions
     constexpr const char *asm_mpyi = R"(
   .section .sllvm.text.<pm>.__mspabi_mpyi_<pm>,"ax",@progbits
   .globl __mspabi_mpyi_<pm>
   .p2align 1
   .type __mspabi_mpyi_<pm>,@function
+  .equiv _nds___mspabi_mpyi, __mspabi_mpyi_<pm>
+  .equiv _ndd___mspabi_mpyi, __mspabi_mpyi_<pm>
 __mspabi_mpyi_<pm>:
   push  r2    ;
   dint      
@@ -401,6 +405,8 @@ udivmodhi4_<pm>:
   .p2align 1
   .type __mspabi_remi_<pm>,@function
   .equiv __mspabi_remu_<pm>, __mspabi_remi_<pm> ; TODO support remu properly
+  .equiv _nds___mspabi_remi, __mspabi_remi_<pm>
+  .equiv _ndd___mspabi_remi, __mspabi_remi_<pm>
 __mspabi_remi_<pm>:
   push  r10   ;
   cmp #0, r12 ;r3 As==00
@@ -471,6 +477,36 @@ __mspabi_divi_<pm>:
   jge	$-10
   clr.b	r10
   br	#.SLLVM4
+  )";
+
+    constexpr const char *asm_fltulf = R"(
+  .section .sllvm.text.<pm>.__mspabi_fltulf_<pm>,"ax",@progbits
+  .globl __mspabi_fltulf_<pm>
+  .p2align 1
+  .type __mspabi_fltulf_<pm>,@function
+__mspabi_fltulf_<pm>:
+  nop     
+  reti      
+  )";
+
+    constexpr const char *asm_addf = R"(
+  .section .sllvm.text.<pm>.__mspabi_addf_<pm>,"ax",@progbits
+  .globl __mspabi_addf_<pm>
+  .p2align 1
+  .type __mspabi_addf_<pm>,@function
+__mspabi_addf_<pm>:
+  nop     
+  reti      
+  )";
+
+    constexpr const char *asm_mpyf = R"(
+  .section .sllvm.text.<pm>.__mspabi_mpyf_<pm>,"ax",@progbits
+  .globl __mspabi_mpyf_<pm>
+  .p2align 1
+  .type __mspabi_mpyf_<pm>,@function
+__mspabi_mpyf_<pm>:
+  nop     
+  reti      
   )";
 
     constexpr const char *asm_aliases = R"(

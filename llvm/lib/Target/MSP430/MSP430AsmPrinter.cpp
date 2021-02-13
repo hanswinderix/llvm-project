@@ -118,6 +118,12 @@ void MSP430AsmPrinter::emitEndOfAsmFile(Module &M) {
           sllvm::sancus::asm_remi, "<pm>", sllvm::getPMName(&M)).c_str());
     OutStreamer->emitRawText(string_replace(
           sllvm::sancus::asm_divi, "<pm>", sllvm::getPMName(&M)).c_str());
+    OutStreamer->emitRawText(string_replace(
+          sllvm::sancus::asm_fltulf, "<pm>", sllvm::getPMName(&M)).c_str());
+    OutStreamer->emitRawText(string_replace(
+          sllvm::sancus::asm_mpyf, "<pm>", sllvm::getPMName(&M)).c_str());
+    OutStreamer->emitRawText(string_replace(
+          sllvm::sancus::asm_addf, "<pm>", sllvm::getPMName(&M)).c_str());
 
     OutStreamer->emitRawText(string_replace(
           sllvm::sancus::asm_aliases, "<pm>", sllvm::getPMName(&M)).c_str());

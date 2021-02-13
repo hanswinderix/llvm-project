@@ -340,13 +340,52 @@ sllvm_reti:
   .equiv _nds___mspabi_mpyi, __mspabi_mpyi_<pm>
   .equiv _ndd___mspabi_mpyi, __mspabi_mpyi_<pm>
 __mspabi_mpyi_<pm>:
-  push  r2    ;
-  dint      
-  nop     
-  mov r12,  &0x0130 ;
-  mov r13,  &0x0138 ;
-  mov &0x013a,r12 ;0x013a
-  reti      
+	CMP.W	#0, R13
+  JGE	.MPYL2
+	MOV.B	#0, R14
+	SUB.W	R13, R14
+	MOV.W	R14, R13
+	MOV.B #42, R3
+	MOV.B	#1, R11
+.MPYL3:
+	MOV.B	#17, R15
+	MOV.B	#0, R14
+.MPYL4:
+	CMP.W	#0, R13 
+  JNE	.MPYL7
+.MPYL11:
+	CMP.W	#0, R11 
+  JNE	.MPYL8
+.MPYL1:
+	MOV.W	R14, R12
+	RET
+.MPYL2:
+	MOV.W R3, R3
+	MOV.W R3, R3
+	MOV.W R3, R3
+	MOV.B	#0, R11
+	BR	#.MPYL3
+.MPYL5:
+	MOV.B R3, R3
+	BR	#.MPYL6
+.MPYL7:
+	ADD.B	#-1, R15
+	AND	#0xff, R15
+	CMP.W	#0, R15 
+  JEQ	.MPYL11
+	BIT.W	#1, R13 
+  JEQ	.MPYL5
+	ADD.W	R12, R14
+	MOV.B #42, R3
+.MPYL6:
+	ADD.W	R12, R12
+	RRA.W	R13
+	BR	#.MPYL4
+.MPYL8:
+	MOV.B	#0, R12
+	SUB.W	R14, R12
+	MOV.W	R12, R14
+	BR	#.MPYL1
   )";
 
     constexpr const char *asm_divu = R"(

@@ -1846,13 +1846,14 @@ bool MSP430NemesisDefenderPass::IsSecretDependent(MBBInfo *BBI) {
 
 // Marks the given machine instruction as sensitive
 void MSP430NemesisDefenderPass::Taint(MachineInstr * MI) {
-  SensitivityInfo.insert(MI);
 
-  //LLVM_DEBUG(dbgs() << GetName(MI->getParent()) << ": Tainting " << *MI);
+  //LLVM_DEBUG(dbgs() << GetName(MI->getParent()) << ": Tainting instruction " << *MI);
+  SensitivityInfo.insert(MI);
 
   for (auto &MMO : MI->memoperands()) {
     if (MMO->isStore()) {
       if (const Value *Val = MMO->getValue()) {
+        //LLVM_DEBUG(dbgs() << GetName(MI->getParent()) << ": Tainting value " << *Val);
         SensitivityInfo2.insert(Val);
       } else if (const PseudoSourceValue *PVal = MMO->getPseudoValue()) {
         // See MachineOperand::print (lib/CodeGen/MachineOperand.cpp)
@@ -3395,6 +3396,12 @@ bool MSP430NemesisDefenderPass::runOnMachineFunction(MachineFunction &MF) {
   ClassifyBranches();
 #endif
   FinishAnalysis();
+
+  if (! HasSecretDependentBranch)
+  {
+    assert(! Changed);
+    return Changed;
+  }
 
   // Canonicalize CFG, if needed
   CanonicalizeCFG();

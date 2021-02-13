@@ -345,18 +345,35 @@ __mspabi_mpyi_<pm>:
 	MOV.B	#0, R14
 	SUB.W	R13, R14
 	MOV.W	R14, R13
-	MOV.B #42, R3
 	MOV.B	#1, R11
+  JMP .MPYL3
 .MPYL3:
-	MOV.B	#17, R15
+	MOV.B	#16, R15
 	MOV.B	#0, R14
-.MPYL4:
-	CMP.W	#0, R13 
-  JNE	.MPYL7
-.MPYL11:
+.MPYL6:
+	BIT.W	#1, R13
+  JEQ	.MPYL4
+	ADD.W	R12, R14
+	JMP .MPYL5
+.MPYL5:
+	ADD.W	R12, R12
+	RRA.W	R13
+	ADD.B	#-1, R15
+	AND	#0xff, R15
+	CMP.W	#0, R15
+  JNE	.MPYL6
 	CMP.W	#0, R11 
-  JNE	.MPYL8
+  JEQ	.MPYL1
+	MOV.B	#0, R12
+	SUB.W	R14, R12
+	MOV.W	R12, R14
+  JMP .MPYL7
 .MPYL1:
+	MOV.W R3, R3
+	MOV.W R3, R3
+	MOV.W R3, R3
+  JMP .MPYL7
+.MPYL7:
 	MOV.W	R14, R12
 	RET
 .MPYL2:
@@ -364,28 +381,10 @@ __mspabi_mpyi_<pm>:
 	MOV.W R3, R3
 	MOV.W R3, R3
 	MOV.B	#0, R11
-	BR	#.MPYL3
-.MPYL5:
+	JMP	.MPYL3
+.MPYL4:
 	MOV.B R3, R3
-	BR	#.MPYL6
-.MPYL7:
-	ADD.B	#-1, R15
-	AND	#0xff, R15
-	CMP.W	#0, R15 
-  JEQ	.MPYL11
-	BIT.W	#1, R13 
-  JEQ	.MPYL5
-	ADD.W	R12, R14
-	MOV.B #42, R3
-.MPYL6:
-	ADD.W	R12, R12
-	RRA.W	R13
-	BR	#.MPYL4
-.MPYL8:
-	MOV.B	#0, R12
-	SUB.W	R14, R12
-	MOV.W	R12, R14
-	BR	#.MPYL1
+	JMP	.MPYL5
   )";
 
     constexpr const char *asm_divu = R"(

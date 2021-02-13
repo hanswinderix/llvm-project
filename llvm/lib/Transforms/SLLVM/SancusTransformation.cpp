@@ -452,7 +452,9 @@ void SancusTransformation::handleEnclave(Module &M) {
   for (Function& F : M) {
     if (! F.isDeclaration()) {
       if (A.isEEntryDef(&F) || A.isEFunc(&F)) {
-        F.setSection(getTextSectionName(&F));
+        if (! F.hasSection()) {
+          F.setSection(getTextSectionName(&F));
+        }
       }
     }
   }

@@ -234,40 +234,36 @@ void SancusTransformation::createDispatchBody(Module &M, Function *D) {
       if (&F != D) {
         assert(! F.hasLocalLinkage());
         if (sllvm::shareProtectionDomains(&M, &F)) { 
+
           assert(F.arg_size() <= 4 && "Argument spilling not supported");
+          for (Argument &A : F.args()) {
+            assert(A.getType()->isSingleValueType() && "No register type");
+          }
 
           BasicBlock * BB = BasicBlock::Create(C, F.getName(), D);
           SI->addCase(ConstantInt::get(Int16Ty, id), BB);
           IRB.SetInsertPoint(BB);
 
-          // TODO: Optimize. The type conversions below should not be necessary 
-          //       as the values are already in the correct argument registers 
-          //       (R12-R15)
-          SmallVector<Value *, 4> args;
-          auto DAI = D->arg_begin();
-          for (Argument &A : F.args()) {
-            DAI++;
-            assert(DAI != D->arg_end());
-            assert(A.getType()->isSingleValueType() && "No register type");
+          Type * VoidTy = Type::getVoidTy(M.getContext());
+          Type * Int16Ty = Type::getInt16Ty(M.getContext());
+          Type *P[] = {Int16Ty, Int16Ty, Int16Ty, Int16Ty};
+          auto FTy = FunctionType::get(VoidTy, P, false);
+          auto PFTy = PointerType::get(FTy, 0);
+          auto A = IRB.CreateAlloca(PFTy);
+          IRB.CreateStore(IRB.CreateBitCast(&F, PFTy), A);
+          auto L = IRB.CreateLoad(A);
 
-            if (A.getType() == DAI->getType()) {
-              args.push_back(DAI);
-            }
-            else if (A.getType()->isPointerTy()) {
-              args.push_back(IRB.CreateIntToPtr(DAI, A.getType()));
-            }
-            else if (A.getType()->isIntegerTy()) {
-              args.push_back(IRB.CreateIntCast(DAI, A.getType(), false));
-            }
-            else {
-              assert(false && "TODO: Support more types?");
+          SmallVector<Value *, 4> args;
+          for (Argument &A : D->args()) {
+            if (&A != D->arg_begin()) {
+              args.push_back(&A);
             }
           }
-
-          auto I = IRB.CreateCall(&F, args);
+          auto I = IRB.CreateCall(FTy, L, args);
           if (! hasStack(&M)) {
             I->setCallingConv(CallingConv::SANCUS_DISPATCH);
           }
+
           IRB.CreateBr(EpiBB);
 
           // Create constant identifier for this entry function

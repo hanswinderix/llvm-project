@@ -879,8 +879,10 @@ static bool isOCall(TargetLowering::CallLoweringInfo &CLI) {
   auto F = CLI.CB->getCaller();
   if (sllvm::isProtected(CLI.CB->getCaller())) {
     const Function *CF = CLI.CB->getCalledFunction();
-    assert (CF != nullptr && "Indirect calls are not allowed in enclaves");
-    return (! sllvm::shareProtectionDomains(F, CF));
+
+    if (CF != nullptr) { // Indirect calls are allowed in the dispatcher
+      return (! sllvm::shareProtectionDomains(F, CF));
+    }
   }
 
   return false;
@@ -917,13 +919,17 @@ SDValue MSP430TargetLowering::lowerSancusCall(
   const Module * M = C->getParent();
 
   if (sllvm::isProtected(C) ) {
+    // Retrieve the dispatcher's address
+    auto DF = M->getNamedValue(sllvm::sancus::getDispatcherName(C));
+    assert(DF != nullptr && "Enclave dispatcher not found");
+
+    if (C == DF) // Ignore calls from the dispatcher, where indirect calls are allowed
+      return Chain;
+
     const Function *CF = CLI.CB->getCalledFunction();
     assert(CF != nullptr && "Indirect calls are not allowed in enclaves");
 
-    // Retrieve the dispatcher's address
-    auto F = M->getNamedValue(sllvm::sancus::getDispatcherName(C));
-    assert(F != nullptr && "Enclave dispatcher not found");
-    SDValue D = DAG.getGlobalAddress(F, dl, PtrVT);
+    SDValue D = DAG.getGlobalAddress(DF, dl, PtrVT);
 
     if (CLI.CallConv == CallingConv::SANCUS_ENTRY) {
       assert( (! sllvm::shareProtectionDomains(C, CF)) 

@@ -369,21 +369,21 @@ __mspabi_mpyi_<pm>:
 	MOV.W	R12, R14
   JMP .MPYL7
 .MPYL1:
-	MOV.W R3, R3
-	MOV.W R3, R3
-	MOV.W R3, R3
+	MOV.W R9, R9
+	MOV.W R9, R9
+	MOV.W R9, R9
   JMP .MPYL7
 .MPYL7:
 	MOV.W	R14, R12
 	RET
 .MPYL2:
-	MOV.W R3, R3
-	MOV.W R3, R3
-	MOV.W R3, R3
+	MOV.W R9, R9
+	MOV.W R9, R9
+	MOV.W R9, R9
 	MOV.B	#0, R11
 	JMP	.MPYL3
 .MPYL4:
-	MOV.B R3, R3
+	MOV.B R9, R9
 	JMP	.MPYL5
   )";
 
@@ -394,47 +394,84 @@ __mspabi_mpyi_<pm>:
   .type __mspabi_divu_<pm>,@function
 __mspabi_divu_<pm>:
   clr.b r14   ;
-  call  #udivmodhi4_<pm>
+  call  #udivmodhi4
+  ret     
+  )";
+
+    constexpr const char *asm_remu = R"(
+  .section .sllvm.text.<pm>.__mspabi_remu_<pm>,"ax",@progbits
+  .globl __mspabi_remu_<pm>
+  .p2align 1
+  .type __mspabi_remu_<pm>,@function
+__mspabi_remu_<pm>:
+  mov.b #1, r14
+  call  #udivmodhi4
   ret     
   )";
 
     constexpr const char *asm_divumodhi4 = R"(
-  .section .sllvm.text.<pm>.udivmodhi4_<pm>,"ax",@progbits
-  .globl udivmodhi4_<pm>
+  .section .sllvm.text.<pm>.udivmodhi4,"ax",@progbits
   .p2align 1
-  .type udivmodhi4_<pm>,@function
-udivmodhi4_<pm>:
-  mov.b #17,  r15 ;#0x0011
-  mov.b #1, r11 ;r3 As==01
-.SLLVM1:
-  cmp r12,  r13 ;
-  jnc $+18      ;abs 0x885e
-  clr.b r15   ;
-.SLLVM2:
-  cmp #0, r11 ;r3 As==00
-  jnz $+30      ;abs 0x8870
-  cmp #0, r14 ;r3 As==00
-  jz  $+4       ;abs 0x885a
-  mov r12,  r15 ;
-  mov r15,  r12 ;
-  ret     
-  add #-1,  r15 ;r3 As==11
-  cmp #0, r15 ;r3 As==00
-  jz  $-14      ;abs 0x8854
-  cmp #0, r13 ;r3 As==00
-  jl  $-24      ;abs 0x884e
-  rla r13   ;
-  rla r11   ;
-  br  #.SLLVM1
-  cmp r13,  r12 ;
-  jnc $+6       ;abs 0x8878
-  sub r13,  r12 ;
-  bis r11,  r15 ;
-  clrc      
-  rrc r11   ;
-  clrc      
-  rrc r13   ;
-  br  #.SLLVM2
+  .type udivmodhi4,@function
+udivmodhi4:
+	PUSH	R10
+	MOV.B	#16, R11
+	MOV.B	#1, R15
+.DIVMOD4:
+	CMP.W	R12, R13 { JHS	.DIVMOD2a
+	CMP.W	#0, R15 { JEQ	.DIVMOD2b
+	CMP.W	#0, R13 { JL	.DIVMOD2c
+	ADD.W	R13, R13
+	ADD.W	R15, R15
+	MOV.B #42, R3 ;A
+.DIVMOD3:
+	ADD.W	#-1, R11
+	CMP.W	#0, R11 { JNE	.DIVMOD4
+	MOV.B	#16, R10
+.DIVMOD9:
+	CMP.W	#0, R15 { JEQ	.DIVMOD5
+	CMP.W	R13, R12 { JLO	.DIVMOD6
+	SUB.W	R13, R12
+	BIS.W	R15, R11
+	MOV.B #42, R3 ;B
+.DIVMOD7:
+	CLRC { RRC.W	R15
+	CLRC { RRC.W	R13
+	MOV.B #42, R3 ;B
+.DIVMOD8:
+	ADD.W	#-1, R10
+	CMP.W	#0, R10 { JNE	.DIVMOD9
+	CMP.W	#0, R14 { JEQ	.DIVMOD1
+	MOV.W	R12, R11
+.DIVMOD1:
+	MOV.W	R11, R12
+	POP	R10
+	RET
+.DIVMOD2a:
+	MOV.B R9, R9 ;A
+	MOV.B #42, R3 ;A
+.DIVMOD2b:
+	MOV.B R9, R9 ;A
+	MOV.B #42, R3 ;A
+.DIVMOD2c:
+	MOV.B R9, R9 ;A
+	MOV.B R9, R9 ;A
+	JMP	.DIVMOD3
+.DIVMOD6:
+	MOV.B R9, R9 ;B
+	MOV.B R9, R9 ;B
+	JMP	.DIVMOD7
+.DIVMOD5:
+	MOV.B R9, R9 
+	MOV.B #42, R3
+	MOV.B R9, R9 
+	MOV.B R9, R9 
+	MOV.B #42, R3
+	MOV.B R9, R9 
+	MOV.B R9, R9 
+	MOV.B R9, R9 
+	MOV.B R9, R9 
+	JMP	.DIVMOD8
   )";
 
     constexpr const char *asm_remi = R"(
@@ -442,34 +479,49 @@ udivmodhi4_<pm>:
   .globl __mspabi_remi_<pm>
   .p2align 1
   .type __mspabi_remi_<pm>,@function
-  .equiv __mspabi_remu_<pm>, __mspabi_remi_<pm> ; TODO support remu properly
   .equiv _nds___mspabi_remi, __mspabi_remi_<pm>
   .equiv _ndd___mspabi_remi, __mspabi_remi_<pm>
 __mspabi_remi_<pm>:
-  push  r10   ;
-  cmp #0, r12 ;r3 As==00
-  jge $+40      ;abs 0x88fc
-  clr.b r14   ;
-  sub r12,  r14 ;
-  mov r14,  r12 ;
-  mov.b #1, r10 ;r3 As==01
-.SLLVM3:
-  cmp #0, r13 ;r3 As==00
-  jge $+8       ;abs 0x88e8
-  clr.b r14   ;
-  sub r13,  r14 ;
-  mov r14,  r13 ;
-  mov.b #1, r14 ;r3 As==01
-  call  #udivmodhi4_<pm>
-  cmp #0, r10 ;r3 As==00
-  jz  $+8       ;abs 0x88f8
-  clr.b r13   ;
-  sub r12,  r13 ;
-  mov r13,  r12 ;
-  pop r10   ;
-  ret     
-  clr.b r10   ;
-  br  #.SLLVM3
+	PUSH	R10
+	CMP.W	#0, R12 { JGE	.DIVML25
+	MOV.B	#0, R14
+	SUB.W	R12, R14
+	MOV.W	R14, R12
+	MOV.B #42, R3 ;X1
+	MOV.B	#1, R10
+.DIVML26:
+	CMP.W	#0, R13 { JGE	.DIVML27
+	MOV.B	#0, R14
+	SUB.W	R13, R14
+	MOV.W	R14, R13
+	MOV.B #42, R3 ;X2
+.DIVML28:
+	MOV.B	#1, R14
+	CALL	#udivmodhi4
+	CMP.W	#0, R10 { JEQ	.DIVML29
+	MOV.B	#0, R13
+	SUB.W	R12, R13
+	MOV.W	R13, R12
+	MOV.B #42, R3 ;X3
+.DIVML24:
+	POP	R10
+	RET
+.DIVML25:
+	MOV.B R9, R9 ;X1
+	MOV.B R9, R9 ;X1
+	MOV.B R9, R9 ;X1
+	MOV.B	#0, R10
+	JMP	.DIVML26
+.DIVML27:
+	MOV.B R9, R9 ;X2
+	MOV.B R9, R9 ;X2
+	MOV.B R9, R9 ;X2
+	JMP	.DIVML28
+.DIVML29:
+	MOV.B R9, R9 ;X3
+	MOV.B R9, R9 ;X3
+	MOV.B R9, R9 ;X3
+	JMP	.DIVML24
   )";
 
     constexpr const char *asm_divi = R"(
@@ -478,43 +530,48 @@ __mspabi_remi_<pm>:
   .p2align 1
   .type __mspabi_divi_<pm>,@function
 __mspabi_divi_<pm>:
-  push	r10
-  mov	r12,	r15
-  mov	r13,	r14
-  mov	#udivmodhi4,r11
-  cmp	#0,	r12
-  jge	$+54
-  clr.b	r12
-  sub	r15,	r12
-  mov	r12,	r15
-  cmp	#0,	r13
-  jge	$+28
-  mov.b	#1,	r10
-.SLLVM4:
-  clr	r13
-  sub	r14,	r13
-  clr.b	r14
-  mov	r15,	r12
-  call	r11
-  cmp	#1,	r10
-  jz	$+8
-.SLLVM5:
-  clr.b	r13
-  sub	r12,	r13
-  mov	r13,	r12
-.SLLVM6:
-  pop	r10
-  ret			
-  clr.b	r14
-  call	r11
-  br	#.SLLVM5
-  clr.b	r14
-  call	r11
-  br	#.SLLVM6
-  cmp	#0,	r13
-  jge	$-10
-  clr.b	r10
-  br	#.SLLVM4
+	PUSH	R10
+	CMP.W	#0, R12 { JGE	.DIVML18
+	MOV.B	#0, R14
+	SUB.W	R12, R14
+	MOV.W	R14, R12
+	MOV.B #42, R3 ;1
+	MOV.B	#1, R10
+.DIVML19:
+	CMP.W	#0, R13 { JGE	.DIVML20
+	MOV.B	#0, R14
+	SUB.W	R13, R14
+	MOV.W	R14, R13
+	XOR.W	#1, R10
+	MOV.B #42, R3 ;2
+.DIVML21:
+	MOV.B	#0, R14
+	CALL	#udivmodhi4
+	CMP.W	#0, R10 { JEQ	.DIVML22
+	MOV.B	#0, R13
+	SUB.W	R12, R13
+	MOV.W	R13, R12
+	MOV.B #42, R3 ;3
+.DIVML17:
+	POP	R10
+	RET
+.DIVML18:
+	MOV.B R9, R9 ;1
+	MOV.B R9, R9 ;1
+	MOV.B R9, R9 ;1
+	MOV.B	#0, R10
+	JMP	.DIVML19
+.DIVML20:
+	MOV.B R9, R9 ;2
+	MOV.B R9, R9 ;2
+	MOV.B R9, R9 ;2
+	MOV.B R9, R9 ;2
+	JMP	.DIVML21
+.DIVML22:
+	MOV.B R9, R9 ;3
+	MOV.B R9, R9 ;3
+	MOV.B R9, R9 ;3
+	JMP	.DIVML17
   )";
 
     constexpr const char *asm_fltulf = R"(

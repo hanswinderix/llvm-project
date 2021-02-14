@@ -111,7 +111,11 @@ void MSP430AsmPrinter::emitEndOfAsmFile(Module &M) {
     OutStreamer->emitRawText(string_replace(
           sllvm::sancus::asm_mpyi, "<pm>", sllvm::getPMName(&M)).c_str());
     OutStreamer->emitRawText(string_replace(
+          sllvm::sancus::asm_mpyl, "<pm>", sllvm::getPMName(&M)).c_str());
+    OutStreamer->emitRawText(string_replace(
           sllvm::sancus::asm_divu, "<pm>", sllvm::getPMName(&M)).c_str());
+    OutStreamer->emitRawText(string_replace(
+          sllvm::sancus::asm_divul, "<pm>", sllvm::getPMName(&M)).c_str());
     OutStreamer->emitRawText(string_replace(
           sllvm::sancus::asm_divumodhi4, "<pm>", sllvm::getPMName(&M)).c_str());
     OutStreamer->emitRawText(string_replace(
@@ -124,6 +128,8 @@ void MSP430AsmPrinter::emitEndOfAsmFile(Module &M) {
           sllvm::sancus::asm_fltulf, "<pm>", sllvm::getPMName(&M)).c_str());
     OutStreamer->emitRawText(string_replace(
           sllvm::sancus::asm_mpyf, "<pm>", sllvm::getPMName(&M)).c_str());
+    OutStreamer->emitRawText(string_replace(
+          sllvm::sancus::asm_divf, "<pm>", sllvm::getPMName(&M)).c_str());
     OutStreamer->emitRawText(string_replace(
           sllvm::sancus::asm_addf, "<pm>", sllvm::getPMName(&M)).c_str());
 

@@ -387,6 +387,17 @@ __mspabi_mpyi_<pm>:
 	JMP	.MPYL5
   )";
 
+    constexpr const char *asm_mpyl = R"(
+  .section .sllvm.text.<pm>.__mspabi_mpyl_<pm>,"ax",@progbits
+  .globl __mspabi_mpyl_<pm>
+  .p2align 1
+  .type __mspabi_mpyl_<pm>,@function
+  .equiv _nds___mspabi_mpyl, __mspabi_mpyl_<pm>
+  .equiv _ndd___mspabi_mpyl, __mspabi_mpyl_<pm>
+__mspabi_mpyl_<pm>:
+  ret
+  )";
+
     constexpr const char *asm_divu = R"(
   .section .sllvm.text.<pm>.__mspabi_divu_<pm>,"ax",@progbits
   .globl __mspabi_divu_<pm>
@@ -396,6 +407,17 @@ __mspabi_divu_<pm>:
   clr.b r14   ;
   call  #udivmodhi4
   ret     
+  )";
+
+    constexpr const char *asm_divul = R"(
+  .section .sllvm.text.<pm>.__mspabi_divul_<pm>,"ax",@progbits
+  .globl __mspabi_divul_<pm>
+  .p2align 1
+  .type __mspabi_divul_<pm>,@function
+  .equiv _nds___mspabi_divul, __mspabi_divul_<pm>
+  .equiv _ndd___mspabi_divul, __mspabi_divul_<pm>
+__mspabi_divul_<pm>:
+  ret
   )";
 
     constexpr const char *asm_remu = R"(
@@ -580,8 +602,7 @@ __mspabi_divi_<pm>:
   .p2align 1
   .type __mspabi_fltulf_<pm>,@function
 __mspabi_fltulf_<pm>:
-  nop     
-  reti      
+  ret
   )";
 
     constexpr const char *asm_addf = R"(
@@ -590,8 +611,7 @@ __mspabi_fltulf_<pm>:
   .p2align 1
   .type __mspabi_addf_<pm>,@function
 __mspabi_addf_<pm>:
-  nop     
-  reti      
+  ret
   )";
 
     constexpr const char *asm_mpyf = R"(
@@ -600,8 +620,16 @@ __mspabi_addf_<pm>:
   .p2align 1
   .type __mspabi_mpyf_<pm>,@function
 __mspabi_mpyf_<pm>:
-  nop     
-  reti      
+  ret
+  )";
+
+    constexpr const char *asm_divf = R"(
+  .section .sllvm.text.<pm>.__mspabi_divf_<pm>,"ax",@progbits
+  .globl __mspabi_divf_<pm>
+  .p2align 1
+  .type __mspabi_divf_<pm>,@function
+__mspabi_divf_<pm>:
+  ret
   )";
 
     constexpr const char *asm_aliases = R"(

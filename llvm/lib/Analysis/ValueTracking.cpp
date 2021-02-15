@@ -1362,6 +1362,51 @@ static void computeKnownBitsFromOperator(const Operator *I,
         if (!LU)
           continue;
         unsigned Opcode = LU->getOpcode();
+
+
+        // If this is a shift recurrence, we know the bits being shifted in.
+        // We can combine that with information about the start value of the
+        // recurrence to conclude facts about the result.
+        if (Opcode == Instruction::LShr ||
+            Opcode == Instruction::AShr ||
+            Opcode == Instruction::Shl) {
+          Value *LL = LU->getOperand(0);
+          Value *LR = LU->getOperand(1);
+          // Find a recurrence.
+          if (LL == I)
+            L = LR;
+          else
+            continue; // Check for recurrence with L and R flipped.
+
+          // We have matched a recurrence of the form:
+          // %iv = [R, %entry], [%iv.next, %backedge]
+          // %iv.next = shift_op %iv, L
+
+          // Recurse with the phi context to avoid concern about whether facts
+          // inferred hold at original context instruction.  TODO: It may be
+          // correct to use the original context.  IF warranted, explore and
+          // add sufficient tests to cover.
+          Query RecQ = Q;
+          RecQ.CxtI = P;
+          computeKnownBits(R, DemandedElts, Known2, Depth + 1, RecQ);
+          switch (Opcode) {
+          case Instruction::Shl:
+            // A shl recurrence will only increase the tailing zeros
+            Known.Zero.setLowBits(Known2.countMinTrailingZeros());
+            break;
+          case Instruction::LShr:
+            // A lshr recurrence will preserve the leading zeros of the
+            // start value
+            Known.Zero.setHighBits(Known2.countMinLeadingZeros());
+            break;
+          case Instruction::AShr:
+            // An ashr recurrence will extend the initial sign bit
+            Known.Zero.setHighBits(Known2.countMinLeadingZeros());
+            Known.One.setHighBits(Known2.countMinLeadingOnes());
+            break;
+          };
+        }
+
         // Check for operations that have the property that if
         // both their operands have low zero bits, the result
         // will have low zero bits.
@@ -5084,8 +5129,8 @@ bool llvm::propagatesPoison(const Operator *I) {
   }
 }
 
-void llvm::getGuaranteedNonPoisonOps(const Instruction *I,
-                                     SmallPtrSetImpl<const Value *> &Operands) {
+void llvm::getGuaranteedWellDefinedOps(
+    const Instruction *I, SmallPtrSetImpl<const Value *> &Operands) {
   switch (I->getOpcode()) {
     case Instruction::Store:
       Operands.insert(cast<StoreInst>(I)->getPointerOperand());
@@ -5095,6 +5140,8 @@ void llvm::getGuaranteedNonPoisonOps(const Instruction *I,
       Operands.insert(cast<LoadInst>(I)->getPointerOperand());
       break;
 
+    // Since dereferenceable attribute imply noundef, atomic operations
+    // also implicitly have noundef pointers too
     case Instruction::AtomicCmpXchg:
       Operands.insert(cast<AtomicCmpXchgInst>(I)->getPointerOperand());
       break;
@@ -5103,20 +5150,14 @@ void llvm::getGuaranteedNonPoisonOps(const Instruction *I,
       Operands.insert(cast<AtomicRMWInst>(I)->getPointerOperand());
       break;
 
-    case Instruction::UDiv:
-    case Instruction::SDiv:
-    case Instruction::URem:
-    case Instruction::SRem:
-      Operands.insert(I->getOperand(1));
-      break;
-
     case Instruction::Call:
     case Instruction::Invoke: {
       const CallBase *CB = cast<CallBase>(I);
       if (CB->isIndirectCall())
         Operands.insert(CB->getCalledOperand());
       for (unsigned i = 0; i < CB->arg_size(); ++i) {
-        if (CB->paramHasAttr(i, Attribute::NoUndef))
+        if (CB->paramHasAttr(i, Attribute::NoUndef) ||
+            CB->paramHasAttr(i, Attribute::Dereferenceable))
           Operands.insert(CB->getArgOperand(i));
       }
       break;
@@ -5124,6 +5165,23 @@ void llvm::getGuaranteedNonPoisonOps(const Instruction *I,
 
     default:
       break;
+  }
+}
+
+void llvm::getGuaranteedNonPoisonOps(const Instruction *I,
+                                     SmallPtrSetImpl<const Value *> &Operands) {
+  getGuaranteedWellDefinedOps(I, Operands);
+  switch (I->getOpcode()) {
+  // Divisors of these operations are allowed to be partially undef.
+  case Instruction::UDiv:
+  case Instruction::SDiv:
+  case Instruction::URem:
+  case Instruction::SRem:
+    Operands.insert(I->getOperand(1));
+    break;
+
+  default:
+    break;
   }
 }
 
@@ -5164,19 +5222,16 @@ static bool programUndefinedIfUndefOrPoison(const Value *V,
   BasicBlock::const_iterator End = BB->end();
 
   if (!PoisonOnly) {
-    // Be conservative & just check whether a value is passed to a noundef
-    // argument.
-    // Instructions that raise UB with a poison operand are well-defined
-    // or have unclear semantics when the input is partially undef.
-    // For example, 'udiv x, (undef | 1)' isn't UB.
+    // Since undef does not propagate eagerly, be conservative & just check
+    // whether a value is directly passed to an instruction that must take
+    // well-defined operands.
 
     for (auto &I : make_range(Begin, End)) {
-      if (const auto *CB = dyn_cast<CallBase>(&I)) {
-        for (unsigned i = 0; i < CB->arg_size(); ++i) {
-          if (CB->paramHasAttr(i, Attribute::NoUndef) &&
-              CB->getArgOperand(i) == V)
-            return true;
-        }
+      SmallPtrSet<const Value *, 4> WellDefinedOps;
+      getGuaranteedWellDefinedOps(&I, WellDefinedOps);
+      for (auto *Op : WellDefinedOps) {
+        if (Op == V)
+          return true;
       }
       if (!isGuaranteedToTransferExecutionToSuccessor(&I))
         break;

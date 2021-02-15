@@ -638,13 +638,15 @@ public:
                   DominatorTree *DT, AssumptionCache *AC,
                   TargetLibraryInfo *LibInfo) const;
 
-  /// \return True is LSR should make efforts to create/preserve post-inc
-  /// addressing mode expressions.
-  bool shouldFavorPostInc() const;
+  enum AddressingModeKind {
+    AMK_PreIndexed,
+    AMK_PostIndexed,
+    AMK_None
+  };
 
-  /// Return true if LSR should make efforts to generate indexed addressing
-  /// modes that operate across loop iterations.
-  bool shouldFavorBackedgeIndex(const Loop *L) const;
+  /// Return the preferred addressing mode LSR should make efforts to generate.
+  AddressingModeKind getPreferredAddressingMode(const Loop *L,
+                                                ScalarEvolution *SE) const;
 
   /// Return true if the target supports masked store.
   bool isLegalMaskedStore(Type *DataType, Align Alignment) const;
@@ -1326,11 +1328,6 @@ public:
     bool NoNaN;    ///< If op is an fp min/max, whether NaNs may be present.
   };
 
-  /// \returns True if the target wants to handle the given reduction idiom in
-  /// the intrinsics form instead of the shuffle form.
-  bool useReductionIntrinsic(unsigned Opcode, Type *Ty,
-                             ReductionFlags Flags) const;
-
   /// \returns True if the target prefers reductions in loop.
   bool preferInLoopReduction(unsigned Opcode, Type *Ty,
                              ReductionFlags Flags) const;
@@ -1459,8 +1456,8 @@ public:
   virtual bool canSaveCmp(Loop *L, BranchInst **BI, ScalarEvolution *SE,
                           LoopInfo *LI, DominatorTree *DT, AssumptionCache *AC,
                           TargetLibraryInfo *LibInfo) = 0;
-  virtual bool shouldFavorPostInc() const = 0;
-  virtual bool shouldFavorBackedgeIndex(const Loop *L) const = 0;
+  virtual AddressingModeKind
+    getPreferredAddressingMode(const Loop *L, ScalarEvolution *SE) const = 0;
   virtual bool isLegalMaskedStore(Type *DataType, Align Alignment) = 0;
   virtual bool isLegalMaskedLoad(Type *DataType, Align Alignment) = 0;
   virtual bool isLegalNTStore(Type *DataType, Align Alignment) = 0;
@@ -1652,8 +1649,6 @@ public:
   virtual unsigned getStoreVectorFactor(unsigned VF, unsigned StoreSize,
                                         unsigned ChainSizeInBytes,
                                         VectorType *VecTy) const = 0;
-  virtual bool useReductionIntrinsic(unsigned Opcode, Type *Ty,
-                                     ReductionFlags) const = 0;
   virtual bool preferInLoopReduction(unsigned Opcode, Type *Ty,
                                      ReductionFlags) const = 0;
   virtual bool preferPredicatedReductionSelect(unsigned Opcode, Type *Ty,
@@ -1803,9 +1798,10 @@ public:
                   TargetLibraryInfo *LibInfo) override {
     return Impl.canSaveCmp(L, BI, SE, LI, DT, AC, LibInfo);
   }
-  bool shouldFavorPostInc() const override { return Impl.shouldFavorPostInc(); }
-  bool shouldFavorBackedgeIndex(const Loop *L) const override {
-    return Impl.shouldFavorBackedgeIndex(L);
+  AddressingModeKind
+    getPreferredAddressingMode(const Loop *L,
+                               ScalarEvolution *SE) const override {
+    return Impl.getPreferredAddressingMode(L, SE);
   }
   bool isLegalMaskedStore(Type *DataType, Align Alignment) override {
     return Impl.isLegalMaskedStore(DataType, Alignment);
@@ -2182,10 +2178,6 @@ public:
                                 unsigned ChainSizeInBytes,
                                 VectorType *VecTy) const override {
     return Impl.getStoreVectorFactor(VF, StoreSize, ChainSizeInBytes, VecTy);
-  }
-  bool useReductionIntrinsic(unsigned Opcode, Type *Ty,
-                             ReductionFlags Flags) const override {
-    return Impl.useReductionIntrinsic(Opcode, Ty, Flags);
   }
   bool preferInLoopReduction(unsigned Opcode, Type *Ty,
                              ReductionFlags Flags) const override {

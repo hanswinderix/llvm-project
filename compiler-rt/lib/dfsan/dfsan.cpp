@@ -65,9 +65,11 @@ SANITIZER_INTERFACE_ATTRIBUTE uptr __dfsan_shadow_ptr_mask;
 // |                    |
 // |       unused       |
 // |                    |
-// +--------------------+ 0x200200000000 (kUnusedAddr)
+// +--------------------+ 0x300200000000 (kUnusedAddr)
 // |    union table     |
-// +--------------------+ 0x200000000000 (kUnionTableAddr)
+// +--------------------+ 0x300000000000 (kUnionTableAddr)
+// |       origin       |
+// +--------------------+ 0x200000000000 (kOriginAddr)
 // |   shadow memory    |
 // +--------------------+ 0x000000010000 (kShadowAddr)
 // | reserved by kernel |
@@ -302,6 +304,7 @@ dfsan_label dfsan_create_label(const char *desc, void *userdata) {
     stack.Print();                      \
   }
 
+/*
 static u32 ChainOrigin(u32 id, StackTrace *stack, bool from_init = false) {
   // StackDepot is not async signal safe. Do not create new chains in a signal
   // handler.
@@ -324,6 +327,7 @@ static u32 ChainOrigin(u32 id, StackTrace *stack, bool from_init = false) {
   Origin chained = Origin::CreateChainedOrigin(o, stack);
   return chained.raw_id();
 }
+*/
 
 static void WriteShadowIfDifferent(dfsan_label label, uptr shadow_addr,
                                    uptr size) {
@@ -549,7 +553,7 @@ static void dfsan_fini() {
 }
 
 extern "C" void dfsan_flush() {
-  if (!MmapFixedNoReserve(ShadowAddr(), UnusedAddr() - ShadowAddr()))
+  if (!MmapFixedSuperNoReserve(ShadowAddr(), UnusedAddr() - ShadowAddr()))
     Die();
 }
 
@@ -558,8 +562,7 @@ static void dfsan_init(int argc, char **argv, char **envp) {
 
   ::InitializePlatformEarly();
 
-  if (!MmapFixedSuperNoReserve(ShadowAddr(), UnusedAddr() - ShadowAddr()))
-    Die();
+  dfsan_flush();
   if (common_flags()->use_madv_dontdump)
     DontDumpShadowMemory(ShadowAddr(), UnusedAddr() - ShadowAddr());
 

@@ -100,18 +100,20 @@ bool ARMTTIImpl::areInlineCompatible(const Function *Caller,
   return MatchExact && MatchSubset;
 }
 
-bool ARMTTIImpl::shouldFavorBackedgeIndex(const Loop *L) const {
-  if (L->getHeader()->getParent()->hasOptSize())
-    return false;
+TTI::AddressingModeKind
+ARMTTIImpl::getPreferredAddressingMode(const Loop *L,
+                                       ScalarEvolution *SE) const {
   if (ST->hasMVEIntegerOps())
-    return false;
-  return ST->isMClass() && ST->isThumb2() && L->getNumBlocks() == 1;
-}
+    return TTI::AMK_PostIndexed;
 
-bool ARMTTIImpl::shouldFavorPostInc() const {
-  if (ST->hasMVEIntegerOps())
-    return true;
-  return false;
+  if (L->getHeader()->getParent()->hasOptSize())
+    return TTI::AMK_None;
+
+  if (ST->isMClass() && ST->isThumb2() &&
+      L->getNumBlocks() == 1)
+    return TTI::AMK_PreIndexed;
+
+  return TTI::AMK_None;
 }
 
 Optional<Instruction *>
@@ -2089,11 +2091,6 @@ void ARMTTIImpl::getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
 void ARMTTIImpl::getPeelingPreferences(Loop *L, ScalarEvolution &SE,
                                        TTI::PeelingPreferences &PP) {
   BaseT::getPeelingPreferences(L, SE, PP);
-}
-
-bool ARMTTIImpl::useReductionIntrinsic(unsigned Opcode, Type *Ty,
-                                       TTI::ReductionFlags Flags) const {
-  return ST->hasMVEIntegerOps();
 }
 
 bool ARMTTIImpl::preferInLoopReduction(unsigned Opcode, Type *Ty,

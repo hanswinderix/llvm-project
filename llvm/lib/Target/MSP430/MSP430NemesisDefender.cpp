@@ -75,6 +75,7 @@ public:
     bool HasSecretDependentBranch   : 1;
     bool IsEntry                    : 1;
     bool IsReturn                   : 1;
+    bool IsMultiWayBranch           : 1;
     int TripCount = -1; /* Only relevant when IsLoopHeader is true */
                         /* LTODO: Add LoopInfo struct ? */
     size_t TerminatorCount = 0;
@@ -433,6 +434,13 @@ void MSP430NemesisDefenderPass::AnalyzeControlFlow(MBBInfo &BBI) {
         BBI.IsAnalyzable = true;
         BBI.IsReturn = true;
         assert(BBI.BB->isReturnBlock());
+      }
+      else if (I->isIndirectBranch()) {
+        // Assume this is a multiway branch encoded with a jumptable
+        // TODO: Figure out how to deal with unknown targets
+        assert(MBB->succ_size() > 2 && "No multiway branch?");
+        BBI.IsAnalyzable = true;
+        BBI.IsMultiWayBranch = true;
       }
     }
   }
@@ -1667,6 +1675,7 @@ void MSP430NemesisDefenderPass::CanonicalizeTerminatingInstructions(
   //LLVM_DEBUG(dbgs() << *MBB);
   //LLVM_DEBUG(dbgs() << *T);
   auto BBI = GetInfo(*MBB);
+
   switch (BBI->TerminatorCount) {
     case 0:
       assert(! BBI->IsBranch);
@@ -1683,6 +1692,10 @@ void MSP430NemesisDefenderPass::CanonicalizeTerminatingInstructions(
       else if (BBI->IsReturn) {
         assert(TII->getInstrLatency(nullptr, *T) == 3);
         llvm_unreachable("Canonical CFG expected");
+      }
+      else if (BBI->IsMultiWayBranch) {
+        BuildNOP2(*MBB, T, TII);
+        assert(TII->getInstrLatency(nullptr, *T++) == 2);
       }
       else {
         //LLVM_DEBUG(DumpMF(*MF));
@@ -1855,7 +1868,8 @@ void MSP430NemesisDefenderPass::Taint(MachineInstr * MI) {
       if (const Value *Val = MMO->getValue()) {
         //LLVM_DEBUG(dbgs() << GetName(MI->getParent()) << ": Tainting value " << *Val);
         SensitivityInfo2.insert(Val);
-      } else if (const PseudoSourceValue *PVal = MMO->getPseudoValue()) {
+      } else if (MMO->getPseudoValue()) {
+      //} else if (const PseudoSourceValue *PVal = MMO->getPseudoValue()) {
         // See MachineOperand::print (lib/CodeGen/MachineOperand.cpp)
         llvm_unreachable("Unhandled memory access");
       }
@@ -2006,7 +2020,8 @@ void MSP430NemesisDefenderPass::PerformSensitivityAnalysis() {
                   Taint(&MI);
                 }
               }
-            } else if (const PseudoSourceValue *PVal = MMO->getPseudoValue()) {
+            } else if (MMO->getPseudoValue()) {
+            //} else if (const PseudoSourceValue *PVal = MMO->getPseudoValue()) {
               // See MachineOperand::print (lib/CodeGen/MachineOperand.cpp)
               llvm_unreachable("Unhandled memory access");
             }

@@ -2941,6 +2941,12 @@ void MSP430NemesisDefenderPass::AlignSensitiveBranch(MBBInfo &BBI) {
   Successors Succs;
   Succs = ComputeSuccessors({BBI.BB}, ExitOfSR);
   while (!Succs.Succs.empty()) {
+
+#if 0
+    MF->viewCFGOnly();
+    getchar();
+#endif
+
     // TODO: Make sure this loop terminates
     if (Succs.Loop == nullptr) {
       assert(Succs.Succs.size() > 1);

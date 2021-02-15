@@ -341,50 +341,50 @@ sllvm_reti:
   .equiv _ndd___mspabi_mpyi, __mspabi_mpyi_<pm>
 __mspabi_mpyi_<pm>:
 	CMP.W	#0, R13
-  JGE	.MPYL2
+  JGE	.MPY2
 	MOV.B	#0, R14
 	SUB.W	R13, R14
 	MOV.W	R14, R13
 	MOV.B	#1, R11
-  JMP .MPYL3
-.MPYL3:
+  JMP .MPY3
+.MPY3:
 	MOV.B	#16, R15
 	MOV.B	#0, R14
-.MPYL6:
+.MPY6:
 	BIT.W	#1, R13
-  JEQ	.MPYL4
+  JEQ	.MPY4
 	ADD.W	R12, R14
-	JMP .MPYL5
-.MPYL5:
+	JMP .MPY5
+.MPY5:
 	ADD.W	R12, R12
 	RRA.W	R13
 	ADD.B	#-1, R15
 	AND	#0xff, R15
 	CMP.W	#0, R15
-  JNE	.MPYL6
+  JNE	.MPY6
 	CMP.W	#0, R11 
-  JEQ	.MPYL1
+  JEQ	.MPY1
 	MOV.B	#0, R12
 	SUB.W	R14, R12
 	MOV.W	R12, R14
-  JMP .MPYL7
-.MPYL1:
+  JMP .MPY7
+.MPY1:
 	MOV.W R9, R9
 	MOV.W R9, R9
 	MOV.W R9, R9
-  JMP .MPYL7
-.MPYL7:
+  JMP .MPY7
+.MPY7:
 	MOV.W	R14, R12
 	RET
-.MPYL2:
+.MPY2:
 	MOV.W R9, R9
 	MOV.W R9, R9
 	MOV.W R9, R9
 	MOV.B	#0, R11
-	JMP	.MPYL3
-.MPYL4:
+	JMP	.MPY3
+.MPY4:
 	MOV.B R9, R9
-	JMP	.MPYL5
+	JMP	.MPY5
   )";
 
     constexpr const char *asm_mpyl = R"(
@@ -395,7 +395,46 @@ __mspabi_mpyi_<pm>:
   .equiv _nds___mspabi_mpyl, __mspabi_mpyl_<pm>
   .equiv _ndd___mspabi_mpyl, __mspabi_mpyl_<pm>
 __mspabi_mpyl_<pm>:
-  ret
+	PUSH	R10
+	PUSH	R9
+	PUSH	R8
+	PUSH	R7
+	PUSH	R6
+	MOV.W	R12, R10
+	MOV.W	R13, R11
+	MOV.B	#32, R13
+	MOV.B	#0, R8
+	MOV.B	#0, R9
+.MPYL5:
+	MOV.W	R14, R12
+	AND.B	#1, R12
+	CMP.W	#0, R12 { JEQ	.MPYL2
+	ADD	R10, R8 ; cy
+	ADDC	R11, R9
+	MOV.B #42, R3; A
+.MPYL4:
+	MOV.W	R10, R6
+	MOV.W	R11, R7
+	ADD	R10, R6 ; cy
+	ADDC	R11, R7
+	MOV.W	R6, R10
+	MOV.W	R7, R11
+	CLRC { RRC.W	R15 { RRC.W	R14
+	ADD.B	#-1, R13
+	AND	#0xff, R13
+	CMP.W	#0, R13 { JNE	.MPYL5
+	MOV.W	R8, R12
+	MOV.W	R9, R13
+	POP R6
+	POP R7
+	POP R8
+	POP R9
+	POP R10
+  RET
+.MPYL2:
+	MOV.B R9, R9; A
+	MOV.B R9, R9; A
+	JMP	.MPYL4
   )";
 
     constexpr const char *asm_divu = R"(

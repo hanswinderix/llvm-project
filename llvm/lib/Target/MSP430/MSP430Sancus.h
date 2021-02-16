@@ -456,7 +456,11 @@ __mspabi_divu_<pm>:
   .equiv _nds___mspabi_divul, __mspabi_divul_<pm>
   .equiv _ndd___mspabi_divul, __mspabi_divul_<pm>
 __mspabi_divul_<pm>:
-  ret
+	SUB.W	#2, R1
+	MOV.W	#0, @R1
+	;CALL	#udivmodsi4
+	ADD.W	#2, R1
+	RET
   )";
 
     constexpr const char *asm_remu = R"(

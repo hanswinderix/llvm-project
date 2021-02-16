@@ -3378,6 +3378,12 @@ bool MSP430NemesisDefenderPass::runOnMachineFunction(MachineFunction &MF) {
   LLVM_DEBUG(dbgs() << "********** " << getPassName() << " : " << MF.getName()
                     << "**********\n");
 
+  if (MF.getName().contains("sllvm_dispatch_")) {
+  //if (MF.getFunction() == sllvm::sancus::getDispatcherName(MF.getFunction()))
+    LLVM_DEBUG(dbgs() << "Ignoring the Sancus dispatch function\n");
+    return false;
+  }
+
   HasSecretDependentBranch = false;
   bool Changed = false;
   const TargetSubtargetInfo &STI = MF.getSubtarget();

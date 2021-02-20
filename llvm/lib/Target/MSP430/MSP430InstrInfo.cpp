@@ -336,6 +336,25 @@ unsigned MSP430InstrInfo::getInstrLatency(const InstrItineraryData *ItinData,
     L += E[1];
   }
 
+#if 0
+  // TI's msp430-elf assembler rewrites "0(RX), XXX" into "@RX, XXX"
+  // which saves one cycle
+  auto R = MI.explicit_operands();
+  auto I = R.begin();
+  while (I != R.end()) {
+    if (I->isReg() && (! I->isDef()) && (! I->isTied())) {
+      I++;
+      if (I != R.end()) {
+        if (I->isImm() && (I->getImm() == 0)) {
+          L--;
+        }
+      }
+    }
+    else
+      I++;
+  }
+#endif
+
   return L;
 }
 

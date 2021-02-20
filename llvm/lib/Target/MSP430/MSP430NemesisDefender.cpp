@@ -1110,11 +1110,11 @@ static void BuildNOP6(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  // MOV  0(R4), 0(R4) ; 6 cycles, 3 words
+  // MOV  2(R4), 2(R4) ; 6 cycles, 3 words
   BuildMI(MBB, I, DL, TII->get(MSP430::MOV16mm), MSP430::R4)
-      .addImm(0)
+      .addImm(2)
       .addReg(MSP430::R4)
-      .addImm(0);
+      .addImm(2);
 }
 
 // TODO: MSP430 specific

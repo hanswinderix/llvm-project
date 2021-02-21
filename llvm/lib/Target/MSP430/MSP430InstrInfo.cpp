@@ -336,9 +336,9 @@ unsigned MSP430InstrInfo::getInstrLatency(const InstrItineraryData *ItinData,
     L += E[1];
   }
 
-#if 0
   // TI's msp430-elf assembler rewrites "0(RX), XXX" into "@RX, XXX"
-  // which saves one cycle
+  // which saves one cycle. Deal with this here.
+#if 0
   auto R = MI.explicit_operands();
   auto I = R.begin();
   while (I != R.end()) {
@@ -352,6 +352,15 @@ unsigned MSP430InstrInfo::getInstrLatency(const InstrItineraryData *ItinData,
     }
     else
       I++;
+  }
+#else
+  if (E[2] != std::numeric_limits<unsigned>::max()) {
+    assert(E[2] < MI.getNumOperands());
+    auto MO = MI.getOperand(E[2]);
+    assert(MO.isImm());
+    if (MO.getImm() == 0) {
+      L--;
+    }
   }
 #endif
 

@@ -68,9 +68,10 @@ static inline uint64_t getValueFromBitsInit(const BitsInit *B) {
 // TODO: Move this information to the TableGen files? (The actual instruction
 //       latency values are subtarget-independent)
 // TODO: This information should match the Sancus architecture (OpenMSP430)
-static std::pair<unsigned, unsigned> ComputeLatency(Record *Inst) {
+static std::tuple<unsigned, unsigned, unsigned> ComputeLatency(Record *Inst) {
   unsigned latency = UINT_MAX;
   unsigned PCCorr = 0;
+  unsigned OffsetOperandIdx = -1;
 
   if (   Inst->isSubClassOf("IForm")
       || Inst->isSubClassOf("I8rc")
@@ -87,7 +88,14 @@ static std::pair<unsigned, unsigned> ComputeLatency(Record *Inst) {
         latency = (Ad == 0) ? 1 : 4;
         PCCorr = 1;
         break;
-      case 1: latency = (Ad == 0) ? 3 : 6; break;
+      case 1: 
+        latency = 3;
+        OffsetOperandIdx = 2;
+        if (Ad == 1) {
+          latency = 6;
+          OffsetOperandIdx = 3;
+        }
+        break;
       case 2: latency = (Ad == 0) ? 2 : 5; break;
       case 3:
         latency = (Ad == 0) ? 2 : 5;
@@ -141,6 +149,7 @@ static std::pair<unsigned, unsigned> ComputeLatency(Record *Inst) {
           break;
         case 1:
           latency = (OpCode == 4 || OpCode == 5) ? 5 : 4;
+          OffsetOperandIdx = 1;
           break;
         case 2:
           latency = (OpCode == 4 || OpCode == 5) ? 4 : 3;
@@ -177,7 +186,7 @@ static std::pair<unsigned, unsigned> ComputeLatency(Record *Inst) {
     llvm_unreachable("Unknown instruction class");
   }
 
-  return std::make_pair(latency, PCCorr);
+  return std::make_tuple(latency, PCCorr, OffsetOperandIdx);
 }
 
 // run - Emit the MSP430 instruction latency information
@@ -197,13 +206,18 @@ void MSP430InstrLatencyInfo::run(raw_ostream &OS) {
 
   // TODO: Generate documentation containing the following information
   //
-  // Table of (latency, PC-correction) entries
+  // Table of (latency, PC-correction, offset operand idx) entries
   // For format-I MSP430 instructions, the instruction latency can differ
   // with one cycle when
   //    1) the destination addressing mode (Ad) is register mode
   //    2) and the program counter is the destination register.
   // This behavior is represented by the second element of a latency table entry.
-  OS << "static const unsigned LatencyTable[][2] = {\n";
+  // The offset operand index is the index of the llvm::MachineOperand in
+  // the llvm::MachineInstr that contains the offset value for indexed
+  // addressing modes of the source operand, or -1 when a different
+  // addressing mode is used. (see llvm::MachineInstr::getOperand(i))
+  //
+  OS << "static const unsigned LatencyTable[][3] = {\n";
 
   unsigned Num = 0;
   for (const CodeGenInstruction *II : Target.getInstructionsByEnumValue()) {
@@ -211,7 +225,9 @@ void MSP430InstrLatencyInfo::run(raw_ostream &OS) {
     auto L = ComputeLatency(Inst);
 
     OS << "/* " << Num++ << "*/ "
-        << "{" << L.first << ", " << L.second << "}, "
+        << "{" 
+        << std::get<0>(L) << ", " << std::get<1>(L) << ", " << std::get<2>(L)
+        << "}, "
         << "// " << Namespace << "::" << Inst->getName() << "\n";
   }
 

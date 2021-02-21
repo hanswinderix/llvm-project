@@ -357,9 +357,10 @@ unsigned MSP430InstrInfo::getInstrLatency(const InstrItineraryData *ItinData,
   if (E[2] != std::numeric_limits<unsigned>::max()) {
     assert(E[2] < MI.getNumOperands());
     auto MO = MI.getOperand(E[2]);
-    assert(MO.isImm());
-    if (MO.getImm() == 0) {
-      L--;
+    if (MO.isImm()) {
+      if (MO.getImm() == 0) {
+        L--;
+      }
     }
   }
 #endif

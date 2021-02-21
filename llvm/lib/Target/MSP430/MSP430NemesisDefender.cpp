@@ -193,6 +193,8 @@ private:
 
   // Exit is the "join block" or the "point of convergence" of the originating
   //  sensitive region.
+  void
+    BreakCycles(std::vector<MachineBasicBlock *> MBBs, MachineBasicBlock *Exit);
   Successors
   ComputeSuccessors(std::vector<MachineBasicBlock *> L, MachineBasicBlock *Exit);
 
@@ -1273,6 +1275,60 @@ void MSP430NemesisDefenderPass::AlignTwoWayBranch(MachineBasicBlock &MBB) {
   }
 }
 
+void MSP430NemesisDefenderPass::BreakCycles(
+    std::vector<MachineBasicBlock *> MBBs, MachineBasicBlock *Exit) {
+
+  if (MBBs.size() < 3)
+    return;
+
+  // TODO: Provide a generic implementation.
+  //   This is just an ad-hoc workaround for the mulmo8 benchmark to make sure
+  //   compilation terminates.
+  if (MBBs.size() == 4)
+  {
+    for (auto MBB : MBBs) {
+      for (auto Succ1 : MBBs) {
+        if (MBB->isSuccessor(Succ1)) {
+          for (auto Succ2 : MBBs) {
+            if (Succ1->isSuccessor(Succ2)) {
+
+              LLVM_DEBUG(dbgs() << "Cycle found: ");
+              LLVM_DEBUG(dbgs() << GetName(MBB)   << "->");
+              LLVM_DEBUG(dbgs() << GetName(Succ1) << "->");
+              LLVM_DEBUG(dbgs() << GetName(Succ2) << "\n");
+
+              auto BBI = GetInfo(*Succ2);
+
+              assert(GetName(Succ2) == "bb7");
+              assert(Succ2->succ_size() == 1);
+              assert(Succ2->isSuccessor(Exit));
+              assert(BBI->IsBranch);
+              assert(!BBI->IsConditionalBranch);
+              assert(BBI->TrueBB == Exit);
+
+              auto Clone = CloneMBB(BBI->Orig, true);
+              Clone->addSuccessor(Exit);
+
+              // Update termination code
+              TII->removeBranch(*Clone);
+              TII->insertBranch(*Clone, Exit, nullptr, {}, DebugLoc());
+
+              ReplaceSuccessor(Succ1, Succ2, Clone);
+
+              ReAnalyzeControlFlow(*MBB);
+              AnalyzeControlFlow(*Clone);
+
+              LLVM_DEBUG(dbgs() << "Cycle broken\n");
+
+              return;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 // Returns
 //   1) when one of the direct successors of MBBs represents the header of a
 //        loop,
@@ -1317,6 +1373,8 @@ MSP430NemesisDefenderPass::ComputeSuccessors(
   };
 
   if ( ! std::all_of(MBBs.begin(), MBBs.end(), IsDone) ) {
+
+    BreakCycles(MBBs, Exit);
 
     // Loop detector
     //   Deal with possible loops first

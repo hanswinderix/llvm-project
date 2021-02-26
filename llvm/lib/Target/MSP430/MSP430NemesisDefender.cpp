@@ -3256,8 +3256,10 @@ void MSP430NemesisDefenderPass::AlignSensitiveBranches() {
   //                   contents for every MBB
   for (auto &&KV : BBAnalysis) {
     MBBInfo &BBI = KV.second;
-    BBI.Orig = CloneMBB(BBI.BB, false);
-    assert(BBI.Orig != nullptr);
+    if (IsSecretDependent(&BBI)) {
+      BBI.Orig = CloneMBB(BBI.BB, false);
+      assert(BBI.Orig != nullptr);
+    }
   }
 
   // 1) Align outer sensitive branches

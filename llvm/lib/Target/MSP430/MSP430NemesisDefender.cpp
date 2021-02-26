@@ -1476,7 +1476,9 @@ MSP430NemesisDefenderPass::ComputeSuccessors(
             // Ignore self-cycles
             // self-cycles should have been dealt with already, just like any
             // other loop (i.e. no single-block loop) inside a senstive region
-            assert(S != MBB && (BBI->Orig != SBBI->Orig) && "Undetected loop");
+
+            assert(S != MBB && "Undetected loop");
+            assert((BBI->Orig != SBBI->Orig) && "Undetected loop");
 
             // !!TODO: Factor out the common logic between the three branches
             //          (when (S == Exit), (S == Return) and (S == Aligned))
@@ -3256,7 +3258,8 @@ void MSP430NemesisDefenderPass::AlignSensitiveBranches() {
   //                   contents for every MBB
   for (auto &&KV : BBAnalysis) {
     MBBInfo &BBI = KV.second;
-    if (IsSecretDependent(&BBI)) {
+    //if (IsSecretDependent(&BBI))
+    {
       BBI.Orig = CloneMBB(BBI.BB, false);
       assert(BBI.Orig != nullptr);
     }

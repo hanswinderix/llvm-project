@@ -467,6 +467,8 @@ __mspabi_divul_<pm>:
   .section .sllvm.text.<pm>.__mspabi_remu_<pm>,"ax",@progbits
   .globl __mspabi_remu_<pm>
   .p2align 1
+  .equiv _nds___mspabi_remu, __mspabi_remu_<pm>
+  .equiv _ndd___mspabi_remu, __mspabi_remu_<pm>
   .type __mspabi_remu_<pm>,@function
 __mspabi_remu_<pm>:
   mov.b #1, r14

@@ -75,18 +75,21 @@ static int InitLibrary(DeviceTy &Device) {
    */
   int32_t device_id = Device.DeviceID;
   int rc = OFFLOAD_SUCCESS;
+  bool supportsEmptyImages = Device.RTL->supports_empty_images &&
+                             Device.RTL->supports_empty_images() > 0;
 
   Device.PendingGlobalsMtx.lock();
   PM->TrlTblMtx.lock();
-  for (HostEntriesBeginToTransTableTy::iterator entry_it =
-           PM->HostEntriesBeginToTransTable.begin();
-       entry_it != PM->HostEntriesBeginToTransTable.end(); ++entry_it) {
-    TranslationTable *TransTable = &entry_it->second;
+  for (auto *HostEntriesBegin : PM->HostEntriesBeginRegistrationOrder) {
+    TranslationTable *TransTable =
+        &PM->HostEntriesBeginToTransTable[HostEntriesBegin];
     if (TransTable->HostTable.EntriesBegin ==
-        TransTable->HostTable.EntriesEnd) {
+            TransTable->HostTable.EntriesEnd &&
+        !supportsEmptyImages) {
       // No host entry so no need to proceed
       continue;
     }
+
     if (TransTable->TargetsTable[device_id] != 0) {
       // Library entries have already been processed
       continue;
@@ -266,10 +269,11 @@ int targetDataMapper(ident_t *loc, DeviceTy &Device, void *arg_base, void *arg,
     MapperArgNames[I] = C.Name;
   }
 
-  int rc = target_data_function(
-      loc, Device, MapperComponents.Components.size(), MapperArgsBase.data(),
-      MapperArgs.data(), MapperArgSizes.data(), MapperArgTypes.data(),
-      MapperArgNames.data(), /*arg_mappers*/ nullptr, AsyncInfo);
+  int rc = target_data_function(loc, Device, MapperComponents.Components.size(),
+                                MapperArgsBase.data(), MapperArgs.data(),
+                                MapperArgSizes.data(), MapperArgTypes.data(),
+                                MapperArgNames.data(), /*arg_mappers*/ nullptr,
+                                AsyncInfo, /*FromMapper=*/true);
 
   return rc;
 }
@@ -278,7 +282,8 @@ int targetDataMapper(ident_t *loc, DeviceTy &Device, void *arg_base, void *arg,
 int targetDataBegin(ident_t *loc, DeviceTy &Device, int32_t arg_num,
                     void **args_base, void **args, int64_t *arg_sizes,
                     int64_t *arg_types, map_var_info_t *arg_names,
-                    void **arg_mappers, AsyncInfoTy &AsyncInfo) {
+                    void **arg_mappers, AsyncInfoTy &AsyncInfo,
+                    bool FromMapper) {
   // process each input.
   for (int32_t i = 0; i < arg_num; ++i) {
     // Ignore private variables and arrays - there is no mapping for them.
@@ -376,7 +381,10 @@ int targetDataBegin(ident_t *loc, DeviceTy &Device, int32_t arg_num,
       Pointer_HstPtrBegin = HstPtrBase;
       // modify current entry.
       HstPtrBase = *(void **)HstPtrBase;
-      UpdateRef = true; // subsequently update ref count of pointee
+      // No need to update pointee ref count for the first element of the
+      // subelement that comes from mapper.
+      UpdateRef =
+          (!FromMapper || i != 0); // subsequently update ref count of pointee
     }
 
     void *TgtPtrBegin = Device.getOrAllocTgtPtr(
@@ -480,7 +488,7 @@ struct DeallocTgtPtrInfo {
 int targetDataEnd(ident_t *loc, DeviceTy &Device, int32_t ArgNum,
                   void **ArgBases, void **Args, int64_t *ArgSizes,
                   int64_t *ArgTypes, map_var_info_t *ArgNames,
-                  void **ArgMappers, AsyncInfoTy &AsyncInfo) {
+                  void **ArgMappers, AsyncInfoTy &AsyncInfo, bool FromMapper) {
   int Ret;
   std::vector<DeallocTgtPtrInfo> DeallocTgtPtrs;
   // process each input.
@@ -533,7 +541,8 @@ int targetDataEnd(ident_t *loc, DeviceTy &Device, int32_t ArgNum,
     bool IsLast, IsHostPtr;
     bool IsImplicit = ArgTypes[I] & OMP_TGT_MAPTYPE_IMPLICIT;
     bool UpdateRef = !(ArgTypes[I] & OMP_TGT_MAPTYPE_MEMBER_OF) ||
-                     (ArgTypes[I] & OMP_TGT_MAPTYPE_PTR_AND_OBJ);
+                     (ArgTypes[I] & OMP_TGT_MAPTYPE_PTR_AND_OBJ &&
+                      (!FromMapper || I != ArgNum - 1));
     bool ForceDelete = ArgTypes[I] & OMP_TGT_MAPTYPE_DELETE;
     bool HasCloseModifier = ArgTypes[I] & OMP_TGT_MAPTYPE_CLOSE;
     bool HasPresentModifier = ArgTypes[I] & OMP_TGT_MAPTYPE_PRESENT;
@@ -581,8 +590,13 @@ int targetDataEnd(ident_t *loc, DeviceTy &Device, int32_t ArgNum,
 
     bool DelEntry = IsLast || ForceDelete;
 
-    if ((ArgTypes[I] & OMP_TGT_MAPTYPE_MEMBER_OF) &&
-        !(ArgTypes[I] & OMP_TGT_MAPTYPE_PTR_AND_OBJ)) {
+    // If the last element from the mapper (for end transfer args comes in
+    // reverse order), do not remove the partial entry, the parent struct still
+    // exists.
+    if (((ArgTypes[I] & OMP_TGT_MAPTYPE_MEMBER_OF) &&
+         !(ArgTypes[I] & OMP_TGT_MAPTYPE_PTR_AND_OBJ)) ||
+        (ArgTypes[I] & OMP_TGT_MAPTYPE_PTR_AND_OBJ && FromMapper &&
+         I == ArgNum - 1)) {
       DelEntry = false; // protect parent struct from being deallocated
     }
 
@@ -819,7 +833,7 @@ static int getNonContigMergedDimension(__tgt_target_non_contig *NonContig,
 int targetDataUpdate(ident_t *loc, DeviceTy &Device, int32_t ArgNum,
                      void **ArgsBase, void **Args, int64_t *ArgSizes,
                      int64_t *ArgTypes, map_var_info_t *ArgNames,
-                     void **ArgMappers, AsyncInfoTy &AsyncInfo) {
+                     void **ArgMappers, AsyncInfoTy &AsyncInfo, bool) {
   // process each input.
   for (int32_t I = 0; I < ArgNum; ++I) {
     if ((ArgTypes[I] & OMP_TGT_MAPTYPE_LITERAL) ||

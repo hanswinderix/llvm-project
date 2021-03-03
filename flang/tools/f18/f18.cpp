@@ -102,6 +102,7 @@ struct DriverOptions {
   bool dumpSymbols{false};
   bool debugNoSemantics{false};
   bool debugModuleWriter{false};
+  bool defaultReal8{false};
   bool measureTree{false};
   bool unparseTypedExprsToF18_FC{false};
   std::vector<std::string> F18_FCArgs;
@@ -563,10 +564,20 @@ int main(int argc, char *const argv[]) {
       }
     } else if (arg.substr(0, 2) == "-U") {
       predefinitions.emplace_back(arg.substr(2), std::optional<std::string>{});
-    } else if (arg == "-fdefault-double-8") {
-      defaultKinds.set_defaultRealKind(4);
     } else if (arg == "-r8" || arg == "-fdefault-real-8") {
+      driver.defaultReal8 = true;
       defaultKinds.set_defaultRealKind(8);
+      defaultKinds.set_doublePrecisionKind(16);
+    } else if (arg == "-fdefault-double-8") {
+      if (!driver.defaultReal8) {
+        // -fdefault-double-8 has to be used with -fdefault-real-8
+        // to be compatible with gfortran. See:
+        // https://gcc.gnu.org/onlinedocs/gfortran/Fortran-Dialect-Options.html
+        llvm::errs()
+            << "Use of `-fdefault-double-8` requires `-fdefault-real-8`\n";
+        return EXIT_FAILURE;
+      }
+      defaultKinds.set_doublePrecisionKind(8);
     } else if (arg == "-i8" || arg == "-fdefault-integer-8") {
       defaultKinds.set_defaultIntegerKind(8);
       defaultKinds.set_subscriptIntegerKind(8);
@@ -582,6 +593,10 @@ int main(int argc, char *const argv[]) {
       defaultKinds.set_sizeIntegerKind(4);
     } else if (arg == "-module") {
       driver.moduleDirectory = args.front();
+      args.pop_front();
+    } else if (arg == "-module-dir") {
+      driver.moduleDirectory = args.front();
+      driver.searchDirectories.push_back(driver.moduleDirectory);
       args.pop_front();
     } else if (arg == "-module-suffix") {
       driver.moduleFileSuffix = args.front();
@@ -652,9 +667,11 @@ int main(int argc, char *const argv[]) {
           << "  -ed                  enable fixed form D lines\n"
           << "  -E                   prescan & preprocess only\n"
           << "  -module dir          module output directory (default .)\n"
+          << "  -module-dir/-J <dir> Put MODULE files in <dir>\n"
           << "  -flatin              interpret source as Latin-1 (ISO 8859-1) "
              "rather than UTF-8\n"
-          << "  -fsyntax-only        parsing and semantics only, no output except messages\n"
+          << "  -fsyntax-only        parsing and semantics only, no output "
+             "except messages\n"
           << "  -funparse            parse & reformat only, no code "
              "generation\n"
           << "  -funparse-with-symbols  parse, resolve symbols, and unparse\n"
@@ -691,6 +708,14 @@ int main(int argc, char *const argv[]) {
         args.pop_front();
       } else if (arg.substr(0, 2) == "-I") {
         driver.searchDirectories.push_back(arg.substr(2));
+      } else if (arg == "-J") {
+        driver.F18_FCArgs.push_back(args.front());
+        driver.moduleDirectory = args.front();
+        driver.searchDirectories.push_back(driver.moduleDirectory);
+        args.pop_front();
+      } else if (arg.substr(0, 2) == "-J") {
+        driver.moduleDirectory = arg.substr(2);
+        driver.searchDirectories.push_back(driver.moduleDirectory);
       }
     }
   }

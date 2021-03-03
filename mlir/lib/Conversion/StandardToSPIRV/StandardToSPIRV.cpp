@@ -194,7 +194,7 @@ static bool isAllocationSupported(MemRefType t) {
   // shape and int or float or vector of int or float element type.
   if (!(t.hasStaticShape() &&
         SPIRVTypeConverter::getMemorySpaceForStorageClass(
-            spirv::StorageClass::Workgroup) == t.getMemorySpace()))
+            spirv::StorageClass::Workgroup) == t.getMemorySpaceAsInt()))
     return false;
   Type elementType = t.getElementType();
   if (auto vecType = elementType.dyn_cast<VectorType>())
@@ -207,7 +207,8 @@ static bool isAllocationSupported(MemRefType t) {
 /// type. Returns None on failure.
 static Optional<spirv::Scope> getAtomicOpScope(MemRefType t) {
   Optional<spirv::StorageClass> storageClass =
-      SPIRVTypeConverter::getStorageClassForMemorySpace(t.getMemorySpace());
+      SPIRVTypeConverter::getStorageClassForMemorySpace(
+          t.getMemorySpaceAsInt());
   if (!storageClass)
     return {};
   switch (*storageClass) {
@@ -264,9 +265,8 @@ public:
       std::string varName =
           std::string("__workgroup_mem__") +
           std::to_string(std::distance(varOps.begin(), varOps.end()));
-      varOp = rewriter.create<spirv::GlobalVariableOp>(
-          loc, TypeAttr::get(spirvType), varName,
-          /*initializer = */ nullptr);
+      varOp = rewriter.create<spirv::GlobalVariableOp>(loc, spirvType, varName,
+                                                       /*initializer=*/nullptr);
     }
 
     // Get pointer to global variable at the current scope.

@@ -59,11 +59,13 @@ AMDGPUInstructionSelector::AMDGPUInstructionSelector(
 
 const char *AMDGPUInstructionSelector::getName() { return DEBUG_TYPE; }
 
-void AMDGPUInstructionSelector::setupMF(MachineFunction &MF, GISelKnownBits &KB,
-                                        CodeGenCoverage &CoverageInfo) {
+void AMDGPUInstructionSelector::setupMF(MachineFunction &MF, GISelKnownBits *KB,
+                                        CodeGenCoverage &CoverageInfo,
+                                        ProfileSummaryInfo *PSI,
+                                        BlockFrequencyInfo *BFI) {
   MRI = &MF.getRegInfo();
   Subtarget = &MF.getSubtarget<GCNSubtarget>();
-  InstructionSelector::setupMF(MF, KB, CoverageInfo);
+  InstructionSelector::setupMF(MF, KB, CoverageInfo, PSI, BFI);
 }
 
 bool AMDGPUInstructionSelector::isVCC(Register Reg,
@@ -925,8 +927,9 @@ bool AMDGPUInstructionSelector::selectG_INTRINSIC(MachineInstr &I) const {
     return constrainCopyLikeIntrin(I, AMDGPU::WQM);
   case Intrinsic::amdgcn_softwqm:
     return constrainCopyLikeIntrin(I, AMDGPU::SOFT_WQM);
+  case Intrinsic::amdgcn_strict_wwm:
   case Intrinsic::amdgcn_wwm:
-    return constrainCopyLikeIntrin(I, AMDGPU::WWM);
+    return constrainCopyLikeIntrin(I, AMDGPU::STRICT_WWM);
   case Intrinsic::amdgcn_writelane:
     return selectWritelane(I);
   case Intrinsic::amdgcn_div_scale:
@@ -2969,7 +2972,7 @@ bool AMDGPUInstructionSelector::selectAMDGPU_BUFFER_ATOMIC_FADD(
 
   if (Opcode == AMDGPU::BUFFER_ATOMIC_ADD_F32_BOTHEN ||
       Opcode == AMDGPU::BUFFER_ATOMIC_PK_ADD_F16_BOTHEN) {
-    Register IdxReg = MRI->createVirtualRegister(&AMDGPU::VReg_64RegClass);
+    Register IdxReg = MRI->createVirtualRegister(TRI.getVGPR64Class());
     BuildMI(*MBB, &*I, DL, TII.get(AMDGPU::REG_SEQUENCE), IdxReg)
       .addReg(VIndex.getReg())
       .addImm(AMDGPU::sub0)

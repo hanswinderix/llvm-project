@@ -19,6 +19,10 @@
 #if KMP_USE_HIER_SCHED
 #include "kmp_dispatch_hier.h"
 #endif
+#if KMP_USE_HWLOC
+// Copied from hwloc
+#define HWLOC_GROUP_KIND_INTEL_DIE 104
+#endif
 
 // Store the real or imagined machine hierarchy here
 static hierarchy_info machine_hierarchy;
@@ -583,6 +587,13 @@ static inline kmp_hw_t __kmp_hwloc_type_2_topology_type(hwloc_obj_t obj) {
     return KMP_HW_CORE;
   case HWLOC_OBJ_PU:
     return KMP_HW_THREAD;
+  case HWLOC_OBJ_GROUP:
+    if (obj->attr->group.kind == HWLOC_GROUP_KIND_INTEL_DIE)
+      return KMP_HW_DIE;
+#if HWLOC_API_VERSION >= 0x00020100
+  case HWLOC_OBJ_DIE:
+    return KMP_HW_DIE;
+#endif
   }
   return KMP_HW_UNKNOWN;
 }
@@ -2165,6 +2176,10 @@ static int __kmp_affinity_create_cpuinfo_map(AddrUnsPair **address2os,
     // FIXME - this will match "node_<n> <garbage>"
     unsigned level;
     if (KMP_SSCANF(buf, "node_%u id", &level) == 1) {
+      // validate the input fisrt:
+      if (level > (unsigned)__kmp_xproc) { // level is too big
+        level = __kmp_xproc;
+      }
       if (nodeIdIndex + level >= maxIndex) {
         maxIndex = nodeIdIndex + level;
       }
@@ -4335,8 +4350,6 @@ static void __kmp_aux_affinity_initialize(void) {
         depth = __kmp_affinity_create_hwloc_map(&address2os, &msg_id);
         if (depth == 0) {
           KMP_EXIT_AFF_NONE;
-        } else if (depth < 0 && __kmp_affinity_verbose) {
-          KMP_INFORM(AffIgnoringHwloc, "KMP_AFFINITY");
         }
       } else if (__kmp_affinity_verbose) {
         KMP_INFORM(AffIgnoringHwloc, "KMP_AFFINITY");

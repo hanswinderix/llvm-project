@@ -1911,6 +1911,11 @@ struct DSEState {
     };
 
     Ptr = Ptr->stripPointerCasts();
+    if (auto *I = dyn_cast<Instruction>(Ptr)) {
+      if (I->getParent() == &I->getFunction()->getEntryBlock()) {
+        return true;
+      }
+    }
     if (auto *GEP = dyn_cast<GEPOperator>(Ptr)) {
       return IsGuaranteedLoopInvariantBase(GEP->getPointerOperand()) &&
              GEP->hasAllConstantIndices();
@@ -2499,7 +2504,7 @@ bool eliminateDeadStoresMemorySSA(Function &F, AliasAnalysis &AA,
 
     MemoryAccess *Current = KillingDef;
     LLVM_DEBUG(dbgs() << "Trying to eliminate MemoryDefs killed by "
-                      << *KillingDef << " (" << *SI << ")\n");
+                      << *Current << " (" << *SI << ")\n");
 
     unsigned ScanLimit = MemorySSAScanLimit;
     unsigned WalkerStepLimit = MemorySSAUpwardsStepLimit;

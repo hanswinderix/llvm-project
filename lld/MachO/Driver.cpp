@@ -261,7 +261,8 @@ static std::vector<ArchiveMember> getArchiveMembers(MemoryBufferRef mb) {
   return v;
 }
 
-static InputFile *addFile(StringRef path, bool forceLoadArchive) {
+static InputFile *addFile(StringRef path, bool forceLoadArchive,
+                          bool isBundleLoader = false) {
   Optional<MemoryBufferRef> buffer = readFile(path);
   if (!buffer)
     return nullptr;
@@ -324,6 +325,16 @@ static InputFile *addFile(StringRef path, bool forceLoadArchive) {
     break;
   case file_magic::bitcode:
     newFile = make<BitcodeFile>(mbref);
+    break;
+  case file_magic::macho_executable:
+  case file_magic::macho_bundle:
+    // We only allow executable and bundle type here if it is used
+    // as a bundle loader.
+    if (!isBundleLoader)
+      error(path + ": unhandled file type");
+    if (Optional<DylibFile *> dylibFile =
+            loadDylib(mbref, nullptr, isBundleLoader))
+      newFile = *dylibFile;
     break;
   default:
     error(path + ": unhandled file type");
@@ -701,10 +712,12 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
   lld::stdoutOS = &stdoutOS;
   lld::stderrOS = &stderrOS;
 
+  errorHandler().cleanupCallback = []() { freeArena(); };
+
+  errorHandler().logName = args::getFilenameWithoutExe(argsArr[0]);
   stderrOS.enable_colors(stderrOS.has_colors());
   // TODO: Set up error handler properly, e.g. the errorLimitExceededMsg
 
-  errorHandler().cleanupCallback = []() { freeArena(); };
 
   MachOOptTable parser;
   opt::InputArgList args = parser.parse(argsArr.slice(1));
@@ -747,6 +760,10 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
     config->explicitUndefineds.push_back(symtab->addUndefined(
         arg->getValue(), /*file=*/nullptr, /*isWeakRef=*/false));
   }
+
+  for (auto *arg : args.filtered(OPT_U))
+    symtab->addDynamicLookup(arg->getValue());
+
   config->outputFile = args.getLastArgValue(OPT_o, "a.out");
   config->installName =
       args.getLastArgValue(OPT_install_name, config->outputFile);
@@ -756,6 +773,11 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
   config->printEachFile = args.hasArg(OPT_t);
   config->printWhyLoad = args.hasArg(OPT_why_load);
   config->outputType = getOutputType(args);
+  if (const opt::Arg *arg = args.getLastArg(OPT_bundle_loader)) {
+    if (config->outputType != MH_BUNDLE)
+      error("-bundle_loader can only be used with MachO bundle output");
+    addFile(arg->getValue(), false, true);
+  }
   config->ltoObjPath = args.getLastArgValue(OPT_object_path_lto);
   config->ltoNewPassManager =
       args.hasFlag(OPT_no_lto_legacy_pass_manager, OPT_lto_legacy_pass_manager,
@@ -774,11 +796,6 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
     config->namespaceKind = arg->getOption().getID() == OPT_twolevel_namespace
                                 ? NamespaceKind::twolevel
                                 : NamespaceKind::flat;
-    if (config->namespaceKind == NamespaceKind::flat) {
-      warn("Option '" + arg->getOption().getPrefixedName() +
-           "' is not yet implemented. Stay tuned...");
-      config->namespaceKind = NamespaceKind::twolevel;
-    }
   }
 
   config->systemLibraryRoots = getSystemLibraryRoots(args);
@@ -795,6 +812,24 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
       parseDylibVersion(args, OPT_compatibility_version);
   config->dylibCurrentVersion = parseDylibVersion(args, OPT_current_version);
 
+  // Reject every special character except '.' and '$'
+  // TODO(gkm): verify that this is the proper set of invalid chars
+  StringRef invalidNameChars("!\"#%&'()*+,-/:;<=>?@[\\]^`{|}~");
+  auto validName = [invalidNameChars](StringRef s) {
+    if (s.find_first_of(invalidNameChars) != StringRef::npos)
+      error("invalid name for segment or section: " + s);
+    return s;
+  };
+  for (opt::Arg *arg : args.filtered(OPT_rename_section)) {
+    config->sectionRenameMap[{validName(arg->getValue(0)),
+                              validName(arg->getValue(1))}] = {
+        validName(arg->getValue(2)), validName(arg->getValue(3))};
+  }
+  for (opt::Arg *arg : args.filtered(OPT_rename_segment)) {
+    config->segmentRenameMap[validName(arg->getValue(0))] =
+        validName(arg->getValue(1));
+  }
+
   config->saveTemps = args.hasArg(OPT_save_temps);
 
   if (args.hasArg(OPT_v)) {
@@ -807,8 +842,6 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
             (config->frameworkSearchPaths.size()
                  ? "\n\t" + join(config->frameworkSearchPaths, "\n\t")
                  : ""));
-    freeArena();
-    return !errorCount();
   }
 
   initLLVM(); // must be run before any call to addFile()
@@ -817,6 +850,7 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
     const auto &opt = arg->getOption();
     warnIfDeprecatedOption(opt);
     warnIfUnimplementedOption(opt);
+
     // TODO: are any of these better handled via filtered() or getLastArg()?
     switch (opt.getID()) {
     case OPT_INPUT:

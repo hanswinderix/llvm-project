@@ -134,9 +134,13 @@ def IntrWillReturn : IntrinsicProperty<1>;
 // Parallels the cold attribute on LLVM IR functions.
 def IntrCold : IntrinsicProperty;
 
-// IntrNoduplicate - Calls to this intrinsic cannot be duplicated.
+// IntrNoDuplicate - Calls to this intrinsic cannot be duplicated.
 // Parallels the noduplicate attribute on LLVM IR functions.
 def IntrNoDuplicate : IntrinsicProperty;
+
+// IntrNoMerge - Calls to this intrinsic cannot be merged
+// Parallels the nomerge attribute on LLVM IR functions.
+def IntrNoMerge : IntrinsicProperty;
 
 // IntrConvergent - Calls to this intrinsic are convergent and may not be made
 // control-dependent on any additional values.
@@ -1216,6 +1220,7 @@ def int_coro_async_context_dealloc : Intrinsic<[],
 def int_coro_async_resume : Intrinsic<[llvm_ptr_ty],
     [],
     []>;
+def int_coro_async_size_replace : Intrinsic<[], [llvm_ptr_ty, llvm_ptr_ty], []>;
 def int_coro_suspend_async
     : Intrinsic<[llvm_any_ty], [llvm_ptr_ty, llvm_ptr_ty, llvm_vararg_ty], []>;
 def int_coro_prepare_async : Intrinsic<[llvm_ptr_ty], [llvm_ptr_ty],

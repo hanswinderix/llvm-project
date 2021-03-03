@@ -32,6 +32,8 @@ namespace RISCV {
 #define GET_RISCVVLSEGTable_IMPL
 #define GET_RISCVVLXSEGTable_IMPL
 #define GET_RISCVVSXSEGTable_IMPL
+#define GET_RISCVVLETable_IMPL
+#define GET_RISCVVSETable_IMPL
 #define GET_RISCVVLXTable_IMPL
 #define GET_RISCVVSXTable_IMPL
 #include "RISCVGenSearchableTables.inc"
@@ -141,7 +143,9 @@ void RISCVDAGToDAGISel::selectVLSEG(SDNode *Node, bool IsMasked,
     Operands.push_back(MaskedOff);
     CurOp += NF;
   }
-  Operands.push_back(Node->getOperand(CurOp++)); // Base pointer.
+  SDValue Base;
+  SelectBaseAddr(Node->getOperand(CurOp++), Base);
+  Operands.push_back(Base); // Base pointer.
   if (IsStrided)
     Operands.push_back(Node->getOperand(CurOp++)); // Stride.
   if (IsMasked)
@@ -189,7 +193,9 @@ void RISCVDAGToDAGISel::selectVLSEGFF(SDNode *Node, bool IsMasked) {
     Operands.push_back(MaskedOff);
     CurOp += NF;
   }
-  Operands.push_back(Node->getOperand(CurOp++)); // Base pointer.
+  SDValue Base;
+  SelectBaseAddr(Node->getOperand(CurOp++), Base);
+  Operands.push_back(Base); // Base pointer.
   if (IsMasked)
     Operands.push_back(Node->getOperand(CurOp++)); // Mask.
   SDValue VL;
@@ -238,7 +244,9 @@ void RISCVDAGToDAGISel::selectVLXSEG(SDNode *Node, bool IsMasked,
     Operands.push_back(MaskedOff);
     CurOp += NF;
   }
-  Operands.push_back(Node->getOperand(CurOp++)); // Base pointer.
+  SDValue Base;
+  SelectBaseAddr(Node->getOperand(CurOp++), Base);
+  Operands.push_back(Base); // Base pointer.
   Operands.push_back(Node->getOperand(CurOp++)); // Index.
   MVT IndexVT = Operands.back()->getSimpleValueType(0);
   if (IsMasked)
@@ -292,7 +300,9 @@ void RISCVDAGToDAGISel::selectVSSEG(SDNode *Node, bool IsMasked,
   SmallVector<SDValue, 7> Operands;
   Operands.push_back(StoreVal);
   unsigned CurOp = 2 + NF;
-  Operands.push_back(Node->getOperand(CurOp++)); // Base pointer.
+  SDValue Base;
+  SelectBaseAddr(Node->getOperand(CurOp++), Base);
+  Operands.push_back(Base); // Base pointer.
   if (IsStrided)
     Operands.push_back(Node->getOperand(CurOp++)); // Stride.
   if (IsMasked)
@@ -329,7 +339,9 @@ void RISCVDAGToDAGISel::selectVSXSEG(SDNode *Node, bool IsMasked,
   SDValue StoreVal = createTuple(*CurDAG, Regs, NF, LMUL);
   Operands.push_back(StoreVal);
   unsigned CurOp = 2 + NF;
-  Operands.push_back(Node->getOperand(CurOp++)); // Base pointer.
+  SDValue Base;
+  SelectBaseAddr(Node->getOperand(CurOp++), Base);
+  Operands.push_back(Base); // Base pointer.
   Operands.push_back(Node->getOperand(CurOp++)); // Index.
   MVT IndexVT = Operands.back()->getSimpleValueType(0);
   if (IsMasked)
@@ -433,7 +445,6 @@ void RISCVDAGToDAGISel::Select(SDNode *Node) {
         uint64_t Mask = N0.getConstantOperandVal(1);
         Mask |= maskTrailingOnes<uint64_t>(ShAmt);
         if (Mask == 0xffff) {
-          SDLoc DL(Node);
           unsigned SLLOpc = Subtarget->is64Bit() ? RISCV::SLLIW : RISCV::SLLI;
           unsigned SRLOpc = Subtarget->is64Bit() ? RISCV::SRLIW : RISCV::SRLI;
           SDNode *SLLI =
@@ -607,7 +618,6 @@ void RISCVDAGToDAGISel::Select(SDNode *Node) {
       bool IsOrdered = IntNo == Intrinsic::riscv_vloxei ||
                        IntNo == Intrinsic::riscv_vloxei_mask;
 
-      SDLoc DL(Node);
       MVT VT = Node->getSimpleValueType(0);
       unsigned ScalarSize = VT.getScalarSizeInBits();
       MVT XLenVT = Subtarget->getXLenVT();
@@ -617,7 +627,9 @@ void RISCVDAGToDAGISel::Select(SDNode *Node) {
       SmallVector<SDValue, 7> Operands;
       if (IsMasked)
         Operands.push_back(Node->getOperand(CurOp++));
-      Operands.push_back(Node->getOperand(CurOp++)); // Base pointer.
+      SDValue Base;
+      SelectBaseAddr(Node->getOperand(CurOp++), Base);
+      Operands.push_back(Base); // Base pointer.
       Operands.push_back(Node->getOperand(CurOp++)); // Index.
       MVT IndexVT = Operands.back()->getSimpleValueType(0);
       if (IsMasked)
@@ -644,6 +656,96 @@ void RISCVDAGToDAGISel::Select(SDNode *Node) {
         CurDAG->setNodeMemRefs(Load, {MemOp->getMemOperand()});
 
       ReplaceNode(Node, Load);
+      return;
+    }
+    case Intrinsic::riscv_vle1:
+    case Intrinsic::riscv_vle:
+    case Intrinsic::riscv_vle_mask:
+    case Intrinsic::riscv_vlse:
+    case Intrinsic::riscv_vlse_mask: {
+      bool IsMasked = IntNo == Intrinsic::riscv_vle_mask ||
+                      IntNo == Intrinsic::riscv_vlse_mask;
+      bool IsStrided =
+          IntNo == Intrinsic::riscv_vlse || IntNo == Intrinsic::riscv_vlse_mask;
+
+      MVT VT = Node->getSimpleValueType(0);
+      unsigned ScalarSize = VT.getScalarSizeInBits();
+      MVT XLenVT = Subtarget->getXLenVT();
+      // VLE1 uses an SEW of 8.
+      unsigned SEWImm = (IntNo == Intrinsic::riscv_vle1) ? 8 : ScalarSize;
+      SDValue SEW = CurDAG->getTargetConstant(SEWImm, DL, XLenVT);
+
+      unsigned CurOp = 2;
+      SmallVector<SDValue, 7> Operands;
+      if (IsMasked)
+        Operands.push_back(Node->getOperand(CurOp++));
+      SDValue Base;
+      SelectBaseAddr(Node->getOperand(CurOp++), Base);
+      Operands.push_back(Base); // Base pointer.
+      if (IsStrided)
+        Operands.push_back(Node->getOperand(CurOp++)); // Stride.
+      if (IsMasked)
+        Operands.push_back(Node->getOperand(CurOp++)); // Mask.
+      SDValue VL;
+      selectVLOp(Node->getOperand(CurOp++), VL);
+      Operands.push_back(VL);
+      Operands.push_back(SEW);
+      Operands.push_back(Node->getOperand(0)); // Chain.
+
+      RISCVVLMUL LMUL = RISCVTargetLowering::getLMUL(VT);
+      const RISCV::VLEPseudo *P =
+          RISCV::getVLEPseudo(IsMasked, IsStrided, /*FF*/ false, ScalarSize,
+                              static_cast<unsigned>(LMUL));
+      MachineSDNode *Load =
+          CurDAG->getMachineNode(P->Pseudo, DL, Node->getVTList(), Operands);
+
+      if (auto *MemOp = dyn_cast<MemSDNode>(Node))
+        CurDAG->setNodeMemRefs(Load, {MemOp->getMemOperand()});
+
+      ReplaceNode(Node, Load);
+      return;
+    }
+    case Intrinsic::riscv_vleff:
+    case Intrinsic::riscv_vleff_mask: {
+      bool IsMasked = IntNo == Intrinsic::riscv_vleff_mask;
+
+      MVT VT = Node->getSimpleValueType(0);
+      unsigned ScalarSize = VT.getScalarSizeInBits();
+      MVT XLenVT = Subtarget->getXLenVT();
+      SDValue SEW = CurDAG->getTargetConstant(ScalarSize, DL, XLenVT);
+
+      unsigned CurOp = 2;
+      SmallVector<SDValue, 7> Operands;
+      if (IsMasked)
+        Operands.push_back(Node->getOperand(CurOp++));
+      SDValue Base;
+      SelectBaseAddr(Node->getOperand(CurOp++), Base);
+      Operands.push_back(Base); // Base pointer.
+      if (IsMasked)
+        Operands.push_back(Node->getOperand(CurOp++)); // Mask.
+      SDValue VL;
+      selectVLOp(Node->getOperand(CurOp++), VL);
+      Operands.push_back(VL);
+      Operands.push_back(SEW);
+      Operands.push_back(Node->getOperand(0)); // Chain.
+
+      RISCVVLMUL LMUL = RISCVTargetLowering::getLMUL(VT);
+      const RISCV::VLEPseudo *P =
+          RISCV::getVLEPseudo(IsMasked, /*Strided*/ false, /*FF*/ true,
+                              ScalarSize, static_cast<unsigned>(LMUL));
+      MachineSDNode *Load =
+          CurDAG->getMachineNode(P->Pseudo, DL, Node->getValueType(0),
+                                 MVT::Other, MVT::Glue, Operands);
+      SDNode *ReadVL = CurDAG->getMachineNode(RISCV::PseudoReadVL, DL, XLenVT,
+                                              /*Glue*/ SDValue(Load, 2));
+
+      if (auto *MemOp = dyn_cast<MemSDNode>(Node))
+        CurDAG->setNodeMemRefs(Load, {MemOp->getMemOperand()});
+
+      ReplaceUses(SDValue(Node, 0), SDValue(Load, 0));
+      ReplaceUses(SDValue(Node, 1), SDValue(ReadVL, 0)); // VL
+      ReplaceUses(SDValue(Node, 2), SDValue(Load, 1));   // Chain
+      CurDAG->RemoveDeadNode(Node);
       return;
     }
     }
@@ -737,7 +839,6 @@ void RISCVDAGToDAGISel::Select(SDNode *Node) {
       bool IsOrdered = IntNo == Intrinsic::riscv_vsoxei ||
                        IntNo == Intrinsic::riscv_vsoxei_mask;
 
-      SDLoc DL(Node);
       MVT VT = Node->getOperand(2)->getSimpleValueType(0);
       unsigned ScalarSize = VT.getScalarSizeInBits();
       MVT XLenVT = Subtarget->getXLenVT();
@@ -746,7 +847,9 @@ void RISCVDAGToDAGISel::Select(SDNode *Node) {
       unsigned CurOp = 2;
       SmallVector<SDValue, 6> Operands;
       Operands.push_back(Node->getOperand(CurOp++)); // Store value.
-      Operands.push_back(Node->getOperand(CurOp++)); // Base pointer.
+      SDValue Base;
+      SelectBaseAddr(Node->getOperand(CurOp++), Base);
+      Operands.push_back(Base); // Base pointer.
       Operands.push_back(Node->getOperand(CurOp++)); // Index.
       MVT IndexVT = Operands.back()->getSimpleValueType(0);
       if (IsMasked)
@@ -775,143 +878,165 @@ void RISCVDAGToDAGISel::Select(SDNode *Node) {
       ReplaceNode(Node, Store);
       return;
     }
+    case Intrinsic::riscv_vse1:
+    case Intrinsic::riscv_vse:
+    case Intrinsic::riscv_vse_mask:
+    case Intrinsic::riscv_vsse:
+    case Intrinsic::riscv_vsse_mask: {
+      bool IsMasked = IntNo == Intrinsic::riscv_vse_mask ||
+                      IntNo == Intrinsic::riscv_vsse_mask;
+      bool IsStrided =
+          IntNo == Intrinsic::riscv_vsse || IntNo == Intrinsic::riscv_vsse_mask;
+
+      MVT VT = Node->getOperand(2)->getSimpleValueType(0);
+      unsigned ScalarSize = VT.getScalarSizeInBits();
+      MVT XLenVT = Subtarget->getXLenVT();
+      // VSE1 uses an SEW of 8.
+      unsigned SEWImm = (IntNo == Intrinsic::riscv_vse1) ? 8 : ScalarSize;
+      SDValue SEW = CurDAG->getTargetConstant(SEWImm, DL, XLenVT);
+
+      unsigned CurOp = 2;
+      SmallVector<SDValue, 6> Operands;
+      Operands.push_back(Node->getOperand(CurOp++)); // Store value.
+      SDValue Base;
+      SelectBaseAddr(Node->getOperand(CurOp++), Base);
+      Operands.push_back(Base); // Base pointer.
+      if (IsStrided)
+        Operands.push_back(Node->getOperand(CurOp++)); // Stride.
+      if (IsMasked)
+        Operands.push_back(Node->getOperand(CurOp++)); // Mask.
+      SDValue VL;
+      selectVLOp(Node->getOperand(CurOp++), VL);
+      Operands.push_back(VL);
+      Operands.push_back(SEW);
+      Operands.push_back(Node->getOperand(0)); // Chain.
+
+      RISCVVLMUL LMUL = RISCVTargetLowering::getLMUL(VT);
+      const RISCV::VSEPseudo *P = RISCV::getVSEPseudo(
+          IsMasked, IsStrided, ScalarSize, static_cast<unsigned>(LMUL));
+      MachineSDNode *Store =
+          CurDAG->getMachineNode(P->Pseudo, DL, Node->getVTList(), Operands);
+
+      if (auto *MemOp = dyn_cast<MemSDNode>(Node))
+        CurDAG->setNodeMemRefs(Store, {MemOp->getMemOperand()});
+
+      ReplaceNode(Node, Store);
+      return;
+    }
     }
     break;
   }
-  case ISD::BITCAST:
-    // Just drop bitcasts between scalable vectors.
-    if (VT.isScalableVector() &&
-        Node->getOperand(0).getSimpleValueType().isScalableVector()) {
+  case ISD::BITCAST: {
+    MVT SrcVT = Node->getOperand(0).getSimpleValueType();
+    // Just drop bitcasts between vectors if both are fixed or both are
+    // scalable.
+    if ((VT.isScalableVector() && SrcVT.isScalableVector()) ||
+        (VT.isFixedLengthVector() && SrcVT.isFixedLengthVector())) {
       ReplaceUses(SDValue(Node, 0), Node->getOperand(0));
       CurDAG->RemoveDeadNode(Node);
       return;
     }
     break;
+  }
   case ISD::INSERT_SUBVECTOR: {
     SDValue V = Node->getOperand(0);
     SDValue SubV = Node->getOperand(1);
     SDLoc DL(SubV);
     auto Idx = Node->getConstantOperandVal(2);
-    MVT SubVecVT = Node->getOperand(1).getSimpleValueType();
+    MVT SubVecVT = SubV.getSimpleValueType();
 
-    // TODO: This method of selecting INSERT_SUBVECTOR should work
-    // with any type of insertion (fixed <-> scalable) but we don't yet
-    // correctly identify the canonical register class for fixed-length types.
-    // For now, keep the two paths separate.
-    if (VT.isScalableVector() && SubVecVT.isScalableVector()) {
-      bool IsFullVecReg = false;
-      switch (RISCVTargetLowering::getLMUL(SubVecVT)) {
-      default:
-        break;
-      case RISCVVLMUL::LMUL_1:
-      case RISCVVLMUL::LMUL_2:
-      case RISCVVLMUL::LMUL_4:
-      case RISCVVLMUL::LMUL_8:
-        IsFullVecReg = true;
-        break;
-      }
+    MVT SubVecContainerVT = SubVecVT;
+    // Establish the correct scalable-vector types for any fixed-length type.
+    if (SubVecVT.isFixedLengthVector())
+      SubVecContainerVT = RISCVTargetLowering::getContainerForFixedLengthVector(
+          *CurDAG, SubVecVT, *Subtarget);
+    if (VT.isFixedLengthVector())
+      VT = RISCVTargetLowering::getContainerForFixedLengthVector(*CurDAG, VT,
+                                                                 *Subtarget);
 
-      // If the subvector doesn't occupy a full vector register then we can't
-      // insert it purely using subregister manipulation. We must not clobber
-      // the untouched elements (say, in the upper half of the VR register).
-      if (!IsFullVecReg)
-        break;
+    const auto *TRI = Subtarget->getRegisterInfo();
+    unsigned SubRegIdx;
+    std::tie(SubRegIdx, Idx) =
+        RISCVTargetLowering::decomposeSubvectorInsertExtractToSubRegs(
+            VT, SubVecContainerVT, Idx, TRI);
 
-      const auto *TRI = Subtarget->getRegisterInfo();
-      unsigned SubRegIdx;
-      std::tie(SubRegIdx, Idx) =
-          RISCVTargetLowering::decomposeSubvectorInsertExtractToSubRegs(
-              VT, SubVecVT, Idx, TRI);
+    // If the Idx hasn't been completely eliminated then this is a subvector
+    // insert which doesn't naturally align to a vector register. These must
+    // be handled using instructions to manipulate the vector registers.
+    if (Idx != 0)
+      break;
 
-      // If the Idx hasn't been completely eliminated then this is a subvector
-      // insert which doesn't naturally align to a vector register. These must
-      // be handled using instructions to manipulate the vector registers.
-      if (Idx != 0)
-        break;
+    RISCVVLMUL SubVecLMUL = RISCVTargetLowering::getLMUL(SubVecVT);
+    bool IsSubVecPartReg = SubVecLMUL == RISCVVLMUL::LMUL_F2 ||
+                           SubVecLMUL == RISCVVLMUL::LMUL_F4 ||
+                           SubVecLMUL == RISCVVLMUL::LMUL_F8;
+    (void)IsSubVecPartReg; // Silence unused variable warning without asserts.
+    assert((!IsSubVecPartReg || V.isUndef()) &&
+           "Expecting lowering to have created legal INSERT_SUBVECTORs when "
+           "the subvector is smaller than a full-sized register");
 
-      SDNode *NewNode = CurDAG->getMachineNode(
-          TargetOpcode::INSERT_SUBREG, DL, VT, V, SubV,
-          CurDAG->getTargetConstant(SubRegIdx, DL, Subtarget->getXLenVT()));
+    // If we haven't set a SubRegIdx, then we must be going between
+    // equally-sized LMUL groups (e.g. VR -> VR). This can be done as a copy.
+    if (SubRegIdx == RISCV::NoSubRegister) {
+      unsigned InRegClassID = RISCVTargetLowering::getRegClassIDForVecVT(VT);
+      assert(RISCVTargetLowering::getRegClassIDForVecVT(SubVecContainerVT) ==
+                 InRegClassID &&
+             "Unexpected subvector extraction");
+      SDValue RC = CurDAG->getTargetConstant(InRegClassID, DL, XLenVT);
+      SDNode *NewNode = CurDAG->getMachineNode(TargetOpcode::COPY_TO_REGCLASS,
+                                               DL, VT, SubV, RC);
       return ReplaceNode(Node, NewNode);
     }
 
-    if (VT.isScalableVector() && SubVecVT.isFixedLengthVector()) {
-      // Bail when not a "cast" like insert_subvector.
-      if (Idx != 0)
-        break;
-      if (!Node->getOperand(0).isUndef())
-        break;
-
-      unsigned RegClassID = RISCVTargetLowering::getRegClassIDForVecVT(VT);
-
-      SDValue RC =
-          CurDAG->getTargetConstant(RegClassID, DL, Subtarget->getXLenVT());
-      SDNode *NewNode = CurDAG->getMachineNode(TargetOpcode::COPY_TO_REGCLASS,
-                                               DL, VT, SubV, RC);
-      ReplaceNode(Node, NewNode);
-      return;
-    }
-    break;
+    SDNode *NewNode = CurDAG->getMachineNode(
+        TargetOpcode::INSERT_SUBREG, DL, VT, V, SubV,
+        CurDAG->getTargetConstant(SubRegIdx, DL, XLenVT));
+    return ReplaceNode(Node, NewNode);
   }
   case ISD::EXTRACT_SUBVECTOR: {
     SDValue V = Node->getOperand(0);
     auto Idx = Node->getConstantOperandVal(1);
-    MVT InVT = Node->getOperand(0).getSimpleValueType();
+    MVT InVT = V.getSimpleValueType();
     SDLoc DL(V);
 
-    // TODO: This method of selecting EXTRACT_SUBVECTOR should work
-    // with any type of extraction (fixed <-> scalable) but we don't yet
-    // correctly identify the canonical register class for fixed-length types.
-    // For now, keep the two paths separate.
-    if (VT.isScalableVector() && InVT.isScalableVector()) {
-      const auto *TRI = Subtarget->getRegisterInfo();
-      unsigned SubRegIdx;
-      std::tie(SubRegIdx, Idx) =
-          RISCVTargetLowering::decomposeSubvectorInsertExtractToSubRegs(
-              InVT, VT, Idx, TRI);
+    MVT SubVecContainerVT = VT;
+    // Establish the correct scalable-vector types for any fixed-length type.
+    if (VT.isFixedLengthVector())
+      SubVecContainerVT = RISCVTargetLowering::getContainerForFixedLengthVector(
+          *CurDAG, VT, *Subtarget);
+    if (InVT.isFixedLengthVector())
+      InVT = RISCVTargetLowering::getContainerForFixedLengthVector(
+          *CurDAG, InVT, *Subtarget);
 
-      // If the Idx hasn't been completely eliminated then this is a subvector
-      // extract which doesn't naturally align to a vector register. These must
-      // be handled using instructions to manipulate the vector registers.
-      if (Idx != 0)
-        break;
+    const auto *TRI = Subtarget->getRegisterInfo();
+    unsigned SubRegIdx;
+    std::tie(SubRegIdx, Idx) =
+        RISCVTargetLowering::decomposeSubvectorInsertExtractToSubRegs(
+            InVT, SubVecContainerVT, Idx, TRI);
 
-      // If we haven't set a SubRegIdx, then we must be going between LMUL<=1
-      // types (VR -> VR). This can be done as a copy.
-      if (SubRegIdx == RISCV::NoSubRegister) {
-        unsigned InRegClassID =
-            RISCVTargetLowering::getRegClassIDForVecVT(InVT);
-        assert(RISCVTargetLowering::getRegClassIDForVecVT(VT) ==
-                   RISCV::VRRegClassID &&
-               InRegClassID == RISCV::VRRegClassID &&
-               "Unexpected subvector extraction");
-        SDValue RC =
-            CurDAG->getTargetConstant(InRegClassID, DL, Subtarget->getXLenVT());
-        SDNode *NewNode = CurDAG->getMachineNode(TargetOpcode::COPY_TO_REGCLASS,
-                                                 DL, VT, V, RC);
-        return ReplaceNode(Node, NewNode);
-      }
-      SDNode *NewNode = CurDAG->getMachineNode(
-          TargetOpcode::EXTRACT_SUBREG, DL, VT, V,
-          CurDAG->getTargetConstant(SubRegIdx, DL, Subtarget->getXLenVT()));
+    // If the Idx hasn't been completely eliminated then this is a subvector
+    // extract which doesn't naturally align to a vector register. These must
+    // be handled using instructions to manipulate the vector registers.
+    if (Idx != 0)
+      break;
+
+    // If we haven't set a SubRegIdx, then we must be going between
+    // equally-sized LMUL types (e.g. VR -> VR). This can be done as a copy.
+    if (SubRegIdx == RISCV::NoSubRegister) {
+      unsigned InRegClassID = RISCVTargetLowering::getRegClassIDForVecVT(InVT);
+      assert(RISCVTargetLowering::getRegClassIDForVecVT(SubVecContainerVT) ==
+                 InRegClassID &&
+             "Unexpected subvector extraction");
+      SDValue RC = CurDAG->getTargetConstant(InRegClassID, DL, XLenVT);
+      SDNode *NewNode =
+          CurDAG->getMachineNode(TargetOpcode::COPY_TO_REGCLASS, DL, VT, V, RC);
       return ReplaceNode(Node, NewNode);
     }
 
-    if (VT.isFixedLengthVector() && InVT.isScalableVector()) {
-      // Bail when not a "cast" like extract_subvector.
-      if (Idx != 0)
-        break;
-
-      unsigned InRegClassID = RISCVTargetLowering::getRegClassIDForVecVT(InVT);
-
-      SDValue RC =
-          CurDAG->getTargetConstant(InRegClassID, DL, Subtarget->getXLenVT());
-      SDNode *NewNode =
-          CurDAG->getMachineNode(TargetOpcode::COPY_TO_REGCLASS, DL, VT, V, RC);
-      ReplaceNode(Node, NewNode);
-      return;
-    }
-    break;
+    SDNode *NewNode = CurDAG->getMachineNode(
+        TargetOpcode::EXTRACT_SUBREG, DL, VT, V,
+        CurDAG->getTargetConstant(SubRegIdx, DL, XLenVT));
+    return ReplaceNode(Node, NewNode);
   }
   }
 
@@ -984,6 +1109,45 @@ bool RISCVDAGToDAGISel::selectShiftMask(SDValue N, unsigned ShiftWidth,
 
   ShAmt = N;
   return true;
+}
+
+bool RISCVDAGToDAGISel::selectSExti32(SDValue N, SDValue &Val) {
+  if (N.getOpcode() == ISD::SIGN_EXTEND_INREG &&
+      cast<VTSDNode>(N.getOperand(1))->getVT() == MVT::i32) {
+    Val = N.getOperand(0);
+    return true;
+  }
+  // FIXME: Should we just call computeNumSignBits here?
+  if (N.getOpcode() == ISD::AssertSext &&
+      cast<VTSDNode>(N->getOperand(1))->getVT().bitsLE(MVT::i32)) {
+    Val = N;
+    return true;
+  }
+  if (N.getOpcode() == ISD::AssertZext &&
+      cast<VTSDNode>(N->getOperand(1))->getVT().bitsLT(MVT::i32)) {
+    Val = N;
+    return true;
+  }
+
+  return false;
+}
+
+bool RISCVDAGToDAGISel::selectZExti32(SDValue N, SDValue &Val) {
+  if (N.getOpcode() == ISD::AND) {
+    auto *C = dyn_cast<ConstantSDNode>(N.getOperand(1));
+    if (C && CheckAndMask(N.getOperand(0), C, UINT64_C(0xFFFFFFFF))) {
+      Val = N.getOperand(0);
+      return true;
+    }
+  }
+  // FIXME: Should we just call computeKnownBits here?
+  if (N.getOpcode() == ISD::AssertZext &&
+      cast<VTSDNode>(N->getOperand(1))->getVT().bitsLE(MVT::i32)) {
+    Val = N;
+    return true;
+  }
+
+  return false;
 }
 
 // Match (srl (and val, mask), imm) where the result would be a

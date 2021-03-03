@@ -193,7 +193,6 @@ private:
   /// sinit/sterm function names.
   std::string FormatIndicatorAndUniqueModId;
 
-  static void ValidateGV(const GlobalVariable *GV);
   // Record a list of GlobalAlias associated with a GlobalObject.
   // This is used for AIX's extra-label-at-definition aliasing strategy.
   DenseMap<const GlobalObject *, SmallVector<const GlobalAlias *, 1>>
@@ -1323,8 +1322,7 @@ void PPCLinuxAsmPrinter::emitInstruction(const MachineInstr *MI) {
     unsigned RetOpcode = MI->getOperand(0).getImm();
     MCInst RetInst;
     RetInst.setOpcode(RetOpcode);
-    for (const auto &MO :
-         make_range(std::next(MI->operands_begin()), MI->operands_end())) {
+    for (const auto &MO : llvm::drop_begin(MI->operands())) {
       MCOperand MCOp;
       if (LowerPPCMachineOperandToMCOperand(MO, MCOp, *this))
         RetInst.addOperand(MCOp);
@@ -2052,15 +2050,6 @@ void PPCAIXAsmPrinter::emitTracebackTable() {
 #undef GENVALUECOMMENT
 }
 
-void PPCAIXAsmPrinter::ValidateGV(const GlobalVariable *GV) {
-  // Early error checking limiting what is supported.
-  if (GV->isThreadLocal())
-    report_fatal_error("Thread local not yet supported on AIX.");
-
-  if (GV->hasComdat())
-    report_fatal_error("COMDAT not yet supported by AIX.");
-}
-
 static bool isSpecialLLVMGlobalArrayToSkip(const GlobalVariable *GV) {
   return GV->hasAppendingLinkage() &&
          StringSwitch<bool>(GV->getName())
@@ -2086,7 +2075,9 @@ void PPCAIXAsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
 
   assert(!GV->getName().startswith("llvm.") &&
          "Unhandled intrinsic global variable.");
-  ValidateGV(GV);
+
+  if (GV->hasComdat())
+    report_fatal_error("COMDAT not yet supported by AIX.");
 
   MCSymbolXCOFF *GVSym = cast<MCSymbolXCOFF>(getSymbol(GV));
 
@@ -2096,7 +2087,8 @@ void PPCAIXAsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
   }
 
   SectionKind GVKind = getObjFileLowering().getKindForGlobal(GV, TM);
-  if (!GVKind.isGlobalWriteableData() && !GVKind.isReadOnly())
+  if (!GVKind.isGlobalWriteableData() && !GVKind.isReadOnly() &&
+      !GVKind.isThreadLocal()) // Checks for both ThreadData and ThreadBSS.
     report_fatal_error("Encountered a global variable kind that is "
                        "not supported yet.");
 
@@ -2108,14 +2100,15 @@ void PPCAIXAsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
 
   const DataLayout &DL = GV->getParent()->getDataLayout();
 
-  // Handle common symbols.
-  if (GVKind.isCommon() || GVKind.isBSSLocal()) {
+  // Handle common and zero-initialized local symbols.
+  if (GV->hasCommonLinkage() || GVKind.isBSSLocal() ||
+      GVKind.isThreadBSSLocal()) {
     Align Alignment = GV->getAlign().getValueOr(DL.getPreferredAlign(GV));
     uint64_t Size = DL.getTypeAllocSize(GV->getType()->getElementType());
     GVSym->setStorageClass(
         TargetLoweringObjectFileXCOFF::getStorageClassForGlobal(GV));
 
-    if (GVKind.isBSSLocal())
+    if (GVKind.isBSSLocal() || GVKind.isThreadBSSLocal())
       OutStreamer->emitXCOFFLocalCommonSymbol(
           OutContext.getOrCreateSymbol(GVSym->getSymbolTableName()), Size,
           GVSym, Alignment.value());

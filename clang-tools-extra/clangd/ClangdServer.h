@@ -12,6 +12,7 @@
 #include "../clang-tidy/ClangTidyOptions.h"
 #include "CodeComplete.h"
 #include "ConfigProvider.h"
+#include "DraftStore.h"
 #include "GlobalCompilationDatabase.h"
 #include "Hover.h"
 #include "Module.h"
@@ -160,6 +161,7 @@ public:
   /// if compilation arguments changed on calls to forceReparse().
   ClangdServer(const GlobalCompilationDatabase &CDB, const ThreadsafeFS &TFS,
                const Options &Opts, Callbacks *Callbacks = nullptr);
+  ~ClangdServer();
 
   /// Gets the installed module of a given type, if any.
   /// This exposes access the public interface of modules that have one.
@@ -175,7 +177,7 @@ public:
   /// separate thread. When the parsing is complete, DiagConsumer passed in
   /// constructor will receive onDiagnosticsReady callback.
   /// Version identifies this snapshot and is propagated to ASTs, preambles,
-  /// diagnostics etc built from it.
+  /// diagnostics etc built from it. If empty, a version number is generated.
   void addDocument(PathRef File, StringRef Contents,
                    llvm::StringRef Version = "null",
                    WantDiagnostics WD = WantDiagnostics::Auto,
@@ -186,6 +188,13 @@ public:
   /// be delivered, even if requested with WantDiags::Auto or WantDiags::Yes.
   /// An empty set of diagnostics will be delivered, with Version = "".
   void removeDocument(PathRef File);
+
+  /// Requests a reparse of currently opened files using their latest source.
+  /// This will typically only rebuild if something other than the source has
+  /// changed (e.g. the CDB yields different flags, or files included in the
+  /// preamble have been modified).
+  void reparseOpenFilesIfNeeded(
+      llvm::function_ref<bool(llvm::StringRef File)> Filter);
 
   /// Run code completion for \p File at \p Pos.
   ///
@@ -252,18 +261,15 @@ public:
   void findReferences(PathRef File, Position Pos, uint32_t Limit,
                       Callback<ReferencesResult> CB);
 
-  /// Run formatting for \p Rng inside \p File with content \p Code.
-  void formatRange(PathRef File, StringRef Code, Range Rng,
-                   Callback<tooling::Replacements> CB);
-
-  /// Run formatting for the whole \p File with content \p Code.
-  void formatFile(PathRef File, StringRef Code,
+  /// Run formatting for the \p File with content \p Code.
+  /// If \p Rng is non-null, formats only that region.
+  void formatFile(PathRef File, llvm::Optional<Range> Rng,
                   Callback<tooling::Replacements> CB);
 
   /// Run formatting after \p TriggerText was typed at \p Pos in \p File with
   /// content \p Code.
-  void formatOnType(PathRef File, StringRef Code, Position Pos,
-                    StringRef TriggerText, Callback<std::vector<TextEdit>> CB);
+  void formatOnType(PathRef File, Position Pos, StringRef TriggerText,
+                    Callback<std::vector<TextEdit>> CB);
 
   /// Test the validity of a rename operation.
   ///
@@ -333,8 +339,12 @@ public:
   /// FIXME: those metrics might be useful too, we should add them.
   llvm::StringMap<TUScheduler::FileStats> fileStats() const;
 
+  llvm::Optional<std::string> getDraft(PathRef File) const;
+
   // Blocks the main thread until the server is idle. Only for use in tests.
   // Returns false if the timeout expires.
+  // FIXME: various subcomponents each get the full timeout, so it's more of
+  // an order of magnitude than a hard deadline.
   LLVM_NODISCARD bool
   blockUntilIdleForTest(llvm::Optional<double> TimeoutSeconds = 10);
 
@@ -342,10 +352,6 @@ public:
   void profile(MemoryTree &MT) const;
 
 private:
-  void formatCode(PathRef File, llvm::StringRef Code,
-                  ArrayRef<tooling::Range> Ranges,
-                  Callback<tooling::Replacements> CB);
-
   ModuleSet *Modules;
   const GlobalCompilationDatabase &CDB;
   const ThreadsafeFS &TFS;
@@ -373,10 +379,12 @@ private:
   mutable std::mutex CachedCompletionFuzzyFindRequestMutex;
 
   llvm::Optional<std::string> WorkspaceRoot;
-  // WorkScheduler has to be the last member, because its destructor has to be
-  // called before all other members to stop the worker thread that references
-  // ClangdServer.
-  TUScheduler WorkScheduler;
+  llvm::Optional<TUScheduler> WorkScheduler;
+
+  // Store of the current versions of the open documents.
+  // Only written from the main thread (despite being threadsafe).
+  // FIXME: TUScheduler also keeps these, unify?
+  DraftStore DraftMgr;
 };
 
 } // namespace clangd

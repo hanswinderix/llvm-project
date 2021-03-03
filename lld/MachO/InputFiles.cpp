@@ -66,6 +66,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/TarWriter.h"
+#include "llvm/TextAPI/MachO/Architecture.h"
 
 using namespace llvm;
 using namespace llvm::MachO;
@@ -105,7 +106,8 @@ Optional<MemoryBufferRef> macho::readFile(StringRef path) {
   // If this is a regular non-fat file, return it.
   const char *buf = mbref.getBufferStart();
   auto *hdr = reinterpret_cast<const MachO::fat_header *>(buf);
-  if (read32be(&hdr->magic) != MachO::FAT_MAGIC) {
+  if (mbref.getBufferSize() < sizeof(uint32_t) ||
+      read32be(&hdr->magic) != MachO::FAT_MAGIC) {
     if (tar)
       tar->append(relativeToRoot(path), mbref.getBuffer());
     return mbref;
@@ -203,15 +205,15 @@ static InputSection *findContainingSubsection(SubsectionMap &map,
   return it->second;
 }
 
-static bool validateRelocationInfo(MemoryBufferRef mb, const section_64 &sec,
+static bool validateRelocationInfo(InputFile *file, const section_64 &sec,
                                    relocation_info rel) {
   const TargetInfo::RelocAttrs &relocAttrs = target->getRelocAttrs(rel.r_type);
   bool valid = true;
-  auto message = [relocAttrs, mb, sec, rel, &valid](const Twine &diagnostic) {
+  auto message = [relocAttrs, file, sec, rel, &valid](const Twine &diagnostic) {
     valid = false;
     return (relocAttrs.name + " relocation " + diagnostic + " at offset " +
             std::to_string(rel.r_address) + " of " + sec.segname + "," +
-            sec.sectname + " in " + mb.getBufferIdentifier())
+            sec.sectname + " in " + toString(file))
         .str();
   };
 
@@ -221,7 +223,7 @@ static bool validateRelocationInfo(MemoryBufferRef mb, const section_64 &sec,
     error(message(Twine("must ") + (rel.r_pcrel ? "not " : "") +
                   "be PC-relative"));
   if (isThreadLocalVariables(sec.flags) &&
-      !relocAttrs.hasAttr(RelocAttrBits::TLV | RelocAttrBits::BYTE8))
+      !relocAttrs.hasAttr(RelocAttrBits::UNSIGNED))
     error(message("not allowed in thread-local section, must be UNSIGNED"));
   if (rel.r_length < 2 || rel.r_length > 3 ||
       !relocAttrs.hasAttr(static_cast<RelocAttrBits>(1 << rel.r_length))) {
@@ -273,20 +275,24 @@ void ObjFile::parseRelocations(const section_64 &sec,
       relInfo = relInfos[++i];
     }
     assert(i < relInfos.size());
-    if (!validateRelocationInfo(mb, sec, relInfo))
+    if (!validateRelocationInfo(this, sec, relInfo))
       continue;
     if (relInfo.r_address & R_SCATTERED)
       fatal("TODO: Scattered relocations not supported");
-    uint64_t embeddedAddend = target->getEmbeddedAddend(mb, sec, relInfo);
-    assert(!(embeddedAddend && pairedAddend));
-    uint64_t totalAddend = pairedAddend + embeddedAddend;
 
     Reloc p;
     if (target->hasAttr(relInfo.r_type, RelocAttrBits::SUBTRAHEND)) {
       p.type = relInfo.r_type;
       p.referent = symbols[relInfo.r_symbolnum];
       relInfo = relInfos[++i];
+      // SUBTRACTOR relocations should always be followed by an UNSIGNED one
+      // indicating the minuend symbol.
+      assert(target->hasAttr(relInfo.r_type, RelocAttrBits::UNSIGNED) &&
+             relInfo.r_extern);
     }
+    uint64_t embeddedAddend = target->getEmbeddedAddend(mb, sec, relInfo);
+    assert(!(embeddedAddend && pairedAddend));
+    uint64_t totalAddend = pairedAddend + embeddedAddend;
     Reloc r;
     r.type = relInfo.r_type;
     r.pcrel = relInfo.r_pcrel;
@@ -303,8 +309,7 @@ void ObjFile::parseRelocations(const section_64 &sec,
         // The implicit addend for pcrel section relocations is the pcrel offset
         // in terms of the addresses in the input file. Here we adjust it so
         // that it describes the offset from the start of the referent section.
-        // TODO: The offset of 4 is probably not right for ARM64, nor for
-        //       relocations with r_length != 2.
+        assert(target->hasAttr(r.type, RelocAttrBits::BYTE4));
         referentOffset =
             sec.addr + relInfo.r_address + 4 + totalAddend - referentSec.addr;
       } else {
@@ -316,8 +321,7 @@ void ObjFile::parseRelocations(const section_64 &sec,
     }
 
     InputSection *subsec = findContainingSubsection(subsecMap, &r.offset);
-    if (p.type != GENERIC_RELOC_INVALID &&
-        target->hasAttr(p.type, RelocAttrBits::SUBTRAHEND))
+    if (p.type != GENERIC_RELOC_INVALID)
       subsec->relocs.push_back(p);
     subsec->relocs.push_back(r);
   }
@@ -474,6 +478,15 @@ ObjFile::ObjFile(MemoryBufferRef mb, uint32_t modTime, StringRef archiveName)
   auto *buf = reinterpret_cast<const uint8_t *>(mb.getBufferStart());
   auto *hdr = reinterpret_cast<const mach_header_64 *>(mb.getBufferStart());
 
+  MachO::Architecture arch =
+      MachO::getArchitectureFromCpuType(hdr->cputype, hdr->cpusubtype);
+  if (arch != config->arch) {
+    error(toString(this) + " has architecture " + getArchitectureName(arch) +
+          " which is incompatible with target architecture " +
+          getArchitectureName(config->arch));
+    return;
+  }
+
   if (const load_command *cmd = findCommand(hdr, LC_LINKER_OPTION)) {
     auto *c = reinterpret_cast<const linker_option_command *>(cmd);
     StringRef data{reinterpret_cast<const char *>(c + 1),
@@ -541,27 +554,23 @@ static Optional<DylibFile *> loadDylib(StringRef path, DylibFile *umbrella) {
 
 // TBD files are parsed into a series of TAPI documents (InterfaceFiles), with
 // the first document storing child pointers to the rest of them. When we are
-// processing a given TBD file, we store that top-level document here. When
-// processing re-exports, we search its children for potentially matching
-// documents in the same TBD file. Note that the children themselves don't
-// point to further documents, i.e. this is a two-level tree.
+// processing a given TBD file, we store that top-level document in
+// currentTopLevelTapi. When processing re-exports, we search its children for
+// potentially matching documents in the same TBD file. Note that the children
+// themselves don't point to further documents, i.e. this is a two-level tree.
 //
-// ld64 allows a TAPI re-export to reference documents nested within other TBD
-// files, but that seems like a strange design, so this is an intentional
-// deviation.
-const InterfaceFile *currentTopLevelTapi = nullptr;
-
 // Re-exports can either refer to on-disk files, or to documents within .tbd
 // files.
-static Optional<DylibFile *> loadReexportHelper(StringRef path,
-                                                DylibFile *umbrella) {
+static Optional<DylibFile *>
+findDylib(StringRef path, DylibFile *umbrella,
+          const InterfaceFile *currentTopLevelTapi) {
   if (path::is_absolute(path, path::Style::posix))
     for (StringRef root : config->systemLibraryRoots)
       if (Optional<std::string> dylibPath =
               resolveDylibPath((root + path).str()))
         return loadDylib(*dylibPath, umbrella);
 
-  // TODO: Expand @loader_path, @executable_path etc
+  // TODO: Expand @loader_path, @executable_path, @rpath etc, handle -dylib_path
 
   if (currentTopLevelTapi) {
     for (InterfaceFile &child :
@@ -575,7 +584,6 @@ static Optional<DylibFile *> loadReexportHelper(StringRef path,
   if (Optional<std::string> dylibPath = resolveDylibPath(path))
     return loadDylib(*dylibPath, umbrella);
 
-  error("unable to locate re-export with install name " + path);
   return {};
 }
 
@@ -599,14 +607,21 @@ static bool isImplicitlyLinked(StringRef path) {
   return false;
 }
 
-void loadReexport(StringRef path, DylibFile *umbrella) {
-  Optional<DylibFile *> reexport = loadReexportHelper(path, umbrella);
-  if (reexport && isImplicitlyLinked(path))
+void loadReexport(StringRef path, DylibFile *umbrella,
+                  const InterfaceFile *currentTopLevelTapi) {
+  Optional<DylibFile *> reexport =
+      findDylib(path, umbrella, currentTopLevelTapi);
+  if (!reexport)
+    error("unable to locate re-export with install name " + path);
+  else if (isImplicitlyLinked(path))
     inputFiles.insert(*reexport);
 }
 
-DylibFile::DylibFile(MemoryBufferRef mb, DylibFile *umbrella)
-    : InputFile(DylibKind, mb), refState(RefState::Unreferenced) {
+DylibFile::DylibFile(MemoryBufferRef mb, DylibFile *umbrella,
+                     bool isBundleLoader)
+    : InputFile(DylibKind, mb), refState(RefState::Unreferenced),
+      isBundleLoader(isBundleLoader) {
+  assert(!isBundleLoader || !umbrella);
   if (umbrella == nullptr)
     umbrella = this;
 
@@ -619,7 +634,9 @@ DylibFile::DylibFile(MemoryBufferRef mb, DylibFile *umbrella)
     currentVersion = read32le(&c->dylib.current_version);
     compatibilityVersion = read32le(&c->dylib.compatibility_version);
     dylibName = reinterpret_cast<const char *>(cmd) + read32le(&c->dylib.name);
-  } else {
+  } else if (!isBundleLoader) {
+    // macho_executable and macho_bundle don't have LC_ID_DYLIB,
+    // so it's OK.
     error("dylib " + toString(this) + " missing LC_ID_DYLIB load command");
     return;
   }
@@ -640,28 +657,50 @@ DylibFile::DylibFile(MemoryBufferRef mb, DylibFile *umbrella)
     return;
   }
 
-  if (hdr->flags & MH_NO_REEXPORTED_DYLIBS)
-    return;
-
   const uint8_t *p =
       reinterpret_cast<const uint8_t *>(hdr) + sizeof(mach_header_64);
   for (uint32_t i = 0, n = hdr->ncmds; i < n; ++i) {
     auto *cmd = reinterpret_cast<const load_command *>(p);
     p += cmd->cmdsize;
-    if (cmd->cmd != LC_REEXPORT_DYLIB)
-      continue;
 
-    auto *c = reinterpret_cast<const dylib_command *>(cmd);
-    StringRef reexportPath =
-        reinterpret_cast<const char *>(c) + read32le(&c->dylib.name);
-    loadReexport(reexportPath, umbrella);
+    if (!(hdr->flags & MH_NO_REEXPORTED_DYLIBS) &&
+        cmd->cmd == LC_REEXPORT_DYLIB) {
+      const auto *c = reinterpret_cast<const dylib_command *>(cmd);
+      StringRef reexportPath =
+          reinterpret_cast<const char *>(c) + read32le(&c->dylib.name);
+      loadReexport(reexportPath, umbrella, nullptr);
+    }
+
+    // FIXME: What about LC_LOAD_UPWARD_DYLIB, LC_LAZY_LOAD_DYLIB,
+    // LC_LOAD_WEAK_DYLIB, LC_REEXPORT_DYLIB (..are reexports from dylibs with
+    // MH_NO_REEXPORTED_DYLIBS loaded for -flat_namespace)?
+    if (config->namespaceKind == NamespaceKind::flat &&
+        cmd->cmd == LC_LOAD_DYLIB) {
+      const auto *c = reinterpret_cast<const dylib_command *>(cmd);
+      StringRef dylibPath =
+          reinterpret_cast<const char *>(c) + read32le(&c->dylib.name);
+      Optional<DylibFile *> dylib = findDylib(dylibPath, umbrella, nullptr);
+      if (!dylib)
+        error(Twine("unable to locate library '") + dylibPath +
+              "' loaded from '" + toString(this) + "' for -flat_namespace");
+    }
   }
 }
 
-DylibFile::DylibFile(const InterfaceFile &interface, DylibFile *umbrella)
-    : InputFile(DylibKind, interface), refState(RefState::Unreferenced) {
+DylibFile::DylibFile(const InterfaceFile &interface, DylibFile *umbrella,
+                     bool isBundleLoader)
+    : InputFile(DylibKind, interface), refState(RefState::Unreferenced),
+      isBundleLoader(isBundleLoader) {
+  // FIXME: Add test for the missing TBD code path.
+
   if (umbrella == nullptr)
     umbrella = this;
+
+  if (!interface.getArchitectures().has(config->arch)) {
+    error(toString(this) + " is incompatible with " +
+          getArchitectureName(config->arch));
+    return;
+  }
 
   dylibName = saver.save(interface.getInstallName());
   compatibilityVersion = interface.getCompatibilityVersion().rawValue();
@@ -697,17 +736,11 @@ DylibFile::DylibFile(const InterfaceFile &interface, DylibFile *umbrella)
     }
   }
 
-  bool isTopLevelTapi = false;
-  if (currentTopLevelTapi == nullptr) {
-    currentTopLevelTapi = &interface;
-    isTopLevelTapi = true;
-  }
+  const InterfaceFile *topLevel =
+      interface.getParent() == nullptr ? &interface : interface.getParent();
 
   for (InterfaceFileRef intfRef : interface.reexportedLibraries())
-    loadReexport(intfRef.getInstallName(), umbrella);
-
-  if (isTopLevelTapi)
-    currentTopLevelTapi = nullptr;
+    loadReexport(intfRef.getInstallName(), umbrella, topLevel);
 }
 
 ArchiveFile::ArchiveFile(std::unique_ptr<object::Archive> &&f)
@@ -754,7 +787,41 @@ void ArchiveFile::fetch(const object::Archive::Symbol &sym) {
   }
 }
 
+static macho::Symbol *createBitcodeSymbol(const lto::InputFile::Symbol &objSym,
+                                          BitcodeFile &file) {
+  StringRef name = saver.save(objSym.getName());
+
+  // TODO: support weak references
+  if (objSym.isUndefined())
+    return symtab->addUndefined(name, &file, /*isWeakRef=*/false);
+
+  assert(!objSym.isCommon() && "TODO: support common symbols in LTO");
+
+  // TODO: Write a test demonstrating why computing isPrivateExtern before
+  // LTO compilation is important.
+  bool isPrivateExtern = false;
+  switch (objSym.getVisibility()) {
+  case GlobalValue::HiddenVisibility:
+    isPrivateExtern = true;
+    break;
+  case GlobalValue::ProtectedVisibility:
+    error(name + " has protected visibility, which is not supported by Mach-O");
+    break;
+  case GlobalValue::DefaultVisibility:
+    break;
+  }
+
+  return symtab->addDefined(name, &file, /*isec=*/nullptr, /*value=*/0,
+                            objSym.isWeak(), isPrivateExtern);
+}
+
 BitcodeFile::BitcodeFile(MemoryBufferRef mbref)
     : InputFile(BitcodeKind, mbref) {
   obj = check(lto::InputFile::create(mbref));
+
+  // Convert LTO Symbols to LLD Symbols in order to perform resolution. The
+  // "winning" symbol will then be marked as Prevailing at LTO compilation
+  // time.
+  for (const lto::InputFile::Symbol &objSym : obj->symbols())
+    symbols.push_back(createBitcodeSymbol(objSym, *this));
 }

@@ -958,6 +958,10 @@ extern omp_memspace_handle_t const omp_large_cap_mem_space;
 extern omp_memspace_handle_t const omp_const_mem_space;
 extern omp_memspace_handle_t const omp_high_bw_mem_space;
 extern omp_memspace_handle_t const omp_low_lat_mem_space;
+// Preview of target memory support
+extern omp_memspace_handle_t const llvm_omp_target_host_mem_space;
+extern omp_memspace_handle_t const llvm_omp_target_shared_mem_space;
+extern omp_memspace_handle_t const llvm_omp_target_device_mem_space;
 
 typedef struct {
   omp_alloctrait_key_t key;
@@ -974,6 +978,10 @@ extern omp_allocator_handle_t const omp_low_lat_mem_alloc;
 extern omp_allocator_handle_t const omp_cgroup_mem_alloc;
 extern omp_allocator_handle_t const omp_pteam_mem_alloc;
 extern omp_allocator_handle_t const omp_thread_mem_alloc;
+// Preview of target memory support
+extern omp_allocator_handle_t const llvm_omp_target_host_mem_alloc;
+extern omp_allocator_handle_t const llvm_omp_target_shared_mem_alloc;
+extern omp_allocator_handle_t const llvm_omp_target_device_mem_alloc;
 extern omp_allocator_handle_t const kmp_max_mem_alloc;
 extern omp_allocator_handle_t __kmp_def_allocator;
 
@@ -1011,6 +1019,7 @@ extern void __kmpc_free(int gtid, void *ptr, omp_allocator_handle_t al);
 
 extern void __kmp_init_memkind();
 extern void __kmp_fini_memkind();
+extern void __kmp_init_target_mem();
 
 /* ------------------------------------------------------------------------ */
 
@@ -1124,7 +1133,10 @@ extern kmp_uint64 __kmp_now_nsec();
 #define KMP_MAX_CHUNK (INT_MAX - 1)
 #define KMP_DEFAULT_CHUNK 1
 
+#define KMP_MIN_DISP_NUM_BUFF 1
 #define KMP_DFLT_DISP_NUM_BUFF 7
+#define KMP_MAX_DISP_NUM_BUFF 4096
+
 #define KMP_MAX_ORDERED 8
 
 #define KMP_MAX_FIELDS 32

@@ -837,6 +837,7 @@ static unsigned getBranchOpcodeForIntCondCode(ISD::CondCode CC) {
 }
 
 RISCVVLMUL RISCVTargetLowering::getLMUL(MVT VT) {
+  assert(VT.isScalableVector() && "Expecting a scalable vector type");
   unsigned KnownSize = VT.getSizeInBits().getKnownMinValue();
   if (VT.getVectorElementType() == MVT::i1)
     KnownSize *= 8;
@@ -2210,14 +2211,12 @@ SDValue RISCVTargetLowering::lowerINSERT_VECTOR_ELT(SDValue Op,
   //   (slideup vec, (insertelt (slidedown impdef, vec, idx), val, 0), idx),
   if (Subtarget.is64Bit() || Val.getValueType() != MVT::i64) {
     if (isNullConstant(Idx))
-      return Op;
+      return DAG.getNode(RISCVISD::VMV_S_XF_VL, DL, ContainerVT, Vec, Val, VL);
     SDValue Slidedown =
         DAG.getNode(RISCVISD::VSLIDEDOWN_VL, DL, ContainerVT,
                     DAG.getUNDEF(ContainerVT), Vec, Idx, Mask, VL);
     SDValue InsertElt0 =
-        DAG.getNode(ISD::INSERT_VECTOR_ELT, DL, ContainerVT, Slidedown, Val,
-                    DAG.getConstant(0, DL, Subtarget.getXLenVT()));
-
+        DAG.getNode(RISCVISD::VMV_S_XF_VL, DL, ContainerVT, Slidedown, Val, VL);
     return DAG.getNode(RISCVISD::VSLIDEUP_VL, DL, ContainerVT, Vec, InsertElt0,
                        Idx, Mask, VL);
   }
@@ -3790,23 +3789,56 @@ SDValue RISCVTargetLowering::PerformDAGCombine(SDNode *N,
     break;
   case RISCVISD::SELECT_CC: {
     // Transform
-    // (select_cc (xor X, 1), 0, setne, trueV, falseV) ->
-    // (select_cc X, 0, seteq, trueV, falseV) if we can prove X is 0/1.
-    // This can occur when legalizing some floating point comparisons.
     SDValue LHS = N->getOperand(0);
     SDValue RHS = N->getOperand(1);
     auto CCVal = static_cast<ISD::CondCode>(N->getConstantOperandVal(2));
+    if (!ISD::isIntEqualitySetCC(CCVal))
+      break;
+
+    // Fold (select_cc (setlt X, Y), 0, ne, trueV, falseV) ->
+    //      (select_cc X, Y, lt, trueV, falseV)
+    // Sometimes the setcc is introduced after select_cc has been formed.
+    if (LHS.getOpcode() == ISD::SETCC && isNullConstant(RHS) &&
+        LHS.getOperand(0).getValueType() == Subtarget.getXLenVT()) {
+      // If we're looking for eq 0 instead of ne 0, we need to invert the
+      // condition.
+      bool Invert = CCVal == ISD::SETEQ;
+      CCVal = cast<CondCodeSDNode>(LHS.getOperand(2))->get();
+      if (Invert)
+        CCVal = ISD::getSetCCInverse(CCVal, LHS.getValueType());
+
+      RHS = LHS.getOperand(1);
+      LHS = LHS.getOperand(0);
+      normaliseSetCC(LHS, RHS, CCVal);
+
+      SDLoc DL(N);
+      SDValue TargetCC = DAG.getConstant(CCVal, DL, Subtarget.getXLenVT());
+      return DAG.getNode(
+          RISCVISD::SELECT_CC, DL, N->getValueType(0),
+          {LHS, RHS, TargetCC, N->getOperand(3), N->getOperand(4)});
+    }
+
+    // Fold (select_cc (xor X, Y), 0, eq/ne, trueV, falseV) ->
+    //      (select_cc X, Y, eq/ne, trueV, falseV)
+    if (LHS.getOpcode() == ISD::XOR && isNullConstant(RHS))
+      return DAG.getNode(RISCVISD::SELECT_CC, SDLoc(N), N->getValueType(0),
+                         {LHS.getOperand(0), LHS.getOperand(1),
+                          N->getOperand(2), N->getOperand(3),
+                          N->getOperand(4)});
+    // (select_cc X, 1, setne, trueV, falseV) ->
+    // (select_cc X, 0, seteq, trueV, falseV) if we can prove X is 0/1.
+    // This can occur when legalizing some floating point comparisons.
     APInt Mask = APInt::getBitsSetFrom(LHS.getValueSizeInBits(), 1);
-    if (ISD::isIntEqualitySetCC(CCVal) && isNullConstant(RHS) &&
-        LHS.getOpcode() == ISD::XOR && isOneConstant(LHS.getOperand(1)) &&
-        DAG.MaskedValueIsZero(LHS.getOperand(0), Mask)) {
+    if (isOneConstant(RHS) && DAG.MaskedValueIsZero(LHS, Mask)) {
       SDLoc DL(N);
       CCVal = ISD::getSetCCInverse(CCVal, LHS.getValueType());
       SDValue TargetCC = DAG.getConstant(CCVal, DL, Subtarget.getXLenVT());
-      return DAG.getNode(RISCVISD::SELECT_CC, DL, N->getValueType(0),
-                         {LHS.getOperand(0), RHS, TargetCC, N->getOperand(3),
-                          N->getOperand(4)});
+      RHS = DAG.getConstant(0, DL, LHS.getValueType());
+      return DAG.getNode(
+          RISCVISD::SELECT_CC, DL, N->getValueType(0),
+          {LHS, RHS, TargetCC, N->getOperand(3), N->getOperand(4)});
     }
+
     break;
   }
   case ISD::SETCC: {
@@ -5735,6 +5767,7 @@ const char *RISCVTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(VMV_V_X_VL)
   NODE_NAME_CASE(VFMV_V_F_VL)
   NODE_NAME_CASE(VMV_X_S)
+  NODE_NAME_CASE(VMV_S_XF_VL)
   NODE_NAME_CASE(SPLAT_VECTOR_I64)
   NODE_NAME_CASE(READ_VLENB)
   NODE_NAME_CASE(TRUNCATE_VECTOR_VL)

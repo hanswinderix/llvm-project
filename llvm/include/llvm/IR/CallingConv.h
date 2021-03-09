@@ -244,6 +244,9 @@ namespace CallingConv {
     /// Calling convention used for AMD graphics targets.
     AMDGPU_Gfx = 100,
 
+    /// M68k_INTR - Calling convention used for M68k interrupt routines.
+    M68k_INTR = 101,
+
     /// Calling convention used for Sancus entry functions.
     SANCUS_ENTRY = 1001,
     SANCUS_DISPATCH = 1002,

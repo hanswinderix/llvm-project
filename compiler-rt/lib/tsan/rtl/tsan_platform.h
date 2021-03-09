@@ -23,8 +23,6 @@
 
 namespace __tsan {
 
-#if !SANITIZER_GO
-
 #if defined(__x86_64__)
 #define HAS_48_BIT_ADDRESS_SPACE 1
 #elif SANITIZER_IOSSIM // arm64 iOS simulators (order of #if matters)
@@ -36,6 +34,8 @@ namespace __tsan {
 #else
 #define HAS_48_BIT_ADDRESS_SPACE 0
 #endif
+
+#if !SANITIZER_GO
 
 #if HAS_48_BIT_ADDRESS_SPACE
 /*

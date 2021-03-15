@@ -4,7 +4,9 @@
 
 # RUN: llvm-mc -filetype=obj -triple=x86_64-apple-darwin %t/basic.s -o %t.basic.o
 # RUN: %lld %t.basic.o -o %t.basic
-# RUN: (llvm-objdump --syms %t.basic; llvm-objdump --macho --function-starts %t.basic) | FileCheck %s --check-prefix=BASIC
+# RUN: llvm-objdump --syms %t.basic > %t.objdump
+# RUN: llvm-objdump --macho --function-starts %t.basic >> %t.objdump
+# RUN: FileCheck %s --check-prefix=BASIC < %t.objdump
 
 # BASIC:      SYMBOL TABLE:
 # BASIC-NEXT: [[#%x,MAIN:]] g F __TEXT,__text _main
@@ -16,7 +18,9 @@
 
 # RUN: llvm-mc -filetype=obj -triple=x86_64-apple-darwin %t/alias.s -o %t.alias.o
 # RUN: %lld %t.alias.o -o %t.alias
-# RUN: (llvm-objdump --syms  %t.alias; llvm-objdump --macho --function-starts %t.alias) | FileCheck %s --check-prefix=ALIAS
+# RUN: llvm-objdump --syms  %t.alias > %t.objdump
+# RUN: llvm-objdump --macho --function-starts %t.alias >> %t.objdump
+# RUN: FileCheck %s --check-prefix=ALIAS < %t.objdump
 
 # ALIAS:      SYMBOL TABLE:
 # ALIAS-NEXT: [[#%x,F2:]] l F __TEXT,__text _f2

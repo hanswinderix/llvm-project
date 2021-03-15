@@ -1909,7 +1909,7 @@ static void handleSLLVMAttribute(Sema &S, Decl *D, const ParsedAttr &AL) {
     return;
   }
 
-  if (!checkAttributeNumArgs(S, AL, 1))
+  if (!AL.checkExactlyNumArgs(S, 1))
     return;
 
   auto LI = AL.getArgAsIdent(0);

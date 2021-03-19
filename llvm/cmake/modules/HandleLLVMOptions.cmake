@@ -982,8 +982,8 @@ endif()
 # linker directly, it isn't sufficient to pass -fsanitize=* to the linker.
 if (CLANG_CL AND (LLVM_BUILD_INSTRUMENTED OR LLVM_USE_SANITIZER))
   execute_process(
-    COMMAND ${CMAKE_CXX_COMPILER} /clang:-print-resource-dir
-    OUTPUT_VARIABLE clang_resource_dir
+    COMMAND ${CMAKE_CXX_COMPILER} /clang:-print-libgcc-file-name /clang:--rtlib=compiler-rt
+    OUTPUT_VARIABLE clang_compiler_rt_file
     ERROR_VARIABLE clang_cl_stderr
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_STRIP_TRAILING_WHITESPACE
@@ -992,8 +992,9 @@ if (CLANG_CL AND (LLVM_BUILD_INSTRUMENTED OR LLVM_USE_SANITIZER))
     message(FATAL_ERROR
       "Unable to invoke clang-cl to find resource dir: ${clang_cl_stderr}")
   endif()
-  file(TO_CMAKE_PATH "${clang_resource_dir}" clang_resource_dir)
-  append("/libpath:${clang_resource_dir}/lib/windows"
+  file(TO_CMAKE_PATH "${clang_compiler_rt_file}" clang_compiler_rt_file)
+  get_filename_component(clang_runtime_dir "${clang_compiler_rt_file}" DIRECTORY)
+  append("/libpath:${clang_runtime_dir}"
     CMAKE_EXE_LINKER_FLAGS
     CMAKE_MODULE_LINKER_FLAGS
     CMAKE_SHARED_LINKER_FLAGS)
@@ -1175,4 +1176,12 @@ if(LLVM_USE_RELATIVE_PATHS_IN_FILES)
   append_if(SUPPORTS_FFILE_PREFIX_MAP "-ffile-prefix-map=${CMAKE_BINARY_DIR}=${relative_root}" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
   append_if(SUPPORTS_FFILE_PREFIX_MAP "-ffile-prefix-map=${source_root}/=${LLVM_SOURCE_PREFIX}" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
   add_flag_if_supported("-no-canonical-prefixes" NO_CANONICAL_PREFIXES)
+endif()
+
+if(LLVM_INCLUDE_TESTS)
+  # Lit test suite requires at least python 3.6
+  set(LLVM_MINIMUM_PYTHON_VERSION 3.6)
+else()
+  # FIXME: it is unknown if this is the actual minimum bound
+  set(LLVM_MINIMUM_PYTHON_VERSION 3.0)
 endif()

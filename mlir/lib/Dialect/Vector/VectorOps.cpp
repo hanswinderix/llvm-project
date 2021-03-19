@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/Vector/VectorOps.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/StructuredOpsUtils.h"
@@ -2293,8 +2294,7 @@ void TransferReadOp::build(OpBuilder &builder, OperationState &result,
 
 static void printTransferAttrs(OpAsmPrinter &p, VectorTransferOpInterface op) {
   SmallVector<StringRef, 2> elidedAttrs;
-  if (op.permutation_map() ==
-      getTransferMinorIdentityMap(op.getShapedType(), op.getVectorType()))
+  if (op.permutation_map().isMinorIdentity())
     elidedAttrs.push_back(op.getPermutationMapAttrName());
   bool elideMasked = true;
   if (auto maybeMasked = op.masked()) {
@@ -2396,12 +2396,12 @@ static LogicalResult verify(TransferReadOp op) {
 /// ```
 ///    someop(memrefcast) -> someop
 /// ```
-/// It folds the source of the memref_cast into the root operation directly.
+/// It folds the source of the memref.cast into the root operation directly.
 static LogicalResult foldMemRefCast(Operation *op) {
   bool folded = false;
   for (OpOperand &operand : op->getOpOperands()) {
-    auto castOp = operand.get().getDefiningOp<MemRefCastOp>();
-    if (castOp && canFoldIntoConsumerOp(castOp)) {
+    auto castOp = operand.get().getDefiningOp<memref::CastOp>();
+    if (castOp && memref::CastOp::canFoldIntoConsumerOp(castOp)) {
       operand.set(castOp.getOperand());
       folded = true;
     }

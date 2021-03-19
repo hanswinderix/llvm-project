@@ -1125,6 +1125,7 @@ def fcoverage_compilation_dir_EQ : Joined<["-"], "fcoverage-compilation-dir=">,
     HelpText<"The compilation directory to embed in the coverage mapping.">,
     MarshallingInfoString<CodeGenOpts<"CoverageCompilationDir">>;
 def ffile_compilation_dir_EQ : Joined<["-"], "ffile-compilation-dir=">, Group<f_Group>,
+    Flags<[CoreOption]>,
     HelpText<"The compilation directory to embed in the debug info and coverage mapping.">;
 defm debug_info_for_profiling : BoolFOption<"debug-info-for-profiling",
   CodeGenOpts<"DebugInfoForProfiling">, DefaultFalse,
@@ -3124,8 +3125,6 @@ def mharden_sls_EQ : Joined<["-"], "mharden-sls=">,
   HelpText<"Select straight-line speculation hardening scope">;
 
 def msimd128 : Flag<["-"], "msimd128">, Group<m_wasm_Features_Group>;
-def munimplemented_simd128 : Flag<["-"], "munimplemented-simd128">, Group<m_wasm_Features_Group>;
-def mno_unimplemented_simd128 : Flag<["-"], "mno-unimplemented-simd128">, Group<m_wasm_Features_Group>;
 def mno_simd128 : Flag<["-"], "mno-simd128">, Group<m_wasm_Features_Group>;
 def mnontrapping_fptoint : Flag<["-"], "mnontrapping-fptoint">, Group<m_wasm_Features_Group>;
 def mno_nontrapping_fptoint : Flag<["-"], "mno-nontrapping-fptoint">, Group<m_wasm_Features_Group>;
@@ -4283,15 +4282,10 @@ defm underscoring : BooleanFFlag<"underscoring">, Group<gfortran_Group>;
 defm whole_file : BooleanFFlag<"whole-file">, Group<gfortran_Group>;
 
 // C++ SYCL options
-defm sycl : BoolOption<"f", "sycl",
-  LangOpts<"SYCL">, DefaultFalse,
-  PosFlag<SetTrue, [CC1Option], "Enable">, NegFlag<SetFalse, [], "Disable">,
-  BothFlags<[CoreOption], " SYCL kernels compilation for device">>,
-  Group<sycl_Group>;
-def sycl_std_EQ : Joined<["-"], "sycl-std=">, Group<sycl_Group>, Flags<[CC1Option, NoArgumentUnused, CoreOption]>,
-  HelpText<"SYCL language standard to compile for.">, Values<"2017,121,1.2.1,sycl-1.2.1">,
-  NormalizedValues<["SYCL_2017", "SYCL_2017", "SYCL_2017", "SYCL_2017"]>, NormalizedValuesScope<"LangOptions">,
-  MarshallingInfoEnum<LangOpts<"SYCLVersion">, "SYCL_None">, ShouldParseIf<fsycl.KeyPath>;
+def fsycl : Flag<["-"], "fsycl">, Flags<[NoXarchOption, CoreOption]>,
+  Group<sycl_Group>, HelpText<"Enables SYCL kernels compilation for device">;
+def fno_sycl : Flag<["-"], "fno-sycl">, Flags<[NoXarchOption, CoreOption]>,
+  Group<sycl_Group>, HelpText<"Disables SYCL kernels compilation for device">;
 
 //===----------------------------------------------------------------------===//
 // FLangOption + CoreOption + NoXarchOption
@@ -4369,6 +4363,8 @@ def fdebug_pre_fir_tree : Flag<["-"], "fdebug-pre-fir-tree">, Group<Action_Group
   HelpText<"Dump the pre-FIR tree">;
 def fdebug_module_writer : Flag<["-"],"fdebug-module-writer">, 
   HelpText<"Enable debug messages while writing module files">;
+def fget_symbols_sources : Flag<["-"], "fget-symbols-sources">, Group<Action_Group>,
+  HelpText<"Dump symbols and their source code locations">;
 
 }
 
@@ -5546,10 +5542,21 @@ def fopenmp_host_ir_file_path : Separate<["-"], "fopenmp-host-ir-file-path">,
 
 def fsycl_is_device : Flag<["-"], "fsycl-is-device">,
   HelpText<"Generate code for SYCL device.">,
-  MarshallingInfoFlag<LangOpts<"SYCLIsDevice">>,
-  ShouldParseIf<fsycl.KeyPath>;
+  MarshallingInfoFlag<LangOpts<"SYCLIsDevice">>;
+def fsycl_is_host : Flag<["-"], "fsycl-is-host">,
+  HelpText<"SYCL host compilation">,
+  MarshallingInfoFlag<LangOpts<"SYCLIsHost">>;
 
 } // let Flags = [CC1Option, NoDriverOption]
+
+def sycl_std_EQ : Joined<["-"], "sycl-std=">, Group<sycl_Group>,
+  Flags<[CC1Option, NoArgumentUnused, CoreOption]>,
+  HelpText<"SYCL language standard to compile for.">,
+  Values<"2017,121,1.2.1,sycl-1.2.1">,
+  NormalizedValues<["SYCL_2017", "SYCL_2017", "SYCL_2017", "SYCL_2017"]>,
+  NormalizedValuesScope<"LangOptions">,
+  MarshallingInfoEnum<LangOpts<"SYCLVersion">, "SYCL_None">,
+  ShouldParseIf<!strconcat(fsycl_is_device.KeyPath, "||", fsycl_is_host.KeyPath)>;
 
 defm cuda_approx_transcendentals : BoolFOption<"cuda-approx-transcendentals",
   LangOpts<"CUDADeviceApproxTranscendentals">, DefaultFalse,

@@ -50,7 +50,6 @@ FunctionPass *createSIAnnotateControlFlowPass();
 FunctionPass *createSIFoldOperandsPass();
 FunctionPass *createSIPeepholeSDWAPass();
 FunctionPass *createSILowerI1CopiesPass();
-FunctionPass *createSIAddIMGInitPass();
 FunctionPass *createSIShrinkInstructionsPass();
 FunctionPass *createSILoadStoreOptimizerPass();
 FunctionPass *createSIWholeQuadModePass();
@@ -204,14 +203,11 @@ extern char &SIWholeQuadModeID;
 void initializeSILowerControlFlowPass(PassRegistry &);
 extern char &SILowerControlFlowID;
 
-void initializeSIRemoveShortExecBranchesPass(PassRegistry &);
-extern char &SIRemoveShortExecBranchesID;
-
 void initializeSIPreEmitPeepholePass(PassRegistry &);
 extern char &SIPreEmitPeepholeID;
 
-void initializeSIInsertSkipsPass(PassRegistry &);
-extern char &SIInsertSkipsPassID;
+void initializeSILateBranchLoweringPass(PassRegistry &);
+extern char &SILateBranchLoweringPassID;
 
 void initializeSIOptimizeExecMaskingPass(PassRegistry &);
 extern char &SIOptimizeExecMaskingID;
@@ -224,9 +220,6 @@ extern char &AMDGPUSimplifyLibCallsID;
 
 void initializeAMDGPUUseNativeCallsPass(PassRegistry &);
 extern char &AMDGPUUseNativeCallsID;
-
-void initializeSIAddIMGInitPass(PassRegistry &);
-extern char &SIAddIMGInitID;
 
 void initializeAMDGPUPerfHintAnalysisPass(PassRegistry &);
 extern char &AMDGPUPerfHintAnalysisID;

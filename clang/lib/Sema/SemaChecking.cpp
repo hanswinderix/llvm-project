@@ -91,6 +91,7 @@
 #include <algorithm>
 #include <bitset>
 #include <cassert>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -1966,6 +1967,26 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
 
   case Builtin::BI__builtin_matrix_column_major_store:
     return SemaBuiltinMatrixColumnMajorStore(TheCall, TheCallResult);
+
+  case Builtin::BI__builtin_get_device_side_mangled_name: {
+    auto Check = [](CallExpr *TheCall) {
+      if (TheCall->getNumArgs() != 1)
+        return false;
+      auto *DRE = dyn_cast<DeclRefExpr>(TheCall->getArg(0)->IgnoreImpCasts());
+      if (!DRE)
+        return false;
+      auto *D = DRE->getDecl();
+      if (!isa<FunctionDecl>(D) && !isa<VarDecl>(D))
+        return false;
+      return D->hasAttr<CUDAGlobalAttr>() || D->hasAttr<CUDADeviceAttr>() ||
+             D->hasAttr<CUDAConstantAttr>() || D->hasAttr<HIPManagedAttr>();
+    };
+    if (!Check(TheCall)) {
+      Diag(TheCall->getBeginLoc(),
+           diag::err_hip_invalid_args_builtin_mangled_name);
+      return ExprError();
+    }
+  }
   }
 
   // Since the target specific builtins for each arch overlap, only check those
@@ -3395,13 +3416,27 @@ bool Sema::CheckRISCVBuiltinFunctionCall(const TargetInfo &TI,
                                          CallExpr *TheCall) {
   // CodeGenFunction can also detect this, but this gives a better error
   // message.
+  bool FeatureMissing = false;
+  SmallVector<StringRef> ReqFeatures;
   StringRef Features = Context.BuiltinInfo.getRequiredFeatures(BuiltinID);
-  if (Features.find("experimental-v") != StringRef::npos &&
-      !TI.hasFeature("experimental-v"))
-    return Diag(TheCall->getBeginLoc(), diag::err_riscvv_builtin_requires_v)
-           << TheCall->getSourceRange();
+  Features.split(ReqFeatures, ',');
 
-  return false;
+  // Check if each required feature is included
+  for (auto &I : ReqFeatures) {
+    if (TI.hasFeature(I))
+      continue;
+    // Convert features like "zbr" and "experimental-zbr" to "Zbr".
+    I.consume_front("experimental-");
+    std::string FeatureStr = I.str();
+    FeatureStr[0] = std::toupper(FeatureStr[0]);
+
+    // Error message
+    FeatureMissing = true;
+    Diag(TheCall->getBeginLoc(), diag::err_riscv_builtin_requires_extension)
+        << TheCall->getSourceRange() << StringRef(FeatureStr);
+  }
+
+  return FeatureMissing;
 }
 
 bool Sema::CheckSystemZBuiltinFunctionCall(unsigned BuiltinID,
@@ -4492,7 +4527,8 @@ void Sema::CheckArgAlignment(SourceLocation Loc, NamedDecl *FDecl,
 
   // Find expected alignment, and the actual alignment of the passed object.
   // getTypeAlignInChars requires complete types
-  if (ParamTy->isIncompleteType() || ArgTy->isIncompleteType())
+  if (ParamTy->isIncompleteType() || ArgTy->isIncompleteType() ||
+      ParamTy->isUndeducedType() || ArgTy->isUndeducedType())
     return;
 
   CharUnits ParamAlign = Context.getTypeAlignInChars(ParamTy);

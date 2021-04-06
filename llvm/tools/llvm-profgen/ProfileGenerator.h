@@ -8,10 +8,13 @@
 
 #ifndef LLVM_TOOLS_LLVM_PROGEN_PROFILEGENERATOR_H
 #define LLVM_TOOLS_LLVM_PROGEN_PROFILEGENERATOR_H
+#include "CSPreInliner.h"
 #include "ErrorHandling.h"
 #include "PerfReader.h"
 #include "ProfiledBinary.h"
+#include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/ProfileData/SampleProfWriter.h"
+#include <memory>
 
 using namespace llvm;
 using namespace sampleprof;
@@ -176,11 +179,18 @@ protected:
   // Lookup or create FunctionSamples for the context
   FunctionSamples &getFunctionProfileForContext(StringRef ContextId,
                                                 bool WasLeafInlined = false);
+  // Post processing for profiles before writing out, such as mermining
+  // and trimming cold profiles, running preinliner on profiles.
+  void postProcessProfiles();
   // Merge cold context profile whose total sample is below threshold
   // into base profile.
   void mergeAndTrimColdProfile(StringMap<FunctionSamples> &ProfileMap);
+  void computeSummaryAndThreshold();
   void write(std::unique_ptr<SampleProfileWriter> Writer,
              StringMap<FunctionSamples> &ProfileMap) override;
+
+  // Profile summary to answer isHotCount and isColdCount queries.
+  std::unique_ptr<ProfileSummaryInfo> PSI;
 
 private:
   // Helper function for updating body sample for a leaf location in

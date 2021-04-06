@@ -1248,14 +1248,15 @@ public:
     Value vectorDataPtr =
         castDataPtr(rewriter, loc, dataPtr, memRefType, toLLVMTy(vtp));
 
-    if (!xferOp.isMaskedDim(0))
+    if (xferOp.isDimInBounds(0))
       return replaceTransferOpWithLoadOrStore(rewriter,
                                               *this->getTypeConverter(), loc,
                                               xferOp, operands, vectorDataPtr);
 
     // 2. Create a vector with linear indices [ 0 .. vector_length - 1 ].
     // 3. Create offsetVector = [ offset + 0 .. offset + vector_length - 1 ].
-    // 4. Let dim the memref dimension, compute the vector comparison mask:
+    // 4. Let dim the memref dimension, compute the vector comparison mask
+    //    (in-bounds mask):
     //   [ offset + 0 .. offset + vector_length - 1 ] < [ dim .. dim ]
     //
     // TODO: when the leaf transfer rank is k > 1, we need the last `k`
@@ -1482,47 +1483,37 @@ public:
 
 /// Populate the given list with patterns that convert from Vector to LLVM.
 void mlir::populateVectorToLLVMConversionPatterns(
-    LLVMTypeConverter &converter, OwningRewritePatternList &patterns,
+    LLVMTypeConverter &converter, RewritePatternSet &patterns,
     bool reassociateFPReductions, bool enableIndexOptimizations) {
   MLIRContext *ctx = converter.getDialect()->getContext();
-  // clang-format off
-  patterns.insert<VectorFMAOpNDRewritePattern,
-                  VectorInsertStridedSliceOpDifferentRankRewritePattern,
-                  VectorInsertStridedSliceOpSameRankRewritePattern,
-                  VectorExtractStridedSliceOpConversion>(ctx);
-  patterns.insert<VectorReductionOpConversion>(
-      converter, reassociateFPReductions);
-  patterns.insert<VectorCreateMaskOpConversion,
-                  VectorTransferConversion<TransferReadOp>,
-                  VectorTransferConversion<TransferWriteOp>>(
+  patterns.add<VectorFMAOpNDRewritePattern,
+               VectorInsertStridedSliceOpDifferentRankRewritePattern,
+               VectorInsertStridedSliceOpSameRankRewritePattern,
+               VectorExtractStridedSliceOpConversion>(ctx);
+  patterns.add<VectorReductionOpConversion>(converter, reassociateFPReductions);
+  patterns.add<VectorCreateMaskOpConversion,
+               VectorTransferConversion<TransferReadOp>,
+               VectorTransferConversion<TransferWriteOp>>(
       converter, enableIndexOptimizations);
   patterns
-      .insert<VectorBitCastOpConversion,
-              VectorShuffleOpConversion,
-              VectorExtractElementOpConversion,
-              VectorExtractOpConversion,
-              VectorFMAOp1DConversion,
-              VectorInsertElementOpConversion,
-              VectorInsertOpConversion,
-              VectorPrintOpConversion,
-              VectorTypeCastOpConversion,
-              VectorLoadStoreConversion<vector::LoadOp,
-                                        vector::LoadOpAdaptor>,
-              VectorLoadStoreConversion<vector::MaskedLoadOp,
-                                        vector::MaskedLoadOpAdaptor>,
-              VectorLoadStoreConversion<vector::StoreOp,
-                                        vector::StoreOpAdaptor>,
-              VectorLoadStoreConversion<vector::MaskedStoreOp,
-                                        vector::MaskedStoreOpAdaptor>,
-              VectorGatherOpConversion,
-              VectorScatterOpConversion,
-              VectorExpandLoadOpConversion,
-              VectorCompressStoreOpConversion>(converter);
-  // clang-format on
+      .add<VectorBitCastOpConversion, VectorShuffleOpConversion,
+           VectorExtractElementOpConversion, VectorExtractOpConversion,
+           VectorFMAOp1DConversion, VectorInsertElementOpConversion,
+           VectorInsertOpConversion, VectorPrintOpConversion,
+           VectorTypeCastOpConversion,
+           VectorLoadStoreConversion<vector::LoadOp, vector::LoadOpAdaptor>,
+           VectorLoadStoreConversion<vector::MaskedLoadOp,
+                                     vector::MaskedLoadOpAdaptor>,
+           VectorLoadStoreConversion<vector::StoreOp, vector::StoreOpAdaptor>,
+           VectorLoadStoreConversion<vector::MaskedStoreOp,
+                                     vector::MaskedStoreOpAdaptor>,
+           VectorGatherOpConversion, VectorScatterOpConversion,
+           VectorExpandLoadOpConversion, VectorCompressStoreOpConversion>(
+          converter);
 }
 
 void mlir::populateVectorToLLVMMatrixConversionPatterns(
-    LLVMTypeConverter &converter, OwningRewritePatternList &patterns) {
-  patterns.insert<VectorMatmulOpConversion>(converter);
-  patterns.insert<VectorFlatTransposeOpConversion>(converter);
+    LLVMTypeConverter &converter, RewritePatternSet &patterns) {
+  patterns.add<VectorMatmulOpConversion>(converter);
+  patterns.add<VectorFlatTransposeOpConversion>(converter);
 }

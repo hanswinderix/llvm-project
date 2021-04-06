@@ -665,7 +665,7 @@ func @f() {
   // CHECK-NEXT: return
   %cs0 = shape.const_shape [8, 1] : !shape.shape
   %cs1 = shape.const_shape [1, -1] : !shape.shape
-  %cs2 = shape.const_shape [1, -1] : !shape.shape
+  %cs2 = shape.const_shape [8, -1] : !shape.shape
   %0 = shape.cstr_broadcastable %cs0, %cs1, %cs2 : !shape.shape, !shape.shape, !shape.shape
   "consume.witness"(%0) : (!shape.witness) -> ()
   return
@@ -1097,6 +1097,19 @@ func @is_broadcastable_on_duplicate_shapes(%a : !shape.shape, %b : !shape.shape)
 
 // -----
 
+// CHECK-LABEL: @cstr_broadcastable_on_duplicate_shapes
+// CHECK-SAME: (%[[A:.*]]: !shape.shape, %[[B:.*]]: !shape.shape)
+func @cstr_broadcastable_on_duplicate_shapes(%a : !shape.shape,
+    %b : !shape.shape) -> !shape.witness {
+  // CHECK: %[[RES:.*]] = shape.cstr_broadcastable %[[A]], %[[B]] :
+  // CHECK: return %[[RES]]
+  %0 = shape.cstr_broadcastable %a, %b, %a, %a, %a, %b : !shape.shape,
+      !shape.shape, !shape.shape, !shape.shape, !shape.shape, !shape.shape
+  return %0 : !shape.witness
+}
+
+// -----
+
 // CHECK-LABEL: @broadcast_on_same_shape
 // CHECK-SAME: (%[[SHAPE:.*]]: !shape.shape)
 func @broadcast_on_same_shape(%shape : !shape.shape) -> !shape.shape {
@@ -1130,4 +1143,48 @@ func @broadcast_on_single_operand(%a : tensor<3xindex>) {
   %0 = shape.broadcast %a : tensor<3xindex> -> tensor<?xindex>
   "use"(%0) : (tensor<?xindex>) -> ()
   return
+}
+
+// -----
+
+// CHECK-LABEL: @casted_extent_tensor
+// CHECK-SAME: (%[[ARG:.*]]: tensor<?x?x?xf32>) -> tensor<?xindex>
+func @casted_extent_tensor(%arg : tensor<?x?x?xf32>) -> tensor<?xindex> {
+  // CHECK: %[[RESULT:.*]] = shape.shape_of %[[ARG]] : tensor<?x?x?xf32> -> tensor<?xindex>
+  // CHECK: return %[[RESULT]] : tensor<?xindex>
+  %0 = shape.shape_of %arg : tensor<?x?x?xf32> -> tensor<3xindex>
+  %1 = tensor.cast %0 : tensor<3xindex> to tensor<?xindex>
+  return %1 : tensor<?xindex>
+}
+
+// -----
+
+// CHECK-LABEL: @casted_extent_tensor
+// CHECK-SAME: (%[[ARG:.*]]: tensor<?x?x?xf32>) -> tensor<3xindex>
+func @casted_extent_tensor(%arg : tensor<?x?x?xf32>) -> tensor<3xindex> {
+  // CHECK: %[[RESULT:.*]] = shape.shape_of %[[ARG]] : tensor<?x?x?xf32> -> tensor<3xindex>
+  // CHECK: return %[[RESULT]] : tensor<3xindex>
+  %0 = shape.shape_of %arg : tensor<?x?x?xf32> -> tensor<?xindex>
+  %1 = tensor.cast %0 : tensor<?xindex> to tensor<3xindex>
+  return %1 : tensor<3xindex>
+}
+
+// -----
+
+// CHECK-LABEL: @casted_extent_tensor
+func @casted_extent_tensor(%arg : tensor<?x?x?x?xf32>) -> tensor<3xindex> {
+  // CHECK: tensor.cast %{{.*}} : tensor<?xindex> to tensor<3xindex>
+  %0 = shape.shape_of %arg : tensor<?x?x?x?xf32> -> tensor<?xindex>
+  %1 = tensor.cast %0 : tensor<?xindex> to tensor<3xindex>
+  return %1 : tensor<3xindex>
+}
+
+// -----
+
+// CHECK-LABEL: @casted_extent_tensor
+func @casted_extent_tensor(%arg : tensor<*xf32>) -> tensor<3xindex> {
+  // CHECK: tensor.cast %{{.*}} : tensor<?xindex> to tensor<3xindex>
+  %0 = shape.shape_of %arg : tensor<*xf32> -> tensor<?xindex>
+  %1 = tensor.cast %0 : tensor<?xindex> to tensor<3xindex>
+  return %1 : tensor<3xindex>
 }

@@ -249,9 +249,8 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAMDGPUTarget() {
   initializeSIModeRegisterPass(*PR);
   initializeSIWholeQuadModePass(*PR);
   initializeSILowerControlFlowPass(*PR);
-  initializeSIRemoveShortExecBranchesPass(*PR);
   initializeSIPreEmitPeepholePass(*PR);
-  initializeSIInsertSkipsPass(*PR);
+  initializeSILateBranchLoweringPass(*PR);
   initializeSIMemoryLegalizerPass(*PR);
   initializeSIOptimizeExecMaskingPass(*PR);
   initializeSIPreAllocateWWMRegsPass(*PR);
@@ -265,7 +264,6 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAMDGPUTarget() {
   initializeAMDGPUPrintfRuntimeBindingPass(*PR);
   initializeGCNRegBankReassignPass(*PR);
   initializeGCNNSAReassignPass(*PR);
-  initializeSIAddIMGInitPass(*PR);
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
@@ -1098,7 +1096,6 @@ bool GCNPassConfig::addInstSelector() {
   AMDGPUPassConfig::addInstSelector();
   addPass(&SIFixSGPRCopiesID);
   addPass(createSILowerI1CopiesPass());
-  addPass(createSIAddIMGInitPass());
   return false;
 }
 
@@ -1135,10 +1132,6 @@ void GCNPassConfig::addPreGlobalInstructionSelect() {
 
 bool GCNPassConfig::addGlobalInstructionSelect() {
   addPass(new InstructionSelect(getOptLevel()));
-  // TODO: Fix instruction selection to do the right thing for image
-  // instructions with tfe or lwe in the first place, instead of running a
-  // separate pass to fix them up?
-  addPass(createSIAddIMGInitPass());
   return false;
 }
 
@@ -1215,9 +1208,9 @@ void GCNPassConfig::addPreEmitPass() {
   if (getOptLevel() > CodeGenOpt::None)
     addPass(&SIInsertHardClausesID);
 
-  addPass(&SIRemoveShortExecBranchesID);
-  addPass(&SIInsertSkipsPassID);
-  addPass(&SIPreEmitPeepholeID);
+  addPass(&SILateBranchLoweringPassID);
+  if (getOptLevel() > CodeGenOpt::None)
+    addPass(&SIPreEmitPeepholeID);
   // The hazard recognizer that runs as part of the post-ra scheduler does not
   // guarantee to be able handle all hazards correctly. This is because if there
   // are multiple scheduling regions in a basic block, the regions are scheduled

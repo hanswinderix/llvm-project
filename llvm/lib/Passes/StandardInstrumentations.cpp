@@ -41,7 +41,7 @@ cl::opt<bool> PreservedCFGCheckerInstrumentation::VerifyPreservedCFG(
 #ifdef NDEBUG
     cl::init(false));
 #else
-    cl::init(false));
+    cl::init(true));
 #endif
 
 // FIXME: Change `-debug-pass-manager` from boolean to enum type. Similar to
@@ -540,6 +540,13 @@ void IRChangedPrinter::generateIRRepresentation(Any IR, StringRef PassID,
 void IRChangedPrinter::handleAfter(StringRef PassID, std::string &Name,
                                    const std::string &Before,
                                    const std::string &After, Any) {
+  // We might not get anything to print if we only want to print a specific
+  // function but it gets deleted.
+  if (After.empty()) {
+    Out << "*** IR Deleted After " << PassID << Name << " ***\n";
+    return;
+  }
+
   assert(After.find("*** IR Dump") == 0 && "Unexpected banner format.");
   StringRef AfterRef = After;
   StringRef Banner =
@@ -1072,6 +1079,7 @@ void PreservedCFGCheckerInstrumentation::registerCallbacks(
   PIC.registerBeforeNonSkippedPassCallback(
       [this, &FAM](StringRef P, Any IR) {
         assert(&PassStack.emplace_back(P));
+        (void)this;
         if (!any_isa<const Function *>(IR))
           return;
 
@@ -1084,6 +1092,7 @@ void PreservedCFGCheckerInstrumentation::registerCallbacks(
       [this](StringRef P, const PreservedAnalyses &PassPA) {
         assert(PassStack.pop_back_val() == P &&
                "Before and After callbacks must correspond");
+        (void)this;
       });
 
   PIC.registerAfterPassCallback([this, &FAM,
@@ -1091,6 +1100,7 @@ void PreservedCFGCheckerInstrumentation::registerCallbacks(
                                            const PreservedAnalyses &PassPA) {
     assert(PassStack.pop_back_val() == P &&
            "Before and After callbacks must correspond");
+    (void)this;
 
     if (!any_isa<const Function *>(IR))
       return;

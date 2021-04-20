@@ -658,16 +658,10 @@ Constant *FoldReinterpretLoadFromConstPtr(Constant *C, Type *LoadTy,
 Constant *ConstantFoldLoadThroughBitcastExpr(ConstantExpr *CE, Type *DestTy,
                                              const DataLayout &DL) {
   auto *SrcPtr = CE->getOperand(0);
-  auto *SrcPtrTy = dyn_cast<PointerType>(SrcPtr->getType());
-  if (!SrcPtrTy)
-    return nullptr;
-  Type *SrcTy = SrcPtrTy->getPointerElementType();
-
-  Constant *C = ConstantFoldLoadFromConstPtr(SrcPtr, SrcTy, DL);
-  if (!C)
+  if (!SrcPtr->getType()->isPointerTy())
     return nullptr;
 
-  return llvm::ConstantFoldLoadThroughBitcast(C, DestTy, DL);
+  return ConstantFoldLoadFromConstPtr(SrcPtr, DestTy, DL);
 }
 
 } // end anonymous namespace
@@ -677,7 +671,7 @@ Constant *llvm::ConstantFoldLoadFromConstPtr(Constant *C, Type *Ty,
   // First, try the easy cases:
   if (auto *GV = dyn_cast<GlobalVariable>(C))
     if (GV->isConstant() && GV->hasDefinitiveInitializer())
-      return GV->getInitializer();
+      return ConstantFoldLoadThroughBitcast(GV->getInitializer(), Ty, DL);
 
   if (auto *GA = dyn_cast<GlobalAlias>(C))
     if (GA->getAliasee() && !GA->isInterposable())
@@ -691,8 +685,8 @@ Constant *llvm::ConstantFoldLoadFromConstPtr(Constant *C, Type *Ty,
   if (CE->getOpcode() == Instruction::GetElementPtr) {
     if (auto *GV = dyn_cast<GlobalVariable>(CE->getOperand(0))) {
       if (GV->isConstant() && GV->hasDefinitiveInitializer()) {
-        if (Constant *V =
-             ConstantFoldLoadThroughGEPConstantExpr(GV->getInitializer(), CE))
+        if (Constant *V = ConstantFoldLoadThroughGEPConstantExpr(
+                GV->getInitializer(), CE, Ty, DL))
           return V;
       }
     }
@@ -1410,7 +1404,9 @@ Constant *llvm::ConstantFoldCastOperand(unsigned Opcode, Constant *C,
 }
 
 Constant *llvm::ConstantFoldLoadThroughGEPConstantExpr(Constant *C,
-                                                       ConstantExpr *CE) {
+                                                       ConstantExpr *CE,
+                                                       Type *Ty,
+                                                       const DataLayout &DL) {
   if (!CE->getOperand(1)->isNullValue())
     return nullptr;  // Do not allow stepping over the value!
 
@@ -1421,7 +1417,7 @@ Constant *llvm::ConstantFoldLoadThroughGEPConstantExpr(Constant *C,
     if (!C)
       return nullptr;
   }
-  return C;
+  return ConstantFoldLoadThroughBitcast(C, Ty, DL);
 }
 
 Constant *
@@ -1493,8 +1489,6 @@ bool llvm::canConstantFoldCallTo(const CallBase *Call, const Function *F) {
   // WebAssembly float semantics are always known
   case Intrinsic::wasm_trunc_signed:
   case Intrinsic::wasm_trunc_unsigned:
-  case Intrinsic::wasm_trunc_saturate_signed:
-  case Intrinsic::wasm_trunc_saturate_unsigned:
     return true;
 
   // Floating point operations cannot be folded in strictfp functions in
@@ -1896,17 +1890,11 @@ static Constant *ConstantFoldScalarCall1(StringRef Name,
     APFloat U = Op->getValueAPF();
 
     if (IntrinsicID == Intrinsic::wasm_trunc_signed ||
-        IntrinsicID == Intrinsic::wasm_trunc_unsigned ||
-        IntrinsicID == Intrinsic::wasm_trunc_saturate_signed ||
-        IntrinsicID == Intrinsic::wasm_trunc_saturate_unsigned) {
-
-      bool Saturating = IntrinsicID == Intrinsic::wasm_trunc_saturate_signed ||
-                        IntrinsicID == Intrinsic::wasm_trunc_saturate_unsigned;
-      bool Signed = IntrinsicID == Intrinsic::wasm_trunc_signed ||
-                    IntrinsicID == Intrinsic::wasm_trunc_saturate_signed;
+        IntrinsicID == Intrinsic::wasm_trunc_unsigned) {
+      bool Signed = IntrinsicID == Intrinsic::wasm_trunc_signed;
 
       if (U.isNaN())
-        return Saturating ? ConstantInt::get(Ty, 0) : nullptr;
+        return nullptr;
 
       unsigned Width = Ty->getIntegerBitWidth();
       APSInt Int(Width, !Signed);
@@ -1917,15 +1905,7 @@ static Constant *ConstantFoldScalarCall1(StringRef Name,
       if (Status == APFloat::opOK || Status == APFloat::opInexact)
         return ConstantInt::get(Ty, Int);
 
-      if (!Saturating)
-        return nullptr;
-
-      if (U.isNegative())
-        return Signed ? ConstantInt::get(Ty, APInt::getSignedMinValue(Width))
-                      : ConstantInt::get(Ty, APInt::getMinValue(Width));
-      else
-        return Signed ? ConstantInt::get(Ty, APInt::getSignedMaxValue(Width))
-                      : ConstantInt::get(Ty, APInt::getMaxValue(Width));
+      return nullptr;
     }
 
     if (IntrinsicID == Intrinsic::fptoui_sat ||

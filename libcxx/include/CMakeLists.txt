@@ -11,13 +11,18 @@ set(files
   __functional_base
   __functional_base_03
   __hash_table
+  __iterator/concepts.h
+  __iterator/incrementable_traits.h
+  __iterator/readable_traits.h
   __libcpp_version
   __locale
+  __memory/addressof.h
+  __memory/allocation_guard.h
   __memory/allocator.h
   __memory/allocator_traits.h
   __memory/auto_ptr.h
-  __memory/base.h
   __memory/compressed_pair.h
+  __memory/construct_at.h
   __memory/pointer_safety.h
   __memory/pointer_traits.h
   __memory/raw_storage_iterator.h
@@ -25,10 +30,10 @@ set(files
   __memory/temporary_buffer.h
   __memory/uninitialized_algorithms.h
   __memory/unique_ptr.h
-  __memory/utilities.h
   __mutex_base
   __node_handle
   __nullptr
+  __ranges/enable_borrowed_range.h
   __split_buffer
   __sso_allocator
   __std_stream
@@ -140,6 +145,7 @@ set(files
   ostream
   queue
   random
+  ranges
   ratio
   regex
   scoped_allocator

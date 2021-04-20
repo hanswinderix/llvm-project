@@ -2472,7 +2472,7 @@ bool SelectionDAG::isSplatValue(SDValue V, const APInt &DemandedElts,
     return true;
   case ISD::ADD:
   case ISD::SUB:
-  case ISD::AND: 
+  case ISD::AND:
   case ISD::XOR:
   case ISD::OR: {
     APInt UndefLHS, UndefRHS;
@@ -2483,7 +2483,7 @@ bool SelectionDAG::isSplatValue(SDValue V, const APInt &DemandedElts,
       UndefElts = UndefLHS | UndefRHS;
       return true;
     }
-    break;
+    return false;
   }
   case ISD::ABS:
   case ISD::TRUNCATE:
@@ -4642,6 +4642,8 @@ SDValue SelectionDAG::getNode(unsigned Opcode, const SDLoc &DL, EVT VT,
     case ISD::BITCAST:
       if (VT == MVT::i16 && C->getValueType(0) == MVT::f16)
         return getConstant((uint16_t)V.bitcastToAPInt().getZExtValue(), DL, VT);
+      if (VT == MVT::i16 && C->getValueType(0) == MVT::bf16)
+        return getConstant((uint16_t)V.bitcastToAPInt().getZExtValue(), DL, VT);
       else if (VT == MVT::i32 && C->getValueType(0) == MVT::f32)
         return getConstant((uint32_t)V.bitcastToAPInt().getZExtValue(), DL, VT);
       else if (VT == MVT::i64 && C->getValueType(0) == MVT::f64)
@@ -4704,11 +4706,12 @@ SDValue SelectionDAG::getNode(unsigned Opcode, const SDLoc &DL, EVT VT,
     assert(VT.getScalarSizeInBits() >= 8 &&
            "STEP_VECTOR can only be used with vectors of integers that are at "
            "least 8 bits wide");
-    assert(Operand.getValueType().bitsGE(VT.getScalarType()) &&
-           "Operand type should be at least as large as the element type");
     assert(isa<ConstantSDNode>(Operand) &&
            cast<ConstantSDNode>(Operand)->getAPIntValue().isNonNegative() &&
-           "Expected positive integer constant for STEP_VECTOR");
+           cast<ConstantSDNode>(Operand)->getAPIntValue().isSignedIntN(
+               VT.getScalarSizeInBits()) &&
+           "Expected STEP_VECTOR integer constant to be positive and fit in "
+           "the vector element type");
     break;
   case ISD::FREEZE:
     assert(VT == Operand.getValueType() && "Unexpected VT!");

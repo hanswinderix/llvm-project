@@ -13,6 +13,8 @@ set(files
   __hash_table
   __iterator/concepts.h
   __iterator/incrementable_traits.h
+  __iterator/iter_move.h
+  __iterator/iterator_traits.h
   __iterator/readable_traits.h
   __libcpp_version
   __locale
@@ -42,6 +44,7 @@ set(files
   __tree
   __tuple
   __undef_macros
+  __utility/to_underlying.h
   algorithm
   any
   array

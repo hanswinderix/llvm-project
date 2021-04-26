@@ -43,21 +43,16 @@ serializeCompilerInvocation(CompilerInvocation &CI) {
   llvm::BumpPtrAllocator Alloc;
   llvm::StringSaver Strings(Alloc);
   auto SA = [&Strings](const Twine &Arg) { return Strings.save(Arg).data(); };
-  SmallVector<const char *, 32> Args;
 
-  // Synthesize full command line from the CompilerInvocation.
+  // Synthesize full command line from the CompilerInvocation, including "-cc1".
+  SmallVector<const char *, 32> Args{"-cc1"};
   CI.generateCC1CommandLine(Args, SA);
 
   // Convert arguments to the return type.
-  std::vector<std::string> Ret;
-  Ret.reserve(Args.size());
-  for (const char *Arg : Args)
-    Ret.emplace_back(Arg);
-
-  return Ret;
+  return std::vector<std::string>{Args.begin(), Args.end()};
 }
 
-std::vector<std::string> ModuleDeps::getFullCommandLine(
+std::vector<std::string> ModuleDeps::getCanonicalCommandLine(
     std::function<StringRef(ModuleID)> LookupPCMPath,
     std::function<const ModuleDeps &(ModuleID)> LookupModuleDeps) const {
   CompilerInvocation CI(makeInvocationForModuleBuildWithoutPaths(*this));
@@ -65,6 +60,13 @@ std::vector<std::string> ModuleDeps::getFullCommandLine(
   dependencies::detail::collectPCMAndModuleMapPaths(
       ClangModuleDeps, LookupPCMPath, LookupModuleDeps,
       CI.getFrontendOpts().ModuleFiles, CI.getFrontendOpts().ModuleMapFiles);
+
+  return serializeCompilerInvocation(CI);
+}
+
+std::vector<std::string>
+ModuleDeps::getCanonicalCommandLineWithoutModulePaths() const {
+  CompilerInvocation CI(makeInvocationForModuleBuildWithoutPaths(*this));
 
   return serializeCompilerInvocation(CI);
 }

@@ -3544,6 +3544,14 @@ SDValue DAGCombiner::visitSUB(SDNode *N) {
     return DAG.getNode(ISD::ADD, DL, VT, N0, DAG.getVScale(DL, VT, -IntVal));
   }
 
+  // canonicalize (sub X, step_vector(C)) to (add X, step_vector(-C))
+  if (N1.getOpcode() == ISD::STEP_VECTOR && N1.hasOneUse()) {
+    SDValue NewStep = DAG.getConstant(-N1.getConstantOperandAPInt(0), DL,
+                                      N1.getOperand(0).getValueType());
+    return DAG.getNode(ISD::ADD, DL, VT, N0,
+                       DAG.getStepVector(DL, VT, NewStep));
+  }
+
   // Prefer an add for more folding potential and possibly better codegen:
   // sub N0, (lshr N10, width-1) --> add N0, (ashr N10, width-1)
   if (!LegalOperations && N1.getOpcode() == ISD::SRL && N1.hasOneUse()) {
@@ -5595,9 +5603,9 @@ SDValue DAGCombiner::visitAND(SDNode *N) {
                              SDLoc(N), N1.getValueType());
 
     // fold (and x, -1) -> x, vector edition
-    if (ISD::isBuildVectorAllOnes(N0.getNode()))
+    if (ISD::isConstantSplatVectorAllOnes(N0.getNode()))
       return N1;
-    if (ISD::isBuildVectorAllOnes(N1.getNode()))
+    if (ISD::isConstantSplatVectorAllOnes(N1.getNode()))
       return N0;
 
     // fold (and (masked_load) (build_vec (x, ...))) to zext_masked_load
@@ -6357,10 +6365,10 @@ SDValue DAGCombiner::visitOR(SDNode *N) {
       return N0;
 
     // fold (or x, -1) -> -1, vector edition
-    if (ISD::isBuildVectorAllOnes(N0.getNode()))
+    if (ISD::isConstantSplatVectorAllOnes(N0.getNode()))
       // do not return N0, because undef node may exist in N0
       return DAG.getAllOnesConstant(SDLoc(N), N0.getValueType());
-    if (ISD::isBuildVectorAllOnes(N1.getNode()))
+    if (ISD::isConstantSplatVectorAllOnes(N1.getNode()))
       // do not return N1, because undef node may exist in N1
       return DAG.getAllOnesConstant(SDLoc(N), N1.getValueType());
 
@@ -10051,11 +10059,11 @@ SDValue DAGCombiner::visitVSELECT(SDNode *N) {
   if (SimplifySelectOps(N, N1, N2))
     return SDValue(N, 0);  // Don't revisit N.
 
-  // Fold (vselect (build_vector all_ones), N1, N2) -> N1
-  if (ISD::isBuildVectorAllOnes(N0.getNode()))
+  // Fold (vselect all_ones, N1, N2) -> N1
+  if (ISD::isConstantSplatVectorAllOnes(N0.getNode()))
     return N1;
-  // Fold (vselect (build_vector all_zeros), N1, N2) -> N2
-  if (ISD::isBuildVectorAllZeros(N0.getNode()))
+  // Fold (vselect all_zeros, N1, N2) -> N2
+  if (ISD::isConstantSplatVectorAllZeros(N0.getNode()))
     return N2;
 
   // The ConvertSelectToConcatVector function is assuming both the above

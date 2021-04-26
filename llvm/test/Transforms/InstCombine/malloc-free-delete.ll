@@ -391,32 +391,46 @@ if.end:                                           ; preds = %entry, %if.then
   ret void
 }
 
-; Freeing a no-free pointer -> full UB
+; The next four tests cover the semantics of the nofree attributes.  These
+; are thought to be legal transforms, but an implementation thereof has
+; been reverted once due to difficult to isolate fallout.
+
+; TODO: Freeing a no-free pointer -> %foo must be null
 define void @test13(i8* nofree %foo) {
 ; CHECK-LABEL: @test13(
-; CHECK-NEXT:    store i1 true, i1* undef, align 1
+; CHECK-NEXT:    call void @free(i8* [[FOO:%.*]])
 ; CHECK-NEXT:    ret void
 ;
   call void @free(i8* %foo)
   ret void
 }
 
-; Freeing a no-free pointer -> full UB
+; TODO: Freeing a no-free pointer -> %foo must be null
 define void @test14(i8* %foo) nofree {
 ; CHECK-LABEL: @test14(
-; CHECK-NEXT:    store i1 true, i1* undef, align 1
+; CHECK-NEXT:    call void @free(i8* [[FOO:%.*]])
 ; CHECK-NEXT:    ret void
 ;
   call void @free(i8* %foo)
   ret void
 }
 
-; free call marked no-free -> full UB
+; TODO: free call marked no-free ->  %foo must be null
 define void @test15(i8* %foo) {
 ; CHECK-LABEL: @test15(
-; CHECK-NEXT:    store i1 true, i1* undef, align 1
+; CHECK-NEXT:    call void @free(i8* [[FOO:%.*]]) #[[ATTR6:[0-9]+]]
 ; CHECK-NEXT:    ret void
 ;
   call void @free(i8* %foo) nofree
+  ret void
+}
+
+; TODO: freeing a nonnull nofree pointer -> full UB
+define void @test16(i8* nonnull nofree %foo) {
+; CHECK-LABEL: @test16(
+; CHECK-NEXT:    call void @free(i8* [[FOO:%.*]])
+; CHECK-NEXT:    ret void
+;
+  call void @free(i8* %foo)
   ret void
 }

@@ -12,6 +12,8 @@
 #include "clang/Tooling/DependencyScanning/DependencyScanningTool.h"
 #include "clang/Tooling/DependencyScanning/DependencyScanningWorker.h"
 #include "clang/Tooling/JSONCompilationDatabase.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileUtilities.h"
 #include "llvm/Support/InitLLVM.h"
@@ -49,7 +51,8 @@ public:
   /// option and cache the results for reuse. \returns resource directory path
   /// associated with the given invocation command or empty string if the
   /// compiler path is NOT an absolute path.
-  StringRef findResourceDir(const tooling::CommandLineArguments &Args) {
+  StringRef findResourceDir(const tooling::CommandLineArguments &Args,
+                            bool ClangCLMode) {
     if (Args.size() < 1)
       return "";
 
@@ -65,8 +68,12 @@ public:
     if (CachedResourceDir != Cache.end())
       return CachedResourceDir->second;
 
-    std::vector<StringRef> PrintResourceDirArgs{ClangBinaryName,
-                                                "-print-resource-dir"};
+    std::vector<StringRef> PrintResourceDirArgs{ClangBinaryName};
+    if (ClangCLMode)
+      PrintResourceDirArgs.push_back("/clang:-print-resource-dir");
+    else
+      PrintResourceDirArgs.push_back("-print-resource-dir");
+
     llvm::SmallString<64> OutputFile, ErrorFile;
     llvm::sys::fs::createTemporaryFile("print-resource-dir-output",
                                        "" /*no-suffix*/, OutputFile);
@@ -130,6 +137,31 @@ static llvm::cl::opt<ScanningOutputFormat> Format(
                                 "is experimental and will change.")),
     llvm::cl::init(ScanningOutputFormat::Make),
     llvm::cl::cat(DependencyScannerCategory));
+
+// This mode is mostly useful for development of explicitly built modules.
+// Command lines will contain arguments specifying modulemap file paths and
+// absolute paths to PCM files in the module cache directory.
+//
+// Build tools that want to put the PCM files in a different location should use
+// the C++ APIs instead, of which there are two flavors:
+//
+// 1. APIs that generate arguments with paths to modulemap and PCM files via
+//    callbacks provided by the client:
+//     * ModuleDeps::getCanonicalCommandLine(LookupPCMPath, LookupModuleDeps)
+//     * FullDependencies::getAdditionalArgs(LookupPCMPath, LookupModuleDeps)
+//
+// 2. APIs that don't generate arguments with paths to modulemap or PCM files
+//    and instead expect the client to append them manually after the fact:
+//     * ModuleDeps::getCanonicalCommandLineWithoutModulePaths()
+//     * FullDependencies::getAdditionalArgsWithoutModulePaths()
+//
+static llvm::cl::opt<bool> GenerateModulesPathArgs(
+    "generate-modules-path-args",
+    llvm::cl::desc(
+        "With '-format experimental-full', include arguments specifying "
+        "modules-related paths in the generated command lines: "
+        "'-fmodule-file=', '-o', '-fmodule-map-file='."),
+    llvm::cl::init(false), llvm::cl::cat(DependencyScannerCategory));
 
 llvm::cl::opt<unsigned>
     NumThreads("j", llvm::cl::Optional,
@@ -253,11 +285,14 @@ public:
       Modules.insert(I, {{MD.ID, InputIndex}, std::move(MD)});
     }
 
-    ID.AdditonalCommandLine = FD.getAdditionalCommandLine(
-        [&](ModuleID MID) { return lookupPCMPath(MID); },
-        [&](ModuleID MID) -> const ModuleDeps & {
-          return lookupModuleDeps(MID);
-        });
+    ID.AdditionalCommandLine =
+        GenerateModulesPathArgs
+            ? FD.getAdditionalArgs(
+                  [&](ModuleID MID) { return lookupPCMPath(MID); },
+                  [&](ModuleID MID) -> const ModuleDeps & {
+                    return lookupModuleDeps(MID);
+                  })
+            : FD.getAdditionalArgsWithoutModulePaths();
 
     Inputs.push_back(std::move(ID));
   }
@@ -288,11 +323,14 @@ public:
           {"file-deps", toJSONSorted(MD.FileDeps)},
           {"clang-module-deps", toJSONSorted(MD.ClangModuleDeps)},
           {"clang-modulemap-file", MD.ClangModuleMapFile},
-          {"command-line", MD.getFullCommandLine(
-                               [&](ModuleID MID) { return lookupPCMPath(MID); },
-                               [&](ModuleID MID) -> const ModuleDeps & {
-                                 return lookupModuleDeps(MID);
-                               })},
+          {"command-line",
+           GenerateModulesPathArgs
+               ? MD.getCanonicalCommandLine(
+                     [&](ModuleID MID) { return lookupPCMPath(MID); },
+                     [&](ModuleID MID) -> const ModuleDeps & {
+                       return lookupModuleDeps(MID);
+                     })
+               : MD.getCanonicalCommandLineWithoutModulePaths()},
       };
       OutModules.push_back(std::move(O));
     }
@@ -304,7 +342,7 @@ public:
           {"clang-context-hash", I.ContextHash},
           {"file-deps", I.FileDeps},
           {"clang-module-deps", toJSONSorted(I.ModuleDeps)},
-          {"command-line", I.AdditonalCommandLine},
+          {"command-line", I.AdditionalCommandLine},
       };
       TUs.push_back(std::move(O));
     }
@@ -351,7 +389,7 @@ private:
     std::string ContextHash;
     std::vector<std::string> FileDeps;
     std::vector<ModuleID> ModuleDeps;
-    std::vector<std::string> AdditonalCommandLine;
+    std::vector<std::string> AdditionalCommandLine;
   };
 
   std::mutex Lock;
@@ -409,24 +447,55 @@ int main(int argc, const char **argv) {
         bool HasMQ = false;
         bool HasMD = false;
         bool HasResourceDir = false;
+        bool ClangCLMode = false;
         auto FlagsEnd = llvm::find(Args, "--");
         if (FlagsEnd != Args.begin()) {
+          ClangCLMode =
+              llvm::sys::path::stem(Args[0]).contains_lower("clang-cl") ||
+              llvm::is_contained(Args, "--driver-mode=cl");
+
           // Reverse scan, starting at the end or at the element before "--".
           auto R = llvm::make_reverse_iterator(FlagsEnd);
           for (auto I = R, E = Args.rend(); I != E; ++I) {
             StringRef Arg = *I;
-            if (LastO.empty()) {
-              if (Arg == "-o" && I != R)
-                LastO = I[-1]; // Next argument (reverse iterator)
-              else if (Arg.startswith("-o"))
-                LastO = Arg.drop_front(2).str();
+            if (ClangCLMode) {
+              // Ignore arguments that are preceded by "-Xclang".
+              if ((I + 1) != E && I[1] == "-Xclang")
+                continue;
+              if (LastO.empty()) {
+                // With clang-cl, the output obj file can be specified with
+                // "/opath", "/o path", "/Fopath", and the dash counterparts.
+                // Also, clang-cl adds ".obj" extension if none is found.
+                if ((Arg == "-o" || Arg == "/o") && I != R)
+                  LastO = I[-1]; // Next argument (reverse iterator)
+                else if (Arg.startswith("/Fo") || Arg.startswith("-Fo"))
+                  LastO = Arg.drop_front(3).str();
+                else if (Arg.startswith("/o") || Arg.startswith("-o"))
+                  LastO = Arg.drop_front(2).str();
+
+                if (!LastO.empty() && !llvm::sys::path::has_extension(LastO))
+                  LastO.append(".obj");
+              }
+              if (Arg == "/clang:-MT")
+                HasMT = true;
+              if (Arg == "/clang:-MQ")
+                HasMQ = true;
+              if (Arg == "/clang:-MD")
+                HasMD = true;
+            } else {
+              if (LastO.empty()) {
+                if (Arg == "-o" && I != R)
+                  LastO = I[-1]; // Next argument (reverse iterator)
+                else if (Arg.startswith("-o"))
+                  LastO = Arg.drop_front(2).str();
+              }
+              if (Arg == "-MT")
+                HasMT = true;
+              if (Arg == "-MQ")
+                HasMQ = true;
+              if (Arg == "-MD")
+                HasMD = true;
             }
-            if (Arg == "-MT")
-              HasMT = true;
-            if (Arg == "-MQ")
-              HasMQ = true;
-            if (Arg == "-MD")
-              HasMD = true;
             if (Arg == "-resource-dir")
               HasResourceDir = true;
           }
@@ -435,18 +504,29 @@ int main(int argc, const char **argv) {
         // -o option.
         tooling::CommandLineArguments AdjustedArgs(Args.begin(), FlagsEnd);
         AdjustedArgs.push_back("-o");
+#ifdef _WIN32
+        AdjustedArgs.push_back("nul");
+#else
         AdjustedArgs.push_back("/dev/null");
+#endif
         if (!HasMT && !HasMQ) {
-          AdjustedArgs.push_back("-M");
-          AdjustedArgs.push_back("-MT");
           // We're interested in source dependencies of an object file.
+          std::string FileNameArg;
           if (!HasMD) {
             // FIXME: We are missing the directory unless the -o value is an
             // absolute path.
-            AdjustedArgs.push_back(!LastO.empty() ? LastO
-                                                  : getObjFilePath(FileName));
+            FileNameArg = !LastO.empty() ? LastO : getObjFilePath(FileName);
           } else {
-            AdjustedArgs.push_back(std::string(FileName));
+            FileNameArg = std::string(FileName);
+          }
+          if (ClangCLMode) {
+            AdjustedArgs.push_back("/clang:-M");
+            AdjustedArgs.push_back("/clang:-MT");
+            AdjustedArgs.push_back(Twine("/clang:", FileNameArg).str());
+          } else {
+            AdjustedArgs.push_back("-M");
+            AdjustedArgs.push_back("-MT");
+            AdjustedArgs.push_back(std::move(FileNameArg));
           }
         }
         AdjustedArgs.push_back("-Xclang");
@@ -457,7 +537,7 @@ int main(int argc, const char **argv) {
 
         if (!HasResourceDir) {
           StringRef ResourceDir =
-              ResourceDirCache.findResourceDir(Args);
+              ResourceDirCache.findResourceDir(Args, ClangCLMode);
           if (!ResourceDir.empty()) {
             AdjustedArgs.push_back("-resource-dir");
             AdjustedArgs.push_back(std::string(ResourceDir));

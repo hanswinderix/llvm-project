@@ -210,15 +210,40 @@ ns1::ns2::Foo<A, B> ns1::ns2::Bar<T, U>::Nested::method(int i, bool b) const
   llvm::sort(ExpectedLocations);
 
   // clang-format off
-  EXPECT_EQ(
-      llvm::makeArrayRef(ExpectedLocations),
-      (ArrayRef<std::pair<std::string, SourceLocation>>{
+  std::vector<std::pair<std::string, SourceLocation>> ActualLocations{
 STRING_LOCATION_STDPAIR(MethodDecl, getBeginLoc()),
 STRING_LOCATION_STDPAIR(MethodDecl, getBodyRBrace()),
 STRING_LOCATION_STDPAIR(MethodDecl, getEndLoc()),
 STRING_LOCATION_STDPAIR(MethodDecl, getInnerLocStart()),
 STRING_LOCATION_STDPAIR(MethodDecl, getLocation()),
+STRING_LOCATION_STDPAIR(MethodDecl, getNameInfo().getBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getNameInfo().getEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getNameInfo().getLoc()),
 STRING_LOCATION_STDPAIR(MethodDecl, getOuterLocStart()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getLocalBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getLocalEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getLocalBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getLocalEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getPrefix().getBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getPrefix().getEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getPrefix().getLocalBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getPrefix().getLocalEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getPrefix().getPrefix().getBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getPrefix().getPrefix().getEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getPrefix().getPrefix().getLocalBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getPrefix().getPrefix().getLocalEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getTypeLoc().getAs<clang::TemplateSpecializationTypeLoc>().getLAngleLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getTypeLoc().getAs<clang::TemplateSpecializationTypeLoc>().getRAngleLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getTypeLoc().getAs<clang::TemplateSpecializationTypeLoc>().getTemplateNameLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getTypeLoc().getBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getTypeLoc().getEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getTypeLoc().getAs<clang::TypeSpecTypeLoc>().getNameLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getTypeLoc().getBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getTypeLoc().getEndLoc()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getLParenLoc()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getLocalRangeBegin()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getLocalRangeEnd()),
@@ -228,6 +253,14 @@ STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clan
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getAs<clang::ElaboratedTypeLoc>().getNamedTypeLoc().getAs<clang::TemplateSpecializationTypeLoc>().getTemplateNameLoc()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getAs<clang::ElaboratedTypeLoc>().getNamedTypeLoc().getBeginLoc()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getAs<clang::ElaboratedTypeLoc>().getNamedTypeLoc().getEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getLocalBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getLocalEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getPrefix().getBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getPrefix().getEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getPrefix().getLocalBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getPrefix().getLocalEndLoc()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getBeginLoc()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getEndLoc()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getNextTypeLoc().getAs<clang::TemplateSpecializationTypeLoc>().getLAngleLoc()),
@@ -242,6 +275,14 @@ STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTyp
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getAs<clang::ElaboratedTypeLoc>().getNamedTypeLoc().getAs<clang::TemplateSpecializationTypeLoc>().getTemplateNameLoc()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getAs<clang::ElaboratedTypeLoc>().getNamedTypeLoc().getBeginLoc()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getAs<clang::ElaboratedTypeLoc>().getNamedTypeLoc().getEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getLocalBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getLocalEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getPrefix().getBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getPrefix().getEndLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getPrefix().getLocalBeginLoc()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getPrefix().getLocalEndLoc()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getBeginLoc()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getEndLoc()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getNextTypeLoc().getAs<clang::TemplateSpecializationTypeLoc>().getLAngleLoc()),
@@ -251,8 +292,10 @@ STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTyp
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getNextTypeLoc().getEndLoc()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSpecEndLoc()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSpecStartLoc())
-  }));
+  };
   // clang-format on
+
+  EXPECT_EQ(ExpectedLocations, ActualLocations);
 
   auto ExpectedRanges = FormatExpected<SourceRange>(Result.RangeAccessors);
 
@@ -265,13 +308,30 @@ STRING_LOCATION_STDPAIR(MethodDecl, getTypeSpecStartLoc())
             llvm::makeArrayRef(ExpectedRanges),
       (ArrayRef<std::pair<std::string, SourceRange>>{
 STRING_LOCATION_STDPAIR(MethodDecl, getExceptionSpecSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getNameInfo().getSourceRange()),
 STRING_LOCATION_STDPAIR(MethodDecl, getParametersSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getLocalSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getLocalSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getPrefix().getLocalSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getPrefix().getPrefix().getLocalSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getPrefix().getPrefix().getSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getPrefix().getSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getTypeLoc().getLocalSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getPrefix().getTypeLoc().getSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getTypeLoc().getLocalSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getQualifierLoc().getTypeLoc().getSourceRange()),
 STRING_LOCATION_STDPAIR(MethodDecl, getReturnTypeSourceRange()),
 STRING_LOCATION_STDPAIR(MethodDecl, getSourceRange()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getExceptionSpecRange()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getParensRange()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getAs<clang::ElaboratedTypeLoc>().getNamedTypeLoc().getLocalSourceRange()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getAs<clang::ElaboratedTypeLoc>().getNamedTypeLoc().getSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getLocalSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getPrefix().getLocalSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getPrefix().getSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getSourceRange()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getLocalSourceRange()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getNextTypeLoc().getLocalSourceRange()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clang::FunctionTypeLoc>().getReturnLoc().getNextTypeLoc().getSourceRange()),
@@ -279,6 +339,10 @@ STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getAs<clan
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getLocalSourceRange()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getAs<clang::ElaboratedTypeLoc>().getNamedTypeLoc().getLocalSourceRange()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getAs<clang::ElaboratedTypeLoc>().getNamedTypeLoc().getSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getLocalSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getPrefix().getLocalSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getPrefix().getSourceRange()),
+STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getAs<clang::ElaboratedTypeLoc>().getQualifierLoc().getSourceRange()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getLocalSourceRange()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getNextTypeLoc().getLocalSourceRange()),
 STRING_LOCATION_STDPAIR(MethodDecl, getTypeSourceInfo()->getTypeLoc().getNextTypeLoc().getNextTypeLoc().getSourceRange()),
@@ -317,23 +381,31 @@ void ns::A::foo() {}
   auto ExpectedLocations =
       FormatExpected<SourceLocation>(Result.LocationAccessors);
 
-  EXPECT_THAT(
-      ExpectedLocations,
-      UnorderedElementsAre(
-          STRING_LOCATION_PAIR(NNS, getBeginLoc()),
-          STRING_LOCATION_PAIR(NNS, getEndLoc()),
-          STRING_LOCATION_PAIR(NNS, getLocalBeginLoc()),
-          STRING_LOCATION_PAIR(NNS, getLocalEndLoc()),
-          STRING_LOCATION_PAIR(
+  llvm::sort(ExpectedLocations);
+
+  EXPECT_EQ(
+      llvm::makeArrayRef(ExpectedLocations),
+      (ArrayRef<std::pair<std::string, SourceLocation>>{
+          STRING_LOCATION_STDPAIR(NNS, getBeginLoc()),
+          STRING_LOCATION_STDPAIR(NNS, getEndLoc()),
+          STRING_LOCATION_STDPAIR(NNS, getLocalBeginLoc()),
+          STRING_LOCATION_STDPAIR(NNS, getLocalEndLoc()),
+          STRING_LOCATION_STDPAIR(NNS, getPrefix().getBeginLoc()),
+          STRING_LOCATION_STDPAIR(NNS, getPrefix().getEndLoc()),
+          STRING_LOCATION_STDPAIR(NNS, getPrefix().getLocalBeginLoc()),
+          STRING_LOCATION_STDPAIR(NNS, getPrefix().getLocalEndLoc()),
+          STRING_LOCATION_STDPAIR(
               NNS, getTypeLoc().getAs<clang::TypeSpecTypeLoc>().getNameLoc()),
-          STRING_LOCATION_PAIR(NNS, getTypeLoc().getBeginLoc()),
-          STRING_LOCATION_PAIR(NNS, getTypeLoc().getEndLoc())));
+          STRING_LOCATION_STDPAIR(NNS, getTypeLoc().getBeginLoc()),
+          STRING_LOCATION_STDPAIR(NNS, getTypeLoc().getEndLoc())}));
 
   auto ExpectedRanges = FormatExpected<SourceRange>(Result.RangeAccessors);
 
   EXPECT_THAT(
       ExpectedRanges,
       UnorderedElementsAre(
+          STRING_LOCATION_PAIR(NNS, getPrefix().getLocalSourceRange()),
+          STRING_LOCATION_PAIR(NNS, getPrefix().getSourceRange()),
           STRING_LOCATION_PAIR(NNS, getLocalSourceRange()),
           STRING_LOCATION_PAIR(NNS, getSourceRange()),
           STRING_LOCATION_PAIR(NNS, getTypeLoc().getSourceRange()),
@@ -1158,6 +1230,8 @@ STRING_LOCATION_PAIR(Base, getTypeSourceInfo()->getTypeLoc().getLocalSourceRange
 }
 
 TEST(Introspection, SourceLocations_FunctionProtoTypeLoc) {
+  if (!NodeIntrospection::hasIntrospectionSupport())
+    return;
   auto AST =
       buildASTFromCode(R"cpp(
 int foo();
@@ -1173,10 +1247,6 @@ int foo();
 
   const auto *TL = BoundNodes[0].getNodeAs<TypeLoc>("tl");
   auto Result = NodeIntrospection::GetLocations(*TL);
-
-  if (Result.LocationAccessors.empty() && Result.RangeAccessors.empty()) {
-    return;
-  }
 
   auto ExpectedLocations =
       FormatExpected<SourceLocation>(Result.LocationAccessors);
@@ -1222,6 +1292,8 @@ STRING_LOCATION_PAIR(TL, getSourceRange())
 }
 
 TEST(Introspection, SourceLocations_PointerTypeLoc) {
+  if (!NodeIntrospection::hasIntrospectionSupport())
+    return;
   auto AST =
       buildASTFromCode(R"cpp(
 int* i;
@@ -1239,10 +1311,6 @@ int* i;
 
   const auto *TL = BoundNodes[0].getNodeAs<TypeLoc>("tl");
   auto Result = NodeIntrospection::GetLocations(*TL);
-
-  if (Result.LocationAccessors.empty() && Result.RangeAccessors.empty()) {
-    return;
-  }
 
   auto ExpectedLocations =
       FormatExpected<SourceLocation>(Result.LocationAccessors);
@@ -1287,6 +1355,8 @@ STRING_LOCATION_PAIR(TL, getSourceRange())
 #ifndef _WIN32
 // This test doesn't work on windows due to use of the typeof extension.
 TEST(Introspection, SourceLocations_TypeOfTypeLoc) {
+  if (!NodeIntrospection::hasIntrospectionSupport())
+    return;
   auto AST =
       buildASTFromCode(R"cpp(
 typeof (static_cast<void *>(0)) i;
@@ -1304,10 +1374,6 @@ typeof (static_cast<void *>(0)) i;
 
   const auto *TL = BoundNodes[0].getNodeAs<TypeLoc>("tl");
   auto Result = NodeIntrospection::GetLocations(*TL);
-
-  if (Result.LocationAccessors.empty() && Result.RangeAccessors.empty()) {
-    return;
-  }
 
   auto ExpectedLocations =
       FormatExpected<SourceLocation>(Result.LocationAccessors);
@@ -1333,3 +1399,142 @@ typeof (static_cast<void *>(0)) i;
                       TL, getAs<clang::TypeOfExprTypeLoc>().getParensRange())));
 }
 #endif
+
+TEST(Introspection, SourceLocations_DeclarationNameInfo_Dtor) {
+  if (!NodeIntrospection::hasIntrospectionSupport())
+    return;
+  auto AST =
+      buildASTFromCode(R"cpp(
+class Foo
+{
+  ~Foo() {}
+};
+)cpp",
+                       "foo.cpp", std::make_shared<PCHContainerOperations>());
+  auto &Ctx = AST->getASTContext();
+  auto &TU = *Ctx.getTranslationUnitDecl();
+
+  auto BoundNodes = ast_matchers::match(
+      decl(hasDescendant(cxxDestructorDecl(hasName("~Foo")).bind("dtor"))), TU,
+      Ctx);
+
+  EXPECT_EQ(BoundNodes.size(), 1u);
+
+  const auto *Dtor = BoundNodes[0].getNodeAs<CXXDestructorDecl>("dtor");
+  auto NI = Dtor->getNameInfo();
+  auto Result = NodeIntrospection::GetLocations(NI);
+
+  auto ExpectedLocations =
+      FormatExpected<SourceLocation>(Result.LocationAccessors);
+
+  llvm::sort(ExpectedLocations);
+
+  // clang-format off
+  EXPECT_EQ(
+      llvm::makeArrayRef(ExpectedLocations),
+      (ArrayRef<std::pair<std::string, SourceLocation>>{
+          STRING_LOCATION_STDPAIR((&NI), getBeginLoc()),
+          STRING_LOCATION_STDPAIR((&NI), getEndLoc()),
+          STRING_LOCATION_STDPAIR((&NI), getLoc()),
+          STRING_LOCATION_STDPAIR((&NI),
+getNamedTypeInfo()->getTypeLoc().getAs<clang::TypeSpecTypeLoc>().getNameLoc()),
+          STRING_LOCATION_STDPAIR(
+              (&NI), getNamedTypeInfo()->getTypeLoc().getBeginLoc()),
+          STRING_LOCATION_STDPAIR(
+              (&NI), getNamedTypeInfo()->getTypeLoc().getEndLoc())}));
+  // clang-format on
+
+  auto ExpectedRanges = FormatExpected<SourceRange>(Result.RangeAccessors);
+
+  EXPECT_THAT(
+      ExpectedRanges,
+      UnorderedElementsAre(
+          STRING_LOCATION_PAIR(
+              (&NI), getNamedTypeInfo()->getTypeLoc().getLocalSourceRange()),
+          STRING_LOCATION_PAIR(
+              (&NI), getNamedTypeInfo()->getTypeLoc().getSourceRange()),
+          STRING_LOCATION_PAIR((&NI), getSourceRange())));
+}
+
+TEST(Introspection, SourceLocations_DeclarationNameInfo_ConvOp) {
+  if (!NodeIntrospection::hasIntrospectionSupport())
+    return;
+  auto AST =
+      buildASTFromCode(R"cpp(
+class Foo
+{
+  bool operator==(const Foo&) const { return false; }
+};
+)cpp",
+                       "foo.cpp", std::make_shared<PCHContainerOperations>());
+  auto &Ctx = AST->getASTContext();
+  auto &TU = *Ctx.getTranslationUnitDecl();
+
+  auto BoundNodes = ast_matchers::match(
+      decl(hasDescendant(cxxMethodDecl().bind("opeq"))), TU, Ctx);
+
+  EXPECT_EQ(BoundNodes.size(), 1u);
+
+  const auto *Opeq = BoundNodes[0].getNodeAs<CXXMethodDecl>("opeq");
+  auto NI = Opeq->getNameInfo();
+  auto Result = NodeIntrospection::GetLocations(NI);
+
+  auto ExpectedLocations =
+      FormatExpected<SourceLocation>(Result.LocationAccessors);
+
+  llvm::sort(ExpectedLocations);
+
+  EXPECT_EQ(llvm::makeArrayRef(ExpectedLocations),
+            (ArrayRef<std::pair<std::string, SourceLocation>>{
+                STRING_LOCATION_STDPAIR((&NI), getBeginLoc()),
+                STRING_LOCATION_STDPAIR((&NI), getEndLoc()),
+                STRING_LOCATION_STDPAIR((&NI), getLoc())}));
+
+  auto ExpectedRanges = FormatExpected<SourceRange>(Result.RangeAccessors);
+
+  EXPECT_THAT(ExpectedRanges,
+              UnorderedElementsAre(
+                  STRING_LOCATION_PAIR((&NI), getSourceRange()),
+                  STRING_LOCATION_PAIR((&NI), getCXXOperatorNameRange())));
+}
+
+TEST(Introspection, SourceLocations_DeclarationNameInfo_LitOp) {
+  if (!NodeIntrospection::hasIntrospectionSupport())
+    return;
+  auto AST =
+      buildASTFromCode(R"cpp(
+long double operator"" _identity ( long double val )
+{
+    return val;
+}
+)cpp",
+                       "foo.cpp", std::make_shared<PCHContainerOperations>());
+  auto &Ctx = AST->getASTContext();
+  auto &TU = *Ctx.getTranslationUnitDecl();
+
+  auto BoundNodes = ast_matchers::match(
+      decl(hasDescendant(functionDecl().bind("litop"))), TU, Ctx);
+
+  EXPECT_EQ(BoundNodes.size(), 1u);
+
+  const auto *LitOp = BoundNodes[0].getNodeAs<FunctionDecl>("litop");
+  auto NI = LitOp->getNameInfo();
+  auto Result = NodeIntrospection::GetLocations(NI);
+
+  auto ExpectedLocations =
+      FormatExpected<SourceLocation>(Result.LocationAccessors);
+
+  llvm::sort(ExpectedLocations);
+
+  EXPECT_EQ(llvm::makeArrayRef(ExpectedLocations),
+            (ArrayRef<std::pair<std::string, SourceLocation>>{
+                STRING_LOCATION_STDPAIR((&NI), getBeginLoc()),
+                STRING_LOCATION_STDPAIR((&NI), getCXXLiteralOperatorNameLoc()),
+                STRING_LOCATION_STDPAIR((&NI), getEndLoc()),
+                STRING_LOCATION_STDPAIR((&NI), getLoc())}));
+
+  auto ExpectedRanges = FormatExpected<SourceRange>(Result.RangeAccessors);
+
+  EXPECT_THAT(ExpectedRanges, UnorderedElementsAre(STRING_LOCATION_PAIR(
+                                  (&NI), getSourceRange())));
+}

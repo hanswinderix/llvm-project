@@ -49,6 +49,7 @@
 #include "llvm/Support/AtomicOrdering.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/InstructionCost.h"
 #include "llvm/Support/MachineValueType.h"
 #include <algorithm>
 #include <cassert>
@@ -781,7 +782,7 @@ public:
     return false;
   }
 
-  /// Return true if target always beneficiates from combining into FMA for a
+  /// Return true if target always benefits from combining into FMA for a
   /// given value type. This must typically return false on targets where FMA
   /// takes more cycles to execute than FADD.
   virtual bool enableAggressiveFMAFusion(EVT VT) const {
@@ -2347,8 +2348,9 @@ public:
   /// If the AM is not supported, it returns a negative value.
   /// TODO: Handle pre/postinc as well.
   /// TODO: Remove default argument
-  virtual int getScalingFactorCost(const DataLayout &DL, const AddrMode &AM,
-                                   Type *Ty, unsigned AS = 0) const {
+  virtual InstructionCost getScalingFactorCost(const DataLayout &DL,
+                                               const AddrMode &AM, Type *Ty,
+                                               unsigned AS = 0) const {
     // Default: assume that any scaling factor used in a legal AM is free.
     if (isLegalAddressingMode(DL, AM, Ty, AS))
       return 0;

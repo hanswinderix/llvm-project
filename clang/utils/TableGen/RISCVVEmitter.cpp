@@ -136,7 +136,8 @@ enum RISCVExtension : uint8_t {
   Basic = 0,
   F = 1 << 1,
   D = 1 << 2,
-  Zfh = 1 << 3
+  Zfh = 1 << 3,
+  Zvamo = 1 << 4,
 };
 
 // TODO refactor RVVIntrinsic class design after support all intrinsic
@@ -163,6 +164,8 @@ private:
   // C/C++ intrinsic operand order is different to builtin operand order. Record
   // the mapping of InputTypes index.
   SmallVector<unsigned> CTypeOrder;
+  // Operands are reordered in the header.
+  bool IsOperandReordered = false;
   uint8_t RISCVExtensions = 0;
 
 public:
@@ -171,7 +174,8 @@ public:
                bool HasMaskedOffOperand, bool HasVL, bool HasNoMaskedOverloaded,
                bool HasAutoDef, StringRef ManualCodegen, const RVVTypes &Types,
                const std::vector<int64_t> &IntrinsicTypes,
-               const std::vector<int64_t> &PermuteOperands);
+               const std::vector<int64_t> &PermuteOperands,
+               StringRef RequiredExtension);
   ~RVVIntrinsic() = default;
 
   StringRef getName() const { return Name; }
@@ -183,6 +187,7 @@ public:
   bool hasManualCodegen() const { return !ManualCodegen.empty(); }
   bool hasAutoDef() const { return HasAutoDef; }
   bool isMask() const { return IsMask; }
+  bool isOperandReordered() const { return IsOperandReordered; }
   size_t getNumOperand() const { return InputTypes.size(); }
   StringRef getIRName() const { return IRName; }
   StringRef getManualCodegen() const { return ManualCodegen; }
@@ -749,7 +754,8 @@ RVVIntrinsic::RVVIntrinsic(StringRef NewName, StringRef Suffix,
                            bool HasNoMaskedOverloaded, bool HasAutoDef,
                            StringRef ManualCodegen, const RVVTypes &OutInTypes,
                            const std::vector<int64_t> &NewIntrinsicTypes,
-                           const std::vector<int64_t> &PermuteOperands)
+                           const std::vector<int64_t> &PermuteOperands,
+                           StringRef RequiredExtension)
     : IRName(IRName), HasSideEffects(HasSideEffects), IsMask(IsMask),
       HasMaskedOffOperand(HasMaskedOffOperand), HasVL(HasVL),
       HasNoMaskedOverloaded(HasNoMaskedOverloaded), HasAutoDef(HasAutoDef),
@@ -775,6 +781,8 @@ RVVIntrinsic::RVVIntrinsic(StringRef NewName, StringRef Suffix,
     else if (T->isFloatVector(64))
       RISCVExtensions |= RISCVExtension::D;
   }
+  if (RequiredExtension == "Zvamo")
+    RISCVExtensions |= RISCVExtension::Zvamo;
 
   // Init OutputType and InputTypes
   OutputType = OutInTypes[0];
@@ -783,6 +791,7 @@ RVVIntrinsic::RVVIntrinsic(StringRef NewName, StringRef Suffix,
   std::iota(CTypeOrder.begin(), CTypeOrder.end(), 0);
   // Update default order if we need permutate.
   if (!PermuteOperands.empty()) {
+    IsOperandReordered = true;
     // PermuteOperands is nonmasked version index. Update index when there is
     // maskedoff operand which is always in first operand.
 
@@ -879,6 +888,11 @@ void RVVIntrinsic::emitIntrinsicMacro(raw_ostream &OS) const {
 }
 
 void RVVIntrinsic::emitMangledFuncDef(raw_ostream &OS) const {
+  bool UseAliasAttr = !isMask() && !isOperandReordered();
+  if (UseAliasAttr) {
+    OS << "__attribute__((clang_builtin_alias(";
+    OS << "__builtin_rvv_" << getName() << ")))\n";
+  }
   OS << OutputType->getTypeStr() << " " << getMangledName() << "(";
   // Emit function arguments
   if (getNumOperand() > 0) {
@@ -886,16 +900,20 @@ void RVVIntrinsic::emitMangledFuncDef(raw_ostream &OS) const {
     for (unsigned i = 0; i < CTypeOrder.size(); ++i)
       OS << LS << InputTypes[CTypeOrder[i]]->getTypeStr() << " op" << i;
   }
-  OS << "){\n";
-  OS << "  return " << getName() << "(";
-  // Emit parameter variables
-  if (getNumOperand() > 0) {
-    ListSeparator LS;
-    for (unsigned i = 0; i < CTypeOrder.size(); ++i)
-      OS << LS << "op" << i;
+  if (UseAliasAttr) {
+    OS << ");\n\n";
+  } else {
+    OS << "){\n";
+    OS << "  return " << getName() << "(";
+    // Emit parameter variables
+    if (getNumOperand() > 0) {
+      ListSeparator LS;
+      for (unsigned i = 0; i < CTypeOrder.size(); ++i)
+        OS << LS << "op" << i;
+    }
+    OS << ");\n";
+    OS << "}\n\n";
   }
-  OS << ");\n";
-  OS << "}\n\n";
 }
 
 //===----------------------------------------------------------------------===//
@@ -1050,8 +1068,7 @@ void RVVEmitter::createCodeGen(raw_ostream &OS) {
   for (auto &Def : Defs) {
     StringRef CurIRName = Def->getIRName();
     if (CurIRName != PrevDef->getIRName() ||
-        (CurIRName.empty() &&
-         Def->getManualCodegen() != PrevDef->getManualCodegen())) {
+        (Def->getManualCodegen() != PrevDef->getManualCodegen())) {
       PrevDef->emitCodeGenSwitchBody(OS);
     }
     PrevDef = Def.get();
@@ -1108,6 +1125,7 @@ void RVVEmitter::createRVVIntrinsics(
         R->getValueAsListOfInts("IntrinsicTypes");
     std::vector<int64_t> PermuteOperands =
         R->getValueAsListOfInts("PermuteOperands");
+    StringRef RequiredExtension = R->getValueAsString("RequiredExtension");
     StringRef IRName = R->getValueAsString("IRName");
     StringRef IRNameMask = R->getValueAsString("IRNameMask");
 
@@ -1152,7 +1170,7 @@ void RVVEmitter::createRVVIntrinsics(
             Name, SuffixStr, MangledName, IRName, HasSideEffects,
             /*IsMask=*/false, /*HasMaskedOffOperand=*/false, HasVL,
             HasNoMaskedOverloaded, HasAutoDef, ManualCodegen, Types.getValue(),
-            IntrinsicTypes, PermuteOperands));
+            IntrinsicTypes, PermuteOperands, RequiredExtension));
         if (HasMask) {
           // Create a mask intrinsic
           Optional<RVVTypes> MaskTypes =
@@ -1161,7 +1179,8 @@ void RVVEmitter::createRVVIntrinsics(
               Name, SuffixStr, MangledName, IRNameMask, HasSideEffects,
               /*IsMask=*/true, HasMaskedOffOperand, HasVL,
               HasNoMaskedOverloaded, HasAutoDef, ManualCodegenMask,
-              MaskTypes.getValue(), IntrinsicTypes, PermuteOperands));
+              MaskTypes.getValue(), IntrinsicTypes, PermuteOperands,
+              RequiredExtension));
         }
       } // end for Log2LMULList
     }   // end for TypeRange
@@ -1234,6 +1253,8 @@ bool RVVEmitter::emitExtDefStr(uint8_t Extents, raw_ostream &OS) {
     OS << LS << "defined(__riscv_d)";
   if (Extents & RISCVExtension::Zfh)
     OS << LS << "defined(__riscv_zfh)";
+  if (Extents & RISCVExtension::Zvamo)
+    OS << LS << "defined(__riscv_zvamo)";
   OS << "\n";
   return true;
 }

@@ -639,8 +639,9 @@ TEST(VPBasicBlockTest, TraversingIteratorTest) {
     EXPECT_EQ(VPBB1, FromIterator[6]);
 
     // Post-order, const VPRegionBlocks only.
+    VPBlockRecursiveTraversalWrapper<const VPBlockBase *> StartConst(VPBB1);
     SmallVector<const VPRegionBlock *> FromIteratorVPRegion(
-        VPBlockUtils::blocksOnly<const VPRegionBlock>(post_order(Start)));
+        VPBlockUtils::blocksOnly<const VPRegionBlock>(post_order(StartConst)));
     EXPECT_EQ(3u, FromIteratorVPRegion.size());
     EXPECT_EQ(R3, FromIteratorVPRegion[0]);
     EXPECT_EQ(R2, FromIteratorVPRegion[1]);
@@ -941,7 +942,7 @@ TEST(VPRecipeTest, CastVPWidenMemoryInstructionRecipeToVPUserAndVPDef) {
   EXPECT_TRUE(isa<VPUser>(BaseR));
   EXPECT_EQ(&Recipe, BaseR);
 
-  VPValue *VPV = Recipe.getVPValue();
+  VPValue *VPV = Recipe.getVPSingleValue();
   EXPECT_TRUE(isa<VPRecipeBase>(VPV->getDef()));
   EXPECT_EQ(&Recipe, dyn_cast<VPRecipeBase>(VPV->getDef()));
 

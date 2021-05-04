@@ -671,10 +671,10 @@ public:
   /// Returns the underlying instruction, if the recipe is a VPValue or nullptr
   /// otherwise.
   Instruction *getUnderlyingInstr() {
-    return cast<Instruction>(getVPValue()->getUnderlyingValue());
+    return cast<Instruction>(getVPSingleValue()->getUnderlyingValue());
   }
   const Instruction *getUnderlyingInstr() const {
-    return cast<Instruction>(getVPValue()->getUnderlyingValue());
+    return cast<Instruction>(getVPSingleValue()->getUnderlyingValue());
   }
 
   /// Method to support type inquiry through isa, cast, and dyn_cast.
@@ -685,6 +685,12 @@ public:
 
   /// Returns true if the recipe may have side-effects.
   bool mayHaveSideEffects() const;
+
+  /// Returns true for PHI-like recipes.
+  bool isPhi() const {
+    return getVPDefID() == VPWidenIntOrFpInductionSC || getVPDefID() == VPWidenPHISC ||
+      getVPDefID() == VPPredInstPHISC || getVPDefID() == VPWidenCanonicalIVSC;
+  }
 };
 
 inline bool VPUser::classof(const VPDef *Def) {
@@ -738,7 +744,7 @@ public:
       : VPRecipeBase(VPRecipeBase::VPInstructionSC, {}),
         VPValue(VPValue::VPVInstructionSC, nullptr, this), Opcode(Opcode) {
     for (auto *I : Operands)
-      addOperand(I->getVPValue());
+      addOperand(I->getVPSingleValue());
   }
 
   VPInstruction(unsigned Opcode, std::initializer_list<VPValue *> Operands)
@@ -1045,6 +1051,8 @@ public:
 
   /// Returns the \p I th incoming VPBasicBlock.
   VPBasicBlock *getIncomingBlock(unsigned I) { return IncomingBlocks[I]; }
+
+  RecurrenceDescriptor *getRecurrenceDescriptor() { return RdxDesc; }
 };
 
 /// A recipe for vectorizing a phi-node as a sequence of mask-based select
@@ -1430,7 +1438,7 @@ public:
 
 /// VPBasicBlock serves as the leaf of the Hierarchical Control-Flow Graph. It
 /// holds a sequence of zero or more VPRecipe's each representing a sequence of
-/// output IR instructions.
+/// output IR instructions. All PHI-like recipes must come before any non-PHI recipes.
 class VPBasicBlock : public VPBlockBase {
 public:
   using RecipeListTy = iplist<VPRecipeBase>;
@@ -1507,6 +1515,11 @@ public:
 
   /// Return the position of the first non-phi node recipe in the block.
   iterator getFirstNonPhi();
+
+  /// Returns an iterator range over the PHI-like recipes in the block.
+  iterator_range<iterator> phis() {
+    return make_range(begin(), getFirstNonPhi());
+  }
 
   void dropAllReferences(VPValue *NewValue) override;
 
@@ -2202,16 +2215,22 @@ public:
     return Count;
   }
 
-  /// Return an iterator range over \p Iter which only includes \p BlockTy
+  /// Return an iterator range over \p Range which only includes \p BlockTy
   /// blocks. The accesses are casted to \p BlockTy.
-  template <typename BlockTy, typename T> static auto blocksOnly(T Iter) {
-    // We need to first create an iterator range over VPBlockBase & instead of
-    // VPBlockBase * for filter_range to work properly.
-    auto Mapped = map_range(
-        Iter, [](VPBlockBase *Block) -> VPBlockBase & { return *Block; });
+  template <typename BlockTy, typename T>
+  static auto blocksOnly(const T &Range) {
+    // Create BaseTy with correct const-ness based on BlockTy.
+    using BaseTy =
+        typename std::conditional<std::is_const<BlockTy>::value,
+                                  const VPBlockBase, VPBlockBase>::type;
+
+    // We need to first create an iterator range over (const) BlocktTy & instead
+    // of (const) BlockTy * for filter_range to work properly.
+    auto Mapped =
+        map_range(Range, [](BaseTy *Block) -> BaseTy & { return *Block; });
     auto Filter = make_filter_range(
-        Mapped, [](VPBlockBase &Block) { return isa<BlockTy>(&Block); });
-    return map_range(Filter, [](VPBlockBase &Block) -> BlockTy * {
+        Mapped, [](BaseTy &Block) { return isa<BlockTy>(&Block); });
+    return map_range(Filter, [](BaseTy &Block) -> BlockTy * {
       return cast<BlockTy>(&Block);
     });
   }

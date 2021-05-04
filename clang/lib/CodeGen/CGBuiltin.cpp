@@ -5460,7 +5460,6 @@ static const ARMVectorIntrinsicInfo ARMSIMDIntrinsicMap [] = {
   NEONMAP1(vabsq_v, arm_neon_vabs, 0),
   NEONMAP0(vadd_v),
   NEONMAP0(vaddhn_v),
-  NEONMAP0(vaddq_p128),
   NEONMAP0(vaddq_v),
   NEONMAP1(vaesdq_v, arm_neon_aesd, 0),
   NEONMAP1(vaeseq_v, arm_neon_aese, 0),
@@ -15112,6 +15111,25 @@ Value *CodeGenFunction::EmitPPCBuiltinExpr(unsigned BuiltinID,
     Value *X = EmitScalarExpr(E->getArg(0));
     llvm::Function *F = CGM.getIntrinsic(Intrinsic::fabs, ResultType);
     return Builder.CreateCall(F, X);
+  }
+
+  // Fastmath by default
+  case PPC::BI__builtin_ppc_recipdivf:
+  case PPC::BI__builtin_ppc_recipdivd:
+  case PPC::BI__builtin_ppc_rsqrtf:
+  case PPC::BI__builtin_ppc_rsqrtd: {
+    Builder.getFastMathFlags().setFast();
+    llvm::Type *ResultType = ConvertType(E->getType());
+    Value *X = EmitScalarExpr(E->getArg(0));
+
+    if (BuiltinID == PPC::BI__builtin_ppc_recipdivf ||
+        BuiltinID == PPC::BI__builtin_ppc_recipdivd) {
+      Value *Y = EmitScalarExpr(E->getArg(1));
+      return Builder.CreateFDiv(X, Y, "recipdiv");
+    }
+    auto *One = ConstantFP::get(ResultType, 1.0);
+    llvm::Function *F = CGM.getIntrinsic(Intrinsic::sqrt, ResultType);
+    return Builder.CreateFDiv(One, Builder.CreateCall(F, X), "rsqrt");
   }
 
   // FMA variations

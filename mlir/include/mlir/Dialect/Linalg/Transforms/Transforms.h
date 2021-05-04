@@ -215,9 +215,10 @@ void interchange(PatternRewriter &rewriter, LinalgOp op,
 /// smallest constant value for the size of the buffer needed for each
 /// dimension. If that is not possible, contains the dynamic size of the
 /// subview. The call back should return the buffer to use.
-using AllocBufferCallbackFn = std::function<Optional<Value>(
-    OpBuilder &b, memref::SubViewOp subView,
-    ArrayRef<Value> boundingSubViewSize, OperationFolder *folder)>;
+using AllocBufferCallbackFn =
+    std::function<Optional<Value>(OpBuilder &b, memref::SubViewOp subView,
+                                  ArrayRef<Value> boundingSubViewSize,
+                                  DataLayout &layout, OperationFolder *folder)>;
 
 /// Callback function type used to deallocate the buffers used to hold the
 /// promoted subview.
@@ -315,6 +316,7 @@ struct PromotionInfo {
 Optional<PromotionInfo>
 promoteSubviewAsNewBuffer(OpBuilder &b, Location loc, memref::SubViewOp subView,
                           AllocBufferCallbackFn allocationFn,
+                          DataLayout &layout,
                           OperationFolder *folder = nullptr);
 
 /// Promotes the `subViews` into a new buffer allocated at the insertion point
@@ -335,18 +337,21 @@ Optional<LinalgOp> promoteSubViews(OpBuilder &b, LinalgOp op,
 LogicalResult vectorizeLinalgOp(OpBuilder &builder, Operation *op,
                                 SmallVectorImpl<Value> &newResults);
 
-/// Emits a loop nest of `LoopTy` with the proper body for `op`.
+/// Emits a loop nest of `LoopTy` with the proper body for `linalgOp`.
 template <typename LoopTy>
-Optional<LinalgLoops> linalgLowerOpToLoops(OpBuilder &builder, Operation *op);
+Optional<LinalgLoops> linalgLowerOpToLoops(PatternRewriter &rewriter,
+                                           LinalgOp linalgOp);
 
-/// Emits a loop nest of `scf.for` with the proper body for `op`.
-LogicalResult linalgOpToLoops(OpBuilder &builder, Operation *op);
+/// Emits a loop nest of `scf.for` with the proper body for `linalgOp`.
+LogicalResult linalgOpToLoops(PatternRewriter &rewriter, LinalgOp linalgOp);
 
-/// Emits a loop nest of `scf.parallel` with the proper body for `op`.
-LogicalResult linalgOpToParallelLoops(OpBuilder &builder, Operation *op);
+/// Emits a loop nest of `scf.parallel` with the proper body for `linalgOp`.
+LogicalResult linalgOpToParallelLoops(PatternRewriter &rewriter,
+                                      LinalgOp linalgOp);
 
-/// Emits a loop nest of `affine.for` with the proper body for `op`.
-LogicalResult linalgOpToAffineLoops(OpBuilder &builder, Operation *op);
+/// Emits a loop nest of `affine.for` with the proper body for `linalgOp`.
+LogicalResult linalgOpToAffineLoops(PatternRewriter &rewriter,
+                                    LinalgOp linalgOp);
 
 //===----------------------------------------------------------------------===//
 // Preconditions that ensure the corresponding transformation succeeds and can
@@ -424,6 +429,7 @@ enum class LinalgTilingLoopType {
   Loops = 0,
   AffineLoops = 1,
   ParallelLoops = 2,
+  TiledLoops = 3,
 };
 
 using TileSizeComputationFunction =
@@ -1125,9 +1131,6 @@ struct SparsificationOptions {
 void populateSparsificationPatterns(
     RewritePatternSet &patterns,
     const SparsificationOptions &options = SparsificationOptions());
-
-/// Sets up sparsification conversion rules with the given options.
-void populateSparsificationConversionPatterns(RewritePatternSet &patterns);
 
 } // namespace linalg
 } // namespace mlir

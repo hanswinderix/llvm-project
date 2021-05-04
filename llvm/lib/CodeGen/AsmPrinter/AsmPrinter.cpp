@@ -297,8 +297,11 @@ bool AsmPrinter::doInitialization(Module &M) {
   // don't, this at least helps the user find where a global came from.
   if (MAI->hasSingleParameterDotFile()) {
     // .file "foo.c"
-    OutStreamer->emitFileDirective(
-        llvm::sys::path::filename(M.getSourceFileName()));
+    if (MAI->hasBasenameOnlyForFileDirective())
+      OutStreamer->emitFileDirective(
+          llvm::sys::path::filename(M.getSourceFileName()));
+    else
+      OutStreamer->emitFileDirective(M.getSourceFileName());
   }
 
   GCModuleInfo *MI = getAnalysisIfAvailable<GCModuleInfo>();
@@ -352,15 +355,15 @@ bool AsmPrinter::doInitialization(Module &M) {
   case ExceptionHandling::DwarfCFI:
   case ExceptionHandling::ARM:
     for (auto &F : M.getFunctionList()) {
+      if (getFunctionCFISectionType(F) != CFISection::None)
+        ModuleCFISection = getFunctionCFISectionType(F);
       // If any function needsUnwindTableEntry(), it needs .eh_frame and hence
       // the module needs .eh_frame. If we have found that case, we are done.
-      if (ModuleCFISection == AsmPrinter::CFISection::EH)
+      if (ModuleCFISection == CFISection::EH)
         break;
-      if (ModuleCFISection == AsmPrinter::CFISection::None)
-        ModuleCFISection = getFunctionCFISectionType(F);
     }
     assert(MAI->getExceptionHandlingType() == ExceptionHandling::DwarfCFI ||
-           ModuleCFISection != AsmPrinter::CFISection::EH);
+           ModuleCFISection != CFISection::EH);
     break;
   default:
     break;
@@ -707,9 +710,9 @@ void AsmPrinter::emitFunctionHeader() {
   emitConstantPool();
 
   // Print the 'header' of function.
-  // If basic block sections is desired and function sections is off,
-  // explicitly request a unique section for this function.
-  if (MF->front().isBeginSection() && !TM.getFunctionSections())
+  // If basic block sections are desired, explicitly request a unique section
+  // for this function's entry block.
+  if (MF->front().isBeginSection())
     MF->setSection(getObjFileLowering().getUniqueSectionForFunction(F, TM));
   else
     MF->setSection(getObjFileLowering().SectionForGlobal(&F, TM));
@@ -1065,7 +1068,7 @@ void AsmPrinter::emitCFIInstruction(const MachineInstr &MI) {
       ExceptionHandlingType != ExceptionHandling::ARM)
     return;
 
-  if (getFunctionCFISectionType(*MF) == AsmPrinter::CFISection::None)
+  if (getFunctionCFISectionType(*MF) == CFISection::None)
     return;
 
   // If there is no "real" instruction following this CFI instruction, skip
@@ -1844,11 +1847,12 @@ bool AsmPrinter::doFinalization(Module &M) {
   if (TM.Options.EmitAddrsig) {
     // Emit address-significance attributes for all globals.
     OutStreamer->emitAddrsig();
-    for (const GlobalValue &GV : M.global_values())
-      if (!GV.use_empty() && !GV.isThreadLocal() &&
-          !GV.hasDLLImportStorageClass() && !GV.getName().startswith("llvm.") &&
-          !GV.hasAtLeastLocalUnnamedAddr())
+    for (const GlobalValue &GV : M.global_values()) {
+      if (!GV.use_empty() && !GV.isTransitiveUsedByMetadataOnly() &&
+          !GV.isThreadLocal() && !GV.hasDLLImportStorageClass() &&
+          !GV.getName().startswith("llvm.") && !GV.hasAtLeastLocalUnnamedAddr())
         OutStreamer->emitAddrsigSym(getSymbol(&GV));
+    }
   }
 
   // Emit symbol partition specifications (ELF only).

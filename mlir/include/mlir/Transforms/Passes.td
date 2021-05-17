@@ -136,6 +136,7 @@ def AffineLoopFusion : FunctionPass<"affine-loop-fusion"> {
     Option<"maximalFusion", "fusion-maximal", "bool", /*default=*/"false",
            "Enables maximal loop fusion">,
   ];
+  let dependentDialects = ["memref::MemRefDialect"];
 }
 
 def AffinePipelineDataTransfer
@@ -361,7 +362,6 @@ def Canonicalizer : Pass<"canonicalize"> {
     details.
   }];
   let constructor = "mlir::createCanonicalizerPass()";
-  let dependentDialects = ["memref::MemRefDialect"];
 }
 
 def CSE : Pass<"cse"> {

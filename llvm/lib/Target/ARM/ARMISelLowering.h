@@ -300,6 +300,13 @@ class VectorType;
     // instructions.
     MEMCPY,
 
+    // Pseudo-instruction representing a memory copy using a tail predicated
+    // loop
+    MEMCPYLOOP,
+    // Pseudo-instruction representing a memset using a tail predicated
+    // loop
+    MEMSETLOOP,
+
     // V8.1MMainline condition select
     CSINV, // Conditional select invert.
     CSNEG, // Conditional select negate.
@@ -565,6 +572,8 @@ class VectorType;
                              const TargetLibraryInfo *libInfo) const override;
 
     Sched::Preference getSchedulingPreference(SDNode *N) const override;
+
+    bool preferZeroCompareBranch() const override { return true; }
 
     bool
     isShuffleMaskLegal(ArrayRef<int> M, EVT VT) const override;

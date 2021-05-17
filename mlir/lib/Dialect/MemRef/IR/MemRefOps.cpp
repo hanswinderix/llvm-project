@@ -474,8 +474,6 @@ OpFoldResult CastOp::fold(ArrayRef<Attribute> operands) {
 // CloneOp
 //===----------------------------------------------------------------------===//
 
-static LogicalResult verify(CloneOp op) { return success(); }
-
 void CloneOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
         &effects) {
@@ -543,12 +541,6 @@ OpFoldResult CloneOp::fold(ArrayRef<Attribute> operands) {
 //===----------------------------------------------------------------------===//
 // DeallocOp
 //===----------------------------------------------------------------------===//
-
-static LogicalResult verify(DeallocOp op) {
-  if (!op.memref().getType().isa<MemRefType>())
-    return op.emitOpError("operand must be a memref");
-  return success();
-}
 
 LogicalResult DeallocOp::fold(ArrayRef<Attribute> cstOperands,
                               SmallVectorImpl<OpFoldResult> &results) {
@@ -950,10 +942,6 @@ LogicalResult DmaStartOp::verify() {
       !llvm::all_of(getTagIndices().getTypes(),
                     [](Type t) { return t.isIndex(); }))
     return emitOpError("expected tag indices to be of index type");
-
-  // DMAs from different memory spaces supported.
-  if (getSrcMemorySpace() == getDstMemorySpace())
-    return emitOpError("DMA should be between different memory spaces");
 
   // Optional stride-related operands must be either both present or both
   // absent.

@@ -2508,6 +2508,14 @@ Sema::CheckBaseSpecifier(CXXRecordDecl *Class,
       }
     }
 
+    // Make sure that we don't make an ill-formed AST where the type of the
+    // Class is non-dependent and its attached base class specifier is an
+    // dependent type, which violates invariants in many clang code paths (e.g.
+    // constexpr evaluator). If this case happens (in errory-recovery mode), we
+    // explicitly mark the Class decl invalid. The diagnostic was already
+    // emitted.
+    if (!Class->getTypeForDecl()->isDependentType())
+      Class->setInvalidDecl();
     return new (Context) CXXBaseSpecifier(SpecifierRange, Virtual,
                                           Class->getTagKind() == TTK_Class,
                                           Access, TInfo, EllipsisLoc);
@@ -12063,9 +12071,9 @@ NamedDecl *Sema::BuildUsingDeclaration(
     return nullptr;
 
   DeclContext *LookupContext = computeDeclContext(SS);
-  NamedDecl *D;
   NestedNameSpecifierLoc QualifierLoc = SS.getWithLocInContext(Context);
   if (!LookupContext || EllipsisLoc.isValid()) {
+    NamedDecl *D;
     if (HasTypenameKeyword) {
       // FIXME: not all declaration name kinds are legal here
       D = UnresolvedUsingTypenameDecl::Create(Context, CurContext,
@@ -12079,6 +12087,7 @@ NamedDecl *Sema::BuildUsingDeclaration(
     }
     D->setAccess(AS);
     CurContext->addDecl(D);
+    ProcessDeclAttributeList(S, D, AttrList);
     return D;
   }
 
@@ -12088,6 +12097,7 @@ NamedDecl *Sema::BuildUsingDeclaration(
                           UsingName, HasTypenameKeyword);
     UD->setAccess(AS);
     CurContext->addDecl(UD);
+    ProcessDeclAttributeList(S, UD, AttrList);
     UD->setInvalidDecl(Invalid);
     return UD;
   };

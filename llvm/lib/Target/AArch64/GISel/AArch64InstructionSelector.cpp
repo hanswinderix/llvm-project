@@ -958,6 +958,15 @@ static bool selectCopy(MachineInstr &I, const TargetInstrInfo &TII,
                       << " operand\n");
     return false;
   }
+
+  // If this a GPR ZEXT that we want to just reduce down into a copy.
+  // The sizes will be mismatched with the source < 32b but that's ok.
+  if (I.getOpcode() == TargetOpcode::G_ZEXT) {
+    I.setDesc(TII.get(AArch64::COPY));
+    assert(SrcRegBank.getID() == AArch64::GPRRegBankID);
+    return selectCopy(I, TII, MRI, TRI, RBI);
+  }
+
   I.setDesc(TII.get(AArch64::COPY));
   return CheckCopy();
 }
@@ -2973,34 +2982,46 @@ bool AArch64InstructionSelector::select(MachineInstr &I) {
           return selectCopy(I, TII, MRI, TRI, RBI);
       }
 
+      // For the 32-bit -> 64-bit case, we can emit a mov (ORRWrs)
+      // + SUBREG_TO_REG.
+      //
       // If we are zero extending from 32 bits to 64 bits, it's possible that
       // the instruction implicitly does the zero extend for us. In that case,
-      // we can just emit a SUBREG_TO_REG.
+      // we only need the SUBREG_TO_REG.
       if (IsGPR && SrcSize == 32 && DstSize == 64) {
         // Unlike with the G_LOAD case, we don't want to look through copies
-        // here.
+        // here. (See isDef32.)
         MachineInstr *Def = MRI.getVRegDef(SrcReg);
-        if (Def && isDef32(*Def)) {
-          MIB.buildInstr(AArch64::SUBREG_TO_REG, {DefReg}, {})
-              .addImm(0)
-              .addUse(SrcReg)
-              .addImm(AArch64::sub_32);
+        Register SubregToRegSrc = SrcReg;
 
-          if (!RBI.constrainGenericRegister(DefReg, AArch64::GPR64RegClass,
-                                            MRI)) {
-            LLVM_DEBUG(dbgs() << "Failed to constrain G_ZEXT destination\n");
-            return false;
-          }
-
-          if (!RBI.constrainGenericRegister(SrcReg, AArch64::GPR32RegClass,
-                                            MRI)) {
-            LLVM_DEBUG(dbgs() << "Failed to constrain G_ZEXT source\n");
-            return false;
-          }
-
-          I.eraseFromParent();
-          return true;
+        // Does the instruction implicitly zero extend?
+        if (!Def || !isDef32(*Def)) {
+          // No. Zero out using an OR.
+          Register OrDst = MRI.createVirtualRegister(&AArch64::GPR32RegClass);
+          const Register ZReg = AArch64::WZR;
+          MIB.buildInstr(AArch64::ORRWrs, {OrDst}, {ZReg, SrcReg}).addImm(0);
+          SubregToRegSrc = OrDst;
         }
+
+        MIB.buildInstr(AArch64::SUBREG_TO_REG, {DefReg}, {})
+            .addImm(0)
+            .addUse(SubregToRegSrc)
+            .addImm(AArch64::sub_32);
+
+        if (!RBI.constrainGenericRegister(DefReg, AArch64::GPR64RegClass,
+                                          MRI)) {
+          LLVM_DEBUG(dbgs() << "Failed to constrain G_ZEXT destination\n");
+          return false;
+        }
+
+        if (!RBI.constrainGenericRegister(SrcReg, AArch64::GPR32RegClass,
+                                          MRI)) {
+          LLVM_DEBUG(dbgs() << "Failed to constrain G_ZEXT source\n");
+          return false;
+        }
+
+        I.eraseFromParent();
+        return true;
       }
     }
 

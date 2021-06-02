@@ -2564,12 +2564,17 @@ def NoSanitizeDocs : Documentation {
   let Content = [{
 Use the ``no_sanitize`` attribute on a function or a global variable
 declaration to specify that a particular instrumentation or set of
-instrumentations should not be applied. The attribute takes a list of
-string literals, which have the same meaning as values accepted by the
-``-fno-sanitize=`` flag. For example,
-``__attribute__((no_sanitize("address", "thread")))`` specifies that
-AddressSanitizer and ThreadSanitizer should not be applied to the
-function or variable.
+instrumentations should not be applied.
+
+The attribute takes a list of string literals with the following accepted
+values:
+* all values accepted by ``-fno-sanitize=``;
+* ``coverage``, to disable SanitizerCoverage instrumentation.
+
+For example, ``__attribute__((no_sanitize("address", "thread")))`` specifies
+that AddressSanitizer and ThreadSanitizer should not be applied to the function
+or variable. Using ``__attribute__((no_sanitize("coverage")))`` specifies that
+SanitizerCoverage should not be applied to the function.
 
 See :ref:`Controlling Code Generation <controlling-code-generation>` for a
 full list of supported sanitizer flags.
@@ -4519,6 +4524,19 @@ which is normally callee-preserved.
 A ``swift_context`` parameter must either be the last parameter or must be
 followed by a ``swift_error_result`` parameter (which itself must always be
 the last parameter).
+
+A context parameter must have pointer or reference type.
+  }];
+}
+
+def SwiftAsyncContextDocs : Documentation {
+  let Category = DocCatVariable;
+  let Content = [{
+The ``swift_async_context`` attribute marks a parameter as having the
+special asynchronous context-parameter ABI treatment.
+
+This treatment generally passes the context value in a special register
+which is normally callee-preserved.
 
 A context parameter must have pointer or reference type.
   }];

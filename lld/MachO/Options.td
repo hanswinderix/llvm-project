@@ -117,12 +117,10 @@ def weak_library : Separate<["-"], "weak_library">,
 def reexport_l : Joined<["-"], "reexport-l">,
     MetaVarName<"<name>">,
     HelpText<"Like -l<name>, but export all symbols of <name> from newly created library">,
-    Flags<[HelpHidden]>,
     Group<grp_libs>;
 def reexport_library : Separate<["-"], "reexport_library">,
     MetaVarName<"<path>">,
     HelpText<"Like bare <path>, but export all symbols of <path> from newly created library">,
-    Flags<[HelpHidden]>,
     Group<grp_libs>;
 def upward_l : Joined<["-"], "upward-l">,
     MetaVarName<"<name>">,
@@ -162,7 +160,6 @@ def weak_framework : Separate<["-"], "weak_framework">,
 def reexport_framework : Separate<["-"], "reexport_framework">,
     MetaVarName<"<name>">,
     HelpText<"Like -framework <name>, but export all symbols of <name> from the newly created library">,
-    Flags<[HelpHidden]>,
     Group<grp_libs>;
 def upward_framework : Separate<["-"], "upward_framework">,
     MetaVarName<"<name>">,
@@ -702,7 +699,6 @@ def objc_gc_only : Flag<["-"], "objc_gc_only">,
     Group<grp_rare>;
 def dead_strip_dylibs : Flag<["-"], "dead_strip_dylibs">,
     HelpText<"Remove dylibs that are unreachable by the entry point or exported symbols">,
-    Flags<[HelpHidden]>,
     Group<grp_rare>;
 def allow_sub_type_mismatches : Flag<["-"], "allow_sub_type_mismatches">,
     HelpText<"Permit mixing objects compiled for different ARM CPU subtypes">,

@@ -956,9 +956,6 @@ convolutionMatchAndRewriterHelper(Operation *op,
   }
 
   if (isa<tosa::DepthwiseConv2DOp>(op)) {
-    if (llvm::any_of(dilation, [](int64_t d) { return d > 1; }))
-      return failure();
-
     ShapedType linalgConvTy =
         RankedTensorType::get({resultShape[0], resultShape[1], resultShape[2],
                                weightShape[2], weightShape[3]},
@@ -969,7 +966,7 @@ convolutionMatchAndRewriterHelper(Operation *op,
     Value conv = rewriter
                      .create<linalg::DepthwiseConvInputNHWCFilterHWCFOp>(
                          loc, linalgConvTy, ValueRange{input, weight},
-                         ValueRange{biasReshape}, strideAttr)
+                         ValueRange{biasReshape}, dilationAttr, strideAttr)
                      .getResult(0);
 
     Value reshape = rewriter.create<tosa::ReshapeOp>(loc, resultTy, conv);
@@ -1259,6 +1256,11 @@ public:
     auto outputTy = op.output().getType().cast<ShapedType>();
     unsigned rank = inputTy.getRank();
 
+    // This is an illegal configuration. terminate and log an error
+    if (op.double_round() && !op.scale32())
+      return rewriter.notifyMatchFailure(
+          op, "tosa.rescale requires scale32 for double_round to be true");
+
     if (!outputTy.hasStaticShape())
       return rewriter.notifyMatchFailure(
           op, "tosa to linalg conversion expects statically shaped tensors");
@@ -1422,20 +1424,19 @@ public:
     SmallVector<AffineMap, 2> affineMaps = {
         rewriter.getMultiDimIdentityMap(resultTy.getRank())};
 
-    auto genericOp = rewriter.create<linalg::IndexedGenericOp>(
+    auto genericOp = rewriter.create<linalg::GenericOp>(
         loc, resultTy, ValueRange({}), ValueRange{initTensor}, affineMaps,
         getNParallelLoopsAttrs(resultTy.getRank()));
     rewriter.replaceOp(op, genericOp.getResult(0));
 
     {
       OpBuilder::InsertionGuard regionGuard(rewriter);
-      Block *block = rewriter.createBlock(
-          &genericOp.region(), genericOp.region().end(),
-          TypeRange({rewriter.getIndexType(), rewriter.getIndexType(),
-                     rewriter.getIndexType(), rewriter.getIndexType(),
-                     resultElementTy}));
-      Value batch = block->getArgument(0);
-      Value channel = block->getArgument(3);
+      rewriter.createBlock(&genericOp.region(), genericOp.region().end(),
+                           TypeRange({resultElementTy}));
+      Value batch = rewriter.create<linalg::IndexOp>(loc, 0);
+      Value y = rewriter.create<linalg::IndexOp>(loc, 1);
+      Value x = rewriter.create<linalg::IndexOp>(loc, 2);
+      Value channel = rewriter.create<linalg::IndexOp>(loc, 3);
 
       auto hwMin =
           rewriter.create<ConstantOp>(loc, rewriter.getI32IntegerAttr(0));
@@ -1444,10 +1445,8 @@ public:
       auto wMax = rewriter.create<ConstantOp>(
           loc, rewriter.getI32IntegerAttr(imageW - 1));
 
-      Value inY = rewriter.create<IndexCastOp>(loc, rewriter.getI32Type(),
-                                               block->getArgument(1));
-      Value inX = rewriter.create<IndexCastOp>(loc, rewriter.getI32Type(),
-                                               block->getArgument(2));
+      Value inY = rewriter.create<IndexCastOp>(loc, rewriter.getI32Type(), y);
+      Value inX = rewriter.create<IndexCastOp>(loc, rewriter.getI32Type(), x);
 
       int32_t shift = op.shift();
       bool floatingPointMode = shift == 0;
@@ -2010,17 +2009,18 @@ public:
 
     bool didEncounterError = false;
     auto maps = AffineMap::inferFromExprList({srcExprs, dstExprs, dstExprs});
-    auto linalgOp = rewriter.create<linalg::IndexedGenericOp>(
+    auto linalgOp = rewriter.create<linalg::GenericOp>(
         loc, ArrayRef<Type>({resultTy, resultMaxTy}), input,
         ValueRange({filledTensorIdx, filledTensorMax}), maps, iteratorTypes,
-        [&](OpBuilder &nestedBuilder, Location nestedLoc, ValueRange ivs,
+        [&](OpBuilder &nestedBuilder, Location nestedLoc,
             ValueRange blockArgs) {
           auto newValue = blockArgs[0];
           auto oldIndex = blockArgs[1];
           auto oldValue = blockArgs[2];
 
           Value newIndex = rewriter.create<IndexCastOp>(
-              nestedLoc, oldIndex.getType(), ivs[axis]);
+              nestedLoc, oldIndex.getType(),
+              rewriter.create<linalg::IndexOp>(loc, axis));
 
           Value predicate;
           if (inElementTy.isa<FloatType>()) {
@@ -2085,16 +2085,16 @@ public:
             rewriter.getContext()),
         rewriter.getMultiDimIdentityMap(resultTy.getRank())};
 
-    auto genericOp = rewriter.create<linalg::IndexedGenericOp>(
+    auto genericOp = rewriter.create<linalg::GenericOp>(
         loc, ArrayRef<Type>({resultTy}), ValueRange{indices},
         ValueRange{initTensor}, affineMaps,
         getNParallelLoopsAttrs(resultTy.getRank()),
-        [&](OpBuilder &b, Location loc, ValueRange indices, ValueRange args) {
+        [&](OpBuilder &b, Location loc, ValueRange args) {
           auto indexValue = args[0];
-          auto index0 = indices[0];
+          auto index0 = rewriter.create<linalg::IndexOp>(loc, 0);
           Value index1 = rewriter.create<IndexCastOp>(
               loc, rewriter.getIndexType(), indexValue);
-          auto index2 = indices[2];
+          auto index2 = rewriter.create<linalg::IndexOp>(loc, 2);
           Value extract = rewriter.create<tensor::ExtractOp>(
               loc, input, ValueRange{index0, index1, index2});
           rewriter.create<linalg::YieldOp>(loc, extract);
@@ -2263,7 +2263,7 @@ public:
     pad.resize(2, 0);
     getValuesFromIntArrayAttribute(op.pad(), pad);
     pad.resize(pad.size() + 2, 0);
-    input = applyPad(loc, input, pad, initialAttr, rewriter);
+    Value paddedInput = applyPad(loc, input, pad, initialAttr, rewriter);
 
     Value initialValue = rewriter.create<ConstantOp>(loc, initialAttr);
 
@@ -2273,7 +2273,6 @@ public:
 
     Attribute strideAttr = rewriter.getI64VectorAttr(stride);
     Attribute dilationAttr = rewriter.getI64VectorAttr({1, 1});
-    int64_t kernelSize = kernel[0] * kernel[1];
 
     // Create the linalg op that performs pooling.
     Value initTensor = rewriter.create<linalg::InitTensorOp>(
@@ -2290,7 +2289,7 @@ public:
           rewriter
               .create<std::remove_pointer_t<decltype(typePtr)>>(
                   loc, ArrayRef<Type>{resultTy},
-                  ValueRange{input, fakeWindowDims}, filledInitTensor,
+                  ValueRange{paddedInput, fakeWindowDims}, filledInitTensor,
                   dilationAttr, strideAttr)
               .getOperation());
     };
@@ -2324,14 +2323,76 @@ public:
     }
 
     if (isa<tosa::AvgPool2dOp>(op) && inElementTy.isF32()) {
-      linalg::LinalgOp poolingOp =
-          createOp(static_cast<linalg::PoolingNHWCSumFOp *>(nullptr));
-      auto constAttr = DenseElementsAttr::get(
-          resultTy, static_cast<float>(1.0 / kernelSize));
-      auto constant = rewriter.create<ConstantOp>(loc, constAttr);
-      auto mul = rewriter.create<tosa::MulOp>(
-          loc, resultTy, poolingOp->getResult(0), constant, 0);
-      rewriter.replaceOp(op, mul.output());
+      Value poolingOp =
+          createOp(static_cast<linalg::PoolingNHWCSumFOp *>(nullptr))
+              ->getResult(0);
+      auto poolingOpTy = poolingOp.getType().cast<ShapedType>();
+      auto affineMap = rewriter.getMultiDimIdentityMap(resultTy.getRank());
+      auto genericOp = rewriter.create<linalg::GenericOp>(
+          loc, ArrayRef<Type>({resultTy}), ValueRange{}, ValueRange{poolingOp},
+          ArrayRef<AffineMap>({affineMap}),
+          getNParallelLoopsAttrs(resultTy.getRank()),
+          [&](OpBuilder &b, Location loc, ValueRange args) {
+            auto zero = rewriter.create<ConstantIndexOp>(loc, 0);
+            auto one = rewriter.create<ConstantIndexOp>(loc, 1);
+            auto iH = rewriter.create<ConstantIndexOp>(
+                loc, poolingOpTy.getDimSize(1) - 1);
+            auto iW = rewriter.create<ConstantIndexOp>(
+                loc, poolingOpTy.getDimSize(2) - 1);
+
+            // Compute the indices from either end.
+            auto y0 = rewriter.create<linalg::IndexOp>(loc, 1);
+            auto x0 = rewriter.create<linalg::IndexOp>(loc, 2);
+            auto y1 = rewriter.create<SubIOp>(loc, iH, y0);
+            auto x1 = rewriter.create<SubIOp>(loc, iW, x0);
+
+            // Determines what the portion of valid input is covered by the
+            // kernel.
+            auto padFn = [&](Value v, Value x, int64_t pad) -> Value {
+              if (pad == 0)
+                return v;
+
+              auto padVal = rewriter.create<ConstantIndexOp>(loc, pad);
+              Value dx = rewriter.create<SubIOp>(loc, x, padVal);
+
+              Value cmp = rewriter.create<mlir::CmpIOp>(loc, CmpIPredicate::slt,
+                                                        dx, zero);
+              Value offset =
+                  rewriter.create<mlir::SelectOp>(loc, cmp, dx, zero);
+              return rewriter.create<mlir::AddIOp>(loc, v, offset)
+                  ->getResult(0);
+            };
+
+            // Compute the vertical component of coverage.
+            auto kH0 = rewriter.create<ConstantIndexOp>(loc, kernel[0]);
+            auto kH1 = padFn(kH0, y0, pad[2]);
+            auto kH2 = padFn(kH1, y1, pad[3]);
+            auto kHCmp =
+                rewriter.create<CmpIOp>(loc, CmpIPredicate::slt, kH2, one);
+            auto kH3 = rewriter.create<SelectOp>(loc, kHCmp, one, kH2);
+
+            // compute teh horizontal component of coverage.
+            auto kW0 = rewriter.create<ConstantIndexOp>(loc, kernel[1]);
+            auto kW1 = padFn(kW0, x0, pad[4]);
+            auto kW2 = padFn(kW1, x1, pad[5]);
+            auto kWCmp =
+                rewriter.create<CmpIOp>(loc, CmpIPredicate::slt, kW2, one);
+            auto kW3 = rewriter.create<SelectOp>(loc, kWCmp, one, kW2);
+
+            // Compute the total number of elements and normalize.
+            Value count = rewriter.create<MulIOp>(loc, kH3, kW3);
+            auto countI = rewriter.create<mlir::IndexCastOp>(
+                loc, rewriter.getI32Type(), count);
+            auto countF =
+                rewriter.create<mlir::SIToFPOp>(loc, inElementTy, countI);
+
+            auto div =
+                rewriter.create<DivFOp>(loc, args[0], countF)->getResult(0);
+
+            rewriter.create<linalg::YieldOp>(loc, div);
+          });
+
+      rewriter.replaceOp(op, genericOp.getResult(0));
       return success();
     }
 

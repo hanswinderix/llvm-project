@@ -7,9 +7,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "UnwindInfoSection.h"
+#include "ConcatOutputSection.h"
 #include "Config.h"
 #include "InputSection.h"
-#include "MergedOutputSection.h"
 #include "OutputSection.h"
 #include "OutputSegment.h"
 #include "SymbolTable.h"
@@ -19,8 +19,8 @@
 
 #include "lld/Common/ErrorHandler.h"
 #include "lld/Common/Memory.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/BinaryFormat/MachO.h"
 
 using namespace llvm;
@@ -187,7 +187,7 @@ void UnwindInfoSectionImpl<Ptr>::prepareRelocations(InputSection *isec) {
         s = make<Defined>("<internal>", /*file=*/nullptr, referentIsec,
                           r.addend, /*size=*/0, /*isWeakDef=*/false,
                           /*isExternal=*/false, /*isPrivateExtern=*/false,
-                          /*isThumb=*/false);
+                          /*isThumb=*/false, /*isReferencedDynamically=*/false);
         in.got->addEntry(s);
       }
       r.referent = s;
@@ -212,7 +212,7 @@ static void checkTextSegment(InputSection *isec) {
 // is no source address to make a relative location meaningful.
 template <class Ptr>
 static void
-relocateCompactUnwind(MergedOutputSection *compactUnwindSection,
+relocateCompactUnwind(ConcatOutputSection *compactUnwindSection,
                       std::vector<CompactUnwindEntry<Ptr>> &cuVector) {
   for (const InputSection *isec : compactUnwindSection->inputs) {
     assert(isec->parent == compactUnwindSection);

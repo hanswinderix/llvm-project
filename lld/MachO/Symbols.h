@@ -112,10 +112,11 @@ class Defined : public Symbol {
 public:
   Defined(StringRefZ name, InputFile *file, InputSection *isec, uint64_t value,
           uint64_t size, bool isWeakDef, bool isExternal, bool isPrivateExtern,
-          bool isThumb)
+          bool isThumb, bool isReferencedDynamically)
       : Symbol(DefinedKind, name, file), isec(isec), value(value), size(size),
         overridesWeakDef(false), privateExtern(isPrivateExtern),
-        includeInSymtab(true), thumb(isThumb), weakDef(isWeakDef),
+        includeInSymtab(true), thumb(isThumb),
+        referencedDynamically(isReferencedDynamically), weakDef(isWeakDef),
         external(isExternal) {
     if (isec)
       isec->numRefs++;
@@ -151,6 +152,11 @@ public:
   bool includeInSymtab : 1;
   // Only relevant when compiling for Thumb-supporting arm32 archs.
   bool thumb : 1;
+  // Symbols marked referencedDynamically won't be removed from the output's
+  // symbol table by tools like strip. In theory, this could be set on arbitrary
+  // symbols in input object files. In practice, it's used solely for the
+  // synthetic __mh_execute_header symbol.
+  bool referencedDynamically : 1;
 
 private:
   const bool weakDef : 1;
@@ -215,7 +221,10 @@ public:
   DylibSymbol(DylibFile *file, StringRefZ name, bool isWeakDef,
               RefState refState, bool isTlv)
       : Symbol(DylibKind, name, file), refState(refState), weakDef(isWeakDef),
-        tlv(isTlv) {}
+        tlv(isTlv) {
+    if (file && refState > RefState::Unreferenced)
+      file->numReferencedSymbols++;
+  }
 
   uint64_t getVA() const override;
   bool isWeakDef() const override { return weakDef; }
@@ -235,9 +244,25 @@ public:
   uint32_t stubsHelperIndex = UINT32_MAX;
   uint32_t lazyBindOffset = UINT32_MAX;
 
-  RefState refState : 2;
+  RefState getRefState() const { return refState; }
+
+  void reference(RefState newState) {
+    assert(newState > RefState::Unreferenced);
+    if (refState == RefState::Unreferenced && file)
+      getFile()->numReferencedSymbols++;
+    refState = std::max(refState, newState);
+  }
+
+  void unreference() {
+    // dynamic_lookup symbols have no file.
+    if (refState > RefState::Unreferenced && file) {
+      assert(getFile()->numReferencedSymbols > 0);
+      getFile()->numReferencedSymbols--;
+    }
+  }
 
 private:
+  RefState refState : 2;
   const bool weakDef : 1;
   const bool tlv : 1;
 };

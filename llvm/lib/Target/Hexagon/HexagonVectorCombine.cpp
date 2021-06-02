@@ -299,9 +299,10 @@ template <> StoreInst *isCandidate<StoreInst>(Instruction *In) {
   return getIfUnordered(dyn_cast<StoreInst>(In));
 }
 
-#if !defined(_MSC_VER) || _MSC_VER >= 1924
-// VS2017 has trouble compiling this:
+#if !defined(_MSC_VER) || _MSC_VER >= 1926
+// VS2017 and some versions of VS2019 have trouble compiling this:
 // error C2976: 'std::map': too few template arguments
+// VS 2019 16.x is known to work, except for 16.4/16.5 (MSC_VER 1924/1925)
 template <typename Pred, typename... Ts>
 void erase_if(std::map<Ts...> &map, Pred p)
 #else
@@ -442,13 +443,15 @@ auto AlignVectors::createAdjustedPointer(IRBuilder<> &Builder, Value *Ptr,
   Type *ElemTy = cast<PointerType>(Ptr->getType())->getElementType();
   int ElemSize = HVC.getSizeOf(ElemTy);
   if (Adjust % ElemSize == 0) {
-    Value *Tmp0 = Builder.CreateGEP(Ptr, HVC.getConstInt(Adjust / ElemSize));
+    Value *Tmp0 =
+        Builder.CreateGEP(ElemTy, Ptr, HVC.getConstInt(Adjust / ElemSize));
     return Builder.CreatePointerCast(Tmp0, ValTy->getPointerTo());
   }
 
   PointerType *CharPtrTy = Type::getInt8PtrTy(HVC.F.getContext());
   Value *Tmp0 = Builder.CreatePointerCast(Ptr, CharPtrTy);
-  Value *Tmp1 = Builder.CreateGEP(Tmp0, HVC.getConstInt(Adjust));
+  Value *Tmp1 = Builder.CreateGEP(Type::getInt8Ty(HVC.F.getContext()), Tmp0,
+                                  HVC.getConstInt(Adjust));
   return Builder.CreatePointerCast(Tmp1, ValTy->getPointerTo());
 }
 
@@ -1320,8 +1323,7 @@ auto HexagonVectorCombine::calculatePointerDifference(Value *Ptr0,
     return None;
 
   Builder B(Gep0->getParent());
-  Value *BasePtr = Gep0->getPointerOperand();
-  int Scale = DL.getTypeStoreSize(BasePtr->getType()->getPointerElementType());
+  int Scale = DL.getTypeStoreSize(Gep0->getSourceElementType());
 
   // FIXME: for now only check GEPs with a single index.
   if (Gep0->getNumOperands() != 2 || Gep1->getNumOperands() != 2)

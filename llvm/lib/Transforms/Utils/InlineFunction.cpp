@@ -1519,9 +1519,11 @@ static void fixupLineNumbers(Function *Fn, Function::iterator FI,
          BI != BE; ++BI) {
       // Loop metadata needs to be updated so that the start and end locs
       // reference inlined-at locations.
-      auto updateLoopInfoLoc = [&Ctx, &InlinedAtNode, &IANodes](
-                                   const DILocation &Loc) -> DILocation * {
-        return inlineDebugLoc(&Loc, InlinedAtNode, Ctx, IANodes).get();
+      auto updateLoopInfoLoc = [&Ctx, &InlinedAtNode,
+                                &IANodes](Metadata *MD) -> Metadata * {
+        if (auto *Loc = dyn_cast_or_null<DILocation>(MD))
+          return inlineDebugLoc(Loc, InlinedAtNode, Ctx, IANodes).get();
+        return MD;
       };
       updateLoopMetadataDebugLocations(*BI, updateLoopInfoLoc);
 
@@ -2374,6 +2376,7 @@ llvm::InlineResult llvm::InlineFunction(CallBase &CB, InlineFunctionInfo &IFI,
 
         SmallVector<OperandBundleDef, 1> OpBundles;
         DeoptCall->getOperandBundlesAsDefs(OpBundles);
+        auto DeoptAttributes = DeoptCall->getAttributes();
         DeoptCall->eraseFromParent();
         assert(!OpBundles.empty() &&
                "Expected at least the deopt operand bundle");
@@ -2382,6 +2385,7 @@ llvm::InlineResult llvm::InlineFunction(CallBase &CB, InlineFunctionInfo &IFI,
         CallInst *NewDeoptCall =
             Builder.CreateCall(NewDeoptIntrinsic, CallArgs, OpBundles);
         NewDeoptCall->setCallingConv(CallingConv);
+        NewDeoptCall->setAttributes(DeoptAttributes);
         if (NewDeoptCall->getType()->isVoidTy())
           Builder.CreateRetVoid();
         else

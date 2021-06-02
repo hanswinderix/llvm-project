@@ -31,7 +31,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/MachO.h"
 #include "llvm/BinaryFormat/Magic.h"
-#include "llvm/Config/config.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/LTO/LTO.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Option/ArgList.h"
@@ -293,8 +293,10 @@ static InputFile *addFile(StringRef path, bool forceLoadArchive,
   case file_magic::macho_dynamically_linked_shared_lib:
   case file_magic::macho_dynamically_linked_shared_lib_stub:
   case file_magic::tapi_file:
-    if (Optional<DylibFile *> dylibFile = loadDylib(mbref))
-      newFile = *dylibFile;
+    if (DylibFile * dylibFile = loadDylib(mbref)) {
+      dylibFile->explicitlyLinked = true;
+      newFile = dylibFile;
+    }
     break;
   case file_magic::bitcode:
     newFile = make<BitcodeFile>(mbref);
@@ -305,9 +307,8 @@ static InputFile *addFile(StringRef path, bool forceLoadArchive,
     // as a bundle loader.
     if (!isBundleLoader)
       error(path + ": unhandled file type");
-    if (Optional<DylibFile *> dylibFile =
-            loadDylib(mbref, nullptr, isBundleLoader))
-      newFile = *dylibFile;
+    if (DylibFile *dylibFile = loadDylib(mbref, nullptr, isBundleLoader))
+      newFile = dylibFile;
     break;
   default:
     error(path + ": unhandled file type");
@@ -315,28 +316,43 @@ static InputFile *addFile(StringRef path, bool forceLoadArchive,
   if (newFile) {
     // printArchiveMemberLoad() prints both .a and .o names, so no need to
     // print the .a name here.
-    if (config->printEachFile && magic != file_magic::archive)
+    if (config->printEachFile && magic != file_magic::archive &&
+        !isa<DylibFile>(newFile))
       message(toString(newFile));
     inputFiles.insert(newFile);
   }
   return newFile;
 }
 
-static void addLibrary(StringRef name, bool isWeak) {
+static void addLibrary(StringRef name, bool isWeak, bool isReexport,
+                       bool isExplicit) {
   if (Optional<StringRef> path = findLibrary(name)) {
-    auto *dylibFile = dyn_cast_or_null<DylibFile>(addFile(*path, false));
-    if (isWeak && dylibFile)
-      dylibFile->forceWeakImport = true;
+    if (auto *dylibFile = dyn_cast_or_null<DylibFile>(addFile(*path, false))) {
+      dylibFile->explicitlyLinked = isExplicit;
+      if (isWeak)
+        dylibFile->forceWeakImport = true;
+      if (isReexport) {
+        config->hasReexports = true;
+        dylibFile->reexport = true;
+      }
+    }
     return;
   }
   error("library not found for -l" + name);
 }
 
-static void addFramework(StringRef name, bool isWeak) {
+static void addFramework(StringRef name, bool isWeak, bool isReexport,
+                         bool isExplicit) {
   if (Optional<std::string> path = findFramework(name)) {
-    auto *dylibFile = dyn_cast_or_null<DylibFile>(addFile(*path, false));
-    if (isWeak && dylibFile)
-      dylibFile->forceWeakImport = true;
+    if (auto *dylibFile = dyn_cast_or_null<DylibFile>(addFile(*path, false))) {
+      dylibFile->explicitlyLinked = isExplicit;
+      if (isWeak)
+        dylibFile->forceWeakImport = true;
+      if (isReexport) {
+        config->hasReexports = true;
+        dylibFile->reexport = true;
+      }
+    }
     return;
   }
   error("framework not found for -framework " + name);
@@ -365,10 +381,12 @@ void macho::parseLCLinkerOption(InputFile *f, unsigned argc, StringRef data) {
   for (const Arg *arg : args) {
     switch (arg->getOption().getID()) {
     case OPT_l:
-      addLibrary(arg->getValue(), false);
+      addLibrary(arg->getValue(), /*isWeak=*/false, /*isReexport=*/false,
+                 /*isExplicit=*/false);
       break;
     case OPT_framework:
-      addFramework(arg->getValue(), false);
+      addFramework(arg->getValue(), /*isWeak=*/false, /*isReexport=*/false,
+                   /*isExplicit=*/false);
       break;
     default:
       error(arg->getSpelling() + " is not allowed in LC_LINKER_OPTION");
@@ -521,7 +539,8 @@ static void replaceCommonSymbols() {
                            /*size=*/0,
                            /*isWeakDef=*/false,
                            /*isExternal=*/true, common->privateExtern,
-                           /*isThumb=*/false);
+                           /*isThumb=*/false,
+                           /*isReferencedDynamically=*/false);
   }
 }
 
@@ -859,6 +878,13 @@ void createFiles(const InputArgList &args) {
     case OPT_INPUT:
       addFile(rerootPath(arg->getValue()), false);
       break;
+    case OPT_reexport_library:
+      if (auto *dylibFile = dyn_cast_or_null<DylibFile>(
+              addFile(rerootPath(arg->getValue()), false))) {
+        config->hasReexports = true;
+        dylibFile->reexport = true;
+      }
+      break;
     case OPT_weak_library:
       if (auto *dylibFile = dyn_cast_or_null<DylibFile>(
               addFile(rerootPath(arg->getValue()), false)))
@@ -871,12 +897,16 @@ void createFiles(const InputArgList &args) {
       addFile(rerootPath(arg->getValue()), true);
       break;
     case OPT_l:
+    case OPT_reexport_l:
     case OPT_weak_l:
-      addLibrary(arg->getValue(), opt.getID() == OPT_weak_l);
+      addLibrary(arg->getValue(), opt.getID() == OPT_weak_l,
+                 opt.getID() == OPT_reexport_l, /*isExplicit=*/true);
       break;
     case OPT_framework:
+    case OPT_reexport_framework:
     case OPT_weak_framework:
-      addFramework(arg->getValue(), opt.getID() == OPT_weak_framework);
+      addFramework(arg->getValue(), opt.getID() == OPT_weak_framework,
+                   opt.getID() == OPT_reexport_framework, /*isExplicit=*/true);
       break;
     default:
       break;
@@ -980,10 +1010,14 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
   config->runtimePaths = args::getStrings(args, OPT_rpath);
   config->allLoad = args.hasArg(OPT_all_load);
   config->forceLoadObjC = args.hasArg(OPT_ObjC);
+  config->deadStripDylibs = args.hasArg(OPT_dead_strip_dylibs);
   config->demangle = args.hasArg(OPT_demangle);
   config->implicitDylibs = !args.hasArg(OPT_no_implicit_dylibs);
   config->emitFunctionStarts = !args.hasArg(OPT_no_function_starts);
   config->emitBitcodeBundle = args.hasArg(OPT_bitcode_bundle);
+
+  // FIXME: Add a commandline flag for this too.
+  config->zeroModTime = getenv("ZERO_AR_DATE");
 
   std::array<PlatformKind, 3> encryptablePlatforms{
       PlatformKind::iOS, PlatformKind::watchOS, PlatformKind::tvOS};
@@ -991,7 +1025,7 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
       args.hasFlag(OPT_encryptable, OPT_no_encryption,
                    is_contained(encryptablePlatforms, config->platform()));
 
-#ifndef HAVE_LIBXAR
+#ifndef LLVM_HAVE_LIBXAR
   if (config->emitBitcodeBundle)
     error("-bitcode_bundle unsupported because LLD wasn't built with libxar");
 #endif
@@ -1194,6 +1228,27 @@ bool macho::link(ArrayRef<const char *> argsArr, bool canExitEarly,
 
     createSyntheticSections();
     createSyntheticSymbols();
+
+    if (!config->exportedSymbols.empty()) {
+      for (Symbol *sym : symtab->getSymbols()) {
+        if (auto *defined = dyn_cast<Defined>(sym)) {
+          StringRef symbolName = defined->getName();
+          if (config->exportedSymbols.match(symbolName)) {
+            if (defined->privateExtern) {
+              error("cannot export hidden symbol " + symbolName +
+                    "\n>>> defined in " + toString(defined->getFile()));
+            }
+          } else {
+            defined->privateExtern = true;
+          }
+        }
+      }
+    } else if (!config->unexportedSymbols.empty()) {
+      for (Symbol *sym : symtab->getSymbols())
+        if (auto *defined = dyn_cast<Defined>(sym))
+          if (config->unexportedSymbols.match(defined->getName()))
+            defined->privateExtern = true;
+    }
 
     for (const Arg *arg : args.filtered(OPT_sectcreate)) {
       StringRef segName = arg->getValue(0);

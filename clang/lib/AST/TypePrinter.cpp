@@ -846,6 +846,8 @@ StringRef clang::getParameterABISpelling(ParameterABI ABI) {
     llvm_unreachable("asking for spelling of ordinary parameter ABI");
   case ParameterABI::SwiftContext:
     return "swift_context";
+  case ParameterABI::SwiftAsyncContext:
+    return "swift_async_context";
   case ParameterABI::SwiftErrorResult:
     return "swift_error_result";
   case ParameterABI::SwiftIndirectResult:
@@ -2135,8 +2137,10 @@ std::string Qualifiers::getAddrSpaceAsString(LangAS AS) {
   case LangAS::opencl_generic:
     return "__generic";
   case LangAS::opencl_global_device:
+  case LangAS::sycl_global_device:
     return "__global_device";
   case LangAS::opencl_global_host:
+  case LangAS::sycl_global_host:
     return "__global_host";
   case LangAS::cuda_device:
     return "__device__";

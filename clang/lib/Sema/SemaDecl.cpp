@@ -1906,6 +1906,41 @@ void Sema::DiagnoseUnusedDecl(const NamedDecl *D) {
   Diag(D->getLocation(), DiagID) << D << Hint;
 }
 
+void Sema::DiagnoseUnusedButSetDecl(const VarDecl *VD) {
+  // If it's not referenced, it can't be set.
+  if (!VD->isReferenced() || !VD->getDeclName() || VD->hasAttr<UnusedAttr>())
+    return;
+
+  const auto *Ty = VD->getType().getTypePtr()->getBaseElementTypeUnsafe();
+
+  if (Ty->isReferenceType() || Ty->isDependentType())
+    return;
+
+  if (const TagType *TT = Ty->getAs<TagType>()) {
+    const TagDecl *Tag = TT->getDecl();
+    if (Tag->hasAttr<UnusedAttr>())
+      return;
+    // In C++, don't warn for record types that don't have WarnUnusedAttr, to
+    // mimic gcc's behavior.
+    if (const CXXRecordDecl *RD = dyn_cast<CXXRecordDecl>(Tag)) {
+      if (!RD->hasAttr<WarnUnusedAttr>())
+        return;
+    }
+  }
+
+  auto iter = RefsMinusAssignments.find(VD);
+  if (iter == RefsMinusAssignments.end())
+    return;
+
+  assert(iter->getSecond() >= 0 &&
+         "Found a negative number of references to a VarDecl");
+  if (iter->getSecond() != 0)
+    return;
+  unsigned DiagID = isa<ParmVarDecl>(VD) ? diag::warn_unused_but_set_parameter
+                                         : diag::warn_unused_but_set_variable;
+  Diag(VD->getLocation(), DiagID) << VD;
+}
+
 static void CheckPoppedLabel(LabelDecl *L, Sema &S) {
   // Verify that we have no forward references left.  If so, there was a goto
   // or address of a label taken, but no definition of it.  Label fwd
@@ -1938,6 +1973,10 @@ void Sema::ActOnPopScope(SourceLocation Loc, Scope *S) {
       DiagnoseUnusedDecl(D);
       if (const auto *RD = dyn_cast<RecordDecl>(D))
         DiagnoseUnusedNestedTypedefs(RD);
+      if (VarDecl *VD = dyn_cast<VarDecl>(D)) {
+        DiagnoseUnusedButSetDecl(VD);
+        RefsMinusAssignments.erase(VD);
+      }
     }
 
     if (!D->getDeclName()) continue;
@@ -2608,7 +2647,8 @@ static bool mergeDeclAttribute(Sema &S, NamedDecl *D,
     NewAttr = nullptr;
   else if ((isa<DeprecatedAttr>(Attr) || isa<UnavailableAttr>(Attr)) &&
            (AMK == Sema::AMK_Override ||
-            AMK == Sema::AMK_ProtocolImplementation))
+            AMK == Sema::AMK_ProtocolImplementation ||
+            AMK == Sema::AMK_OptionalProtocolImplementation))
     NewAttr = nullptr;
   else if (const auto *UA = dyn_cast<UuidAttr>(Attr))
     NewAttr = S.mergeUuidAttr(D, *UA, UA->getGuid(), UA->getGuidDecl());
@@ -2956,6 +2996,7 @@ void Sema::mergeDeclAttributes(NamedDecl *New, Decl *Old,
       case AMK_Redeclaration:
       case AMK_Override:
       case AMK_ProtocolImplementation:
+      case AMK_OptionalProtocolImplementation:
         LocalAMK = AMK;
         break;
       }
@@ -3861,10 +3902,11 @@ void Sema::mergeObjCMethodDecls(ObjCMethodDecl *newMethod,
                                 ObjCMethodDecl *oldMethod) {
   // Merge the attributes, including deprecated/unavailable
   AvailabilityMergeKind MergeKind =
-    isa<ObjCProtocolDecl>(oldMethod->getDeclContext())
-      ? AMK_ProtocolImplementation
-      : isa<ObjCImplDecl>(newMethod->getDeclContext()) ? AMK_Redeclaration
-                                                       : AMK_Override;
+      isa<ObjCProtocolDecl>(oldMethod->getDeclContext())
+          ? (oldMethod->isOptional() ? AMK_OptionalProtocolImplementation
+                                     : AMK_ProtocolImplementation)
+          : isa<ObjCImplDecl>(newMethod->getDeclContext()) ? AMK_Redeclaration
+                                                           : AMK_Override;
 
   mergeDeclAttributes(newMethod, oldMethod, MergeKind);
 
@@ -7188,7 +7230,6 @@ NamedDecl *Sema::ActOnVariableDeclarator(
 
   case ConstexprSpecKind::Constexpr:
     NewVD->setConstexpr(true);
-    MaybeAddCUDAConstantAttr(NewVD);
     // C++1z [dcl.spec.constexpr]p1:
     //   A static data member declared with the constexpr specifier is
     //   implicitly an inline variable.
@@ -12536,7 +12577,7 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init, bool DirectInit) {
   }
 
   if (LangOpts.OpenMP && VDecl->isFileVarDecl())
-    DeclsToCheckForDeferredDiags.push_back(VDecl);
+    DeclsToCheckForDeferredDiags.insert(VDecl);
   CheckCompleteVariableDeclaration(VDecl);
 }
 
@@ -12635,9 +12676,21 @@ void Sema::ActOnUninitializedDecl(Decl *RealDecl) {
     if (!Var->isInvalidDecl() &&
         Var->getType().getAddressSpace() == LangAS::opencl_constant &&
         Var->getStorageClass() != SC_Extern && !Var->getInit()) {
-      Diag(Var->getLocation(), diag::err_opencl_constant_no_init);
-      Var->setInvalidDecl();
-      return;
+      bool HasConstExprDefaultConstructor = false;
+      if (CXXRecordDecl *RD = Var->getType()->getAsCXXRecordDecl()) {
+        for (auto *Ctor : RD->ctors()) {
+          if (Ctor->isConstexpr() && Ctor->getNumParams() == 0 &&
+              Ctor->getMethodQualifiers().getAddressSpace() ==
+                  LangAS::opencl_constant) {
+            HasConstExprDefaultConstructor = true;
+          }
+        }
+      }
+      if (!HasConstExprDefaultConstructor) {
+        Diag(Var->getLocation(), diag::err_opencl_constant_no_init);
+        Var->setInvalidDecl();
+        return;
+      }
     }
 
     if (!Var->isInvalidDecl() && RealDecl->hasAttr<LoaderUninitializedAttr>()) {
@@ -12942,6 +12995,8 @@ Sema::ActOnCXXForRangeIdentifier(Scope *S, SourceLocation IdentLoc,
 void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   if (var->isInvalidDecl()) return;
 
+  MaybeAddCUDAConstantAttr(var);
+
   if (getLangOpts().OpenCL) {
     // OpenCL v2.0 s6.12.5 - Every block variable declaration must have an
     // initialiser
@@ -13032,43 +13087,6 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
     }
   }
 
-  // Apply section attributes and pragmas to global variables.
-  bool GlobalStorage = var->hasGlobalStorage();
-  if (GlobalStorage && var->isThisDeclarationADefinition() &&
-      !inTemplateInstantiation()) {
-    PragmaStack<StringLiteral *> *Stack = nullptr;
-    int SectionFlags = ASTContext::PSF_Read;
-    if (var->getType().isConstQualified())
-      Stack = &ConstSegStack;
-    else if (!var->getInit()) {
-      Stack = &BSSSegStack;
-      SectionFlags |= ASTContext::PSF_Write;
-    } else {
-      Stack = &DataSegStack;
-      SectionFlags |= ASTContext::PSF_Write;
-    }
-    if (const SectionAttr *SA = var->getAttr<SectionAttr>()) {
-      if (SA->getSyntax() == AttributeCommonInfo::AS_Declspec)
-        SectionFlags |= ASTContext::PSF_Implicit;
-      UnifySection(SA->getName(), SectionFlags, var);
-    } else if (Stack->CurrentValue) {
-      SectionFlags |= ASTContext::PSF_Implicit;
-      auto SectionName = Stack->CurrentValue->getString();
-      var->addAttr(SectionAttr::CreateImplicit(
-          Context, SectionName, Stack->CurrentPragmaLocation,
-          AttributeCommonInfo::AS_Pragma, SectionAttr::Declspec_allocate));
-      if (UnifySection(SectionName, SectionFlags, var))
-        var->dropAttr<SectionAttr>();
-    }
-
-    // Apply the init_seg attribute if this has an initializer.  If the
-    // initializer turns out to not be dynamic, we'll end up ignoring this
-    // attribute.
-    if (CurInitSeg && var->getInit())
-      var->addAttr(InitSegAttr::CreateImplicit(Context, CurInitSeg->getString(),
-                                               CurInitSegLoc,
-                                               AttributeCommonInfo::AS_Pragma));
-  }
 
   if (!var->getType()->isStructureType() && var->hasInit() &&
       isa<InitListExpr>(var->getInit())) {
@@ -13118,14 +13136,6 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
       }
   }
 
-  // All the following checks are C++ only.
-  if (!getLangOpts().CPlusPlus) {
-    // If this variable must be emitted, add it as an initializer for the
-    // current module.
-    if (Context.DeclMustBeEmitted(var) && !ModuleScopes.empty())
-      Context.addModuleInitializer(ModuleScopes.back().Module, var);
-    return;
-  }
 
   QualType type = var->getType();
 
@@ -13133,11 +13143,14 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
     getCurFunction()->addByrefBlockVar(var);
 
   Expr *Init = var->getInit();
+  bool GlobalStorage = var->hasGlobalStorage();
   bool IsGlobal = GlobalStorage && !var->isStaticLocal();
   QualType baseType = Context.getBaseElementType(type);
+  bool HasConstInit = true;
 
   // Check whether the initializer is sufficiently constant.
-  if (!type->isDependentType() && Init && !Init->isValueDependent() &&
+  if (getLangOpts().CPlusPlus && !type->isDependentType() && Init &&
+      !Init->isValueDependent() &&
       (GlobalStorage || var->isConstexpr() ||
        var->mightBeUsableInConstantExpressions(Context))) {
     // If this variable might have a constant initializer or might be usable in
@@ -13145,7 +13158,6 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
     // do this lazily, because the result might depend on things that change
     // later, such as which constexpr functions happen to be defined.
     SmallVector<PartialDiagnosticAt, 8> Notes;
-    bool HasConstInit;
     if (!getLangOpts().CPlusPlus11) {
       // Prior to C++11, in contexts where a constant initializer is required,
       // the set of valid constant initializers is described by syntactic rules
@@ -13208,6 +13220,57 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
               << Init->getSourceRange();
       }
     }
+  }
+
+  // Apply section attributes and pragmas to global variables.
+  if (GlobalStorage && var->isThisDeclarationADefinition() &&
+      !inTemplateInstantiation()) {
+    PragmaStack<StringLiteral *> *Stack = nullptr;
+    int SectionFlags = ASTContext::PSF_Read;
+    if (var->getType().isConstQualified()) {
+      if (HasConstInit)
+        Stack = &ConstSegStack;
+      else {
+        Stack = &BSSSegStack;
+        SectionFlags |= ASTContext::PSF_Write;
+      }
+    } else if (var->hasInit() && HasConstInit) {
+      Stack = &DataSegStack;
+      SectionFlags |= ASTContext::PSF_Write;
+    } else {
+      Stack = &BSSSegStack;
+      SectionFlags |= ASTContext::PSF_Write;
+    }
+    if (const SectionAttr *SA = var->getAttr<SectionAttr>()) {
+      if (SA->getSyntax() == AttributeCommonInfo::AS_Declspec)
+        SectionFlags |= ASTContext::PSF_Implicit;
+      UnifySection(SA->getName(), SectionFlags, var);
+    } else if (Stack->CurrentValue) {
+      SectionFlags |= ASTContext::PSF_Implicit;
+      auto SectionName = Stack->CurrentValue->getString();
+      var->addAttr(SectionAttr::CreateImplicit(
+          Context, SectionName, Stack->CurrentPragmaLocation,
+          AttributeCommonInfo::AS_Pragma, SectionAttr::Declspec_allocate));
+      if (UnifySection(SectionName, SectionFlags, var))
+        var->dropAttr<SectionAttr>();
+    }
+
+    // Apply the init_seg attribute if this has an initializer.  If the
+    // initializer turns out to not be dynamic, we'll end up ignoring this
+    // attribute.
+    if (CurInitSeg && var->getInit())
+      var->addAttr(InitSegAttr::CreateImplicit(Context, CurInitSeg->getString(),
+                                               CurInitSegLoc,
+                                               AttributeCommonInfo::AS_Pragma));
+  }
+
+  // All the following checks are C++ only.
+  if (!getLangOpts().CPlusPlus) {
+    // If this variable must be emitted, add it as an initializer for the
+    // current module.
+    if (Context.DeclMustBeEmitted(var) && !ModuleScopes.empty())
+      Context.addModuleInitializer(ModuleScopes.back().Module, var);
+    return;
   }
 
   // Require the destructor.
@@ -14758,7 +14821,7 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
     auto ES = getEmissionStatus(FD);
     if (ES == Sema::FunctionEmissionStatus::Emitted ||
         ES == Sema::FunctionEmissionStatus::Unknown)
-      DeclsToCheckForDeferredDiags.push_back(FD);
+      DeclsToCheckForDeferredDiags.insert(FD);
   }
 
   return dcl;
@@ -16433,6 +16496,7 @@ Decl *Sema::ActOnObjCContainerStartDefinition(Decl *IDecl) {
 void Sema::ActOnStartCXXMemberDeclarations(Scope *S, Decl *TagD,
                                            SourceLocation FinalLoc,
                                            bool IsFinalSpelledSealed,
+                                           bool IsAbstract,
                                            SourceLocation LBraceLoc) {
   AdjustDeclIfTemplate(TagD);
   CXXRecordDecl *Record = cast<CXXRecordDecl>(TagD);
@@ -16442,11 +16506,14 @@ void Sema::ActOnStartCXXMemberDeclarations(Scope *S, Decl *TagD,
   if (!Record->getIdentifier())
     return;
 
-  if (FinalLoc.isValid())
+  if (IsAbstract)
+    Record->markAbstract();
+
+  if (FinalLoc.isValid()) {
     Record->addAttr(FinalAttr::Create(
         Context, FinalLoc, AttributeCommonInfo::AS_Keyword,
         static_cast<FinalAttr::Spelling>(IsFinalSpelledSealed)));
-
+  }
   // C++ [class]p2:
   //   [...] The class-name is also inserted into the scope of the
   //   class itself; this is known as the injected-class-name. For
@@ -16800,8 +16867,10 @@ FieldDecl *Sema::CheckFieldDecl(DeclarationName Name, QualType T,
       Record->setInvalidDecl();
       InvalidDecl = true;
     }
-    // OpenCL v1.2 s6.9.c: bitfields are not supported.
-    if (BitWidth) {
+    // OpenCL v1.2 s6.9.c: bitfields are not supported, unless Clang extension
+    // is enabled.
+    if (BitWidth && !getOpenCLOptions().isAvailableOption(
+                        "__cl_clang_bitfields", LangOpts)) {
       Diag(Loc, diag::err_opencl_bitfields);
       InvalidDecl = true;
     }

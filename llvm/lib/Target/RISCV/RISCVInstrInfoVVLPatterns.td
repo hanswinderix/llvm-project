@@ -1073,14 +1073,14 @@ foreach mti = AllMasks in {
             (!cast<Instruction>("PseudoVMXOR_MM_" # mti.LMul.MX)
                  VR:$rs1, VR:$rs2, GPR:$vl, mti.Log2SEW)>;
 
-  def : Pat<(mti.Mask (riscv_vmand_vl (riscv_vmnot_vl VR:$rs1,
-                                                      VLOpFrag),
-                                      VR:$rs2, VLOpFrag)),
+  def : Pat<(mti.Mask (riscv_vmand_vl VR:$rs1,
+                                      (riscv_vmnot_vl VR:$rs2, VLOpFrag),
+                                      VLOpFrag)),
             (!cast<Instruction>("PseudoVMANDNOT_MM_" # mti.LMul.MX)
                  VR:$rs1, VR:$rs2, GPR:$vl, mti.Log2SEW)>;
-  def : Pat<(mti.Mask (riscv_vmor_vl (riscv_vmnot_vl VR:$rs1,
-                                                     VLOpFrag),
-                                     VR:$rs2, VLOpFrag)),
+  def : Pat<(mti.Mask (riscv_vmor_vl VR:$rs1,
+                                     (riscv_vmnot_vl VR:$rs2, VLOpFrag),
+                                     VLOpFrag)),
             (!cast<Instruction>("PseudoVMORNOT_MM_" # mti.LMul.MX)
                  VR:$rs1, VR:$rs2, GPR:$vl, mti.Log2SEW)>;
   // XOR is associative so we need 2 patterns for VMXNOR.
@@ -1161,7 +1161,7 @@ foreach vti = AllIntegerVectors in {
 
   // emul = lmul * 16 / sew
   defvar vlmul = vti.LMul;
-  defvar octuple_lmul = octuple_from_str<vlmul.MX>.ret;
+  defvar octuple_lmul = vlmul.octuple;
   defvar octuple_emul = !srl(!mul(octuple_lmul, 16), vti.Log2SEW);
   if !and(!ge(octuple_emul, 1), !le(octuple_emul, 64)) then {
     defvar emul_str = octuple_to_str<octuple_emul>.ret;
@@ -1231,7 +1231,7 @@ foreach vti = AllFloatVectors in {
                  vti.Mask:$vm, GPR:$vl, vti.Log2SEW)>;
 
   defvar vlmul = vti.LMul;
-  defvar octuple_lmul = octuple_from_str<vlmul.MX>.ret;
+  defvar octuple_lmul = vlmul.octuple;
   defvar octuple_emul = !srl(!mul(octuple_lmul, 16), vti.Log2SEW);
   if !and(!ge(octuple_emul, 1), !le(octuple_emul, 64)) then {
     defvar emul_str = octuple_to_str<octuple_emul>.ret;

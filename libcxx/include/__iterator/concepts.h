@@ -71,7 +71,6 @@ concept __signed_integer_like = signed_integral<_Tp>;
 
 template<class _Ip>
 concept weakly_incrementable =
-  default_initializable<_Ip> &&
   movable<_Ip> &&
   requires(_Ip __i) {
     typename iter_difference_t<_Ip>;
@@ -167,6 +166,10 @@ concept contiguous_iterator =
   requires(const _Ip& __i) {
     { _VSTD::to_address(__i) } -> same_as<add_pointer_t<iter_reference_t<_Ip>>>;
   };
+
+
+template<class _Ip>
+concept __has_arrow = input_iterator<_Ip> && (is_pointer_v<_Ip> || requires(_Ip __i) { __i.operator->(); });
 
 // clang-format on
 

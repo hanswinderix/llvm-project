@@ -359,12 +359,6 @@ private:
   StringRef path;
 };
 
-static uint32_t encodeVersion(const VersionTuple &version) {
-  return ((version.getMajor() << 020) |
-          (version.getMinor().getValueOr(0) << 010) |
-          version.getSubminor().getValueOr(0));
-}
-
 class LCMinVersion : public LoadCommand {
 public:
   explicit LCMinVersion(const PlatformInfo &platformInfo)
@@ -723,7 +717,7 @@ template <class LP> void Writer::createLoadCommands() {
       //   files.
       // In the first case, *semantically distinct* DylibFiles will have the
       // same installName.
-      int64_t &ordinal = ordinalForInstallName[dylibFile->dylibName];
+      int64_t &ordinal = ordinalForInstallName[dylibFile->installName];
       if (ordinal) {
         dylibFile->ordinal = ordinal;
         continue;
@@ -734,13 +728,13 @@ template <class LP> void Writer::createLoadCommands() {
           dylibFile->forceWeakImport || dylibFile->refState == RefState::Weak
               ? LC_LOAD_WEAK_DYLIB
               : LC_LOAD_DYLIB;
-      in.header->addLoadCommand(make<LCDylib>(lcType, dylibFile->dylibName,
+      in.header->addLoadCommand(make<LCDylib>(lcType, dylibFile->installName,
                                               dylibFile->compatibilityVersion,
                                               dylibFile->currentVersion));
 
       if (dylibFile->reexport)
         in.header->addLoadCommand(
-            make<LCDylib>(LC_REEXPORT_DYLIB, dylibFile->dylibName));
+            make<LCDylib>(LC_REEXPORT_DYLIB, dylibFile->installName));
     }
   }
 
@@ -869,15 +863,23 @@ template <class LP> void Writer::createOutputSections() {
     InputSection *isec = p.value();
     if (isec->shouldOmitFromOutput())
       continue;
-    NamePair names = maybeRenameSection({isec->segname, isec->name});
-    ConcatOutputSection *&osec = concatOutputSections[names];
-    if (osec == nullptr) {
-      osec = make<ConcatOutputSection>(names.second);
-      osec->inputOrder = p.index();
+    if (auto *concatIsec = dyn_cast<ConcatInputSection>(isec)) {
+      NamePair names = maybeRenameSection({isec->segname, isec->name});
+      ConcatOutputSection *&osec = concatOutputSections[names];
+      if (osec == nullptr) {
+        osec = make<ConcatOutputSection>(names.second);
+        osec->inputOrder = p.index();
+      }
+      osec->addInput(concatIsec);
+    } else if (auto *cStringIsec = dyn_cast<CStringInputSection>(isec)) {
+      if (in.cStringSection->inputs.empty())
+        in.cStringSection->inputOrder = p.index();
+      in.cStringSection->addInput(cStringIsec);
     }
-    osec->addInput(isec);
   }
 
+  // Once all the inputs are added, we can finalize the output section
+  // properties and create the corresponding output segments.
   for (const auto &it : concatOutputSections) {
     StringRef segname = it.first.first;
     ConcatOutputSection *osec = it.second;
@@ -891,13 +893,14 @@ template <class LP> void Writer::createOutputSections() {
 
   for (SyntheticSection *ssec : syntheticSections) {
     auto it = concatOutputSections.find({ssec->segname, ssec->name});
-    if (it == concatOutputSections.end()) {
-      if (ssec->isNeeded())
+    if (ssec->isNeeded()) {
+      if (it == concatOutputSections.end()) {
         getOrCreateOutputSegment(ssec->segname)->addOutputSection(ssec);
-    } else {
-      error("section from " + toString(it->second->firstSection()->file) +
-            " conflicts with synthetic section " + ssec->segname + "," +
-            ssec->name);
+      } else {
+        fatal("section from " + toString(it->second->firstSection()->file) +
+              " conflicts with synthetic section " + ssec->segname + "," +
+              ssec->name);
+      }
     }
   }
 
@@ -1046,6 +1049,7 @@ template <class LP> void macho::writeResult() { Writer().run<LP>(); }
 
 void macho::createSyntheticSections() {
   in.header = make<MachHeaderSection>();
+  in.cStringSection = config->dedupLiterals ? make<CStringSection>() : nullptr;
   in.rebase = make<RebaseSection>();
   in.binding = make<BindingSection>();
   in.weakBinding = make<WeakBindingSection>();

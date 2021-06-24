@@ -96,7 +96,7 @@ private:
 };
 
 // .o file
-class ObjFile : public InputFile {
+class ObjFile final : public InputFile {
 public:
   ObjFile(MemoryBufferRef mb, uint32_t modTime, StringRef archiveName);
   static bool classof(const InputFile *f) { return f->kind() == ObjKind; }
@@ -104,6 +104,7 @@ public:
   llvm::DWARFUnit *compileUnit = nullptr;
   const uint32_t modTime;
   std::vector<ConcatInputSection *> debugSections;
+  ArrayRef<llvm::MachO::data_in_code_entry> dataInCodeEntries;
 
 private:
   template <class LP> void parse();
@@ -118,17 +119,18 @@ private:
   void parseRelocations(ArrayRef<Section> sectionHeaders, const Section &,
                         SubsectionMap &);
   void parseDebugInfo();
+  void parseDataInCode();
 };
 
 // command-line -sectcreate file
-class OpaqueFile : public InputFile {
+class OpaqueFile final : public InputFile {
 public:
   OpaqueFile(MemoryBufferRef mb, StringRef segName, StringRef sectName);
   static bool classof(const InputFile *f) { return f->kind() == OpaqueKind; }
 };
 
 // .dylib or .tbd file
-class DylibFile : public InputFile {
+class DylibFile final : public InputFile {
 public:
   // Mach-O dylibs can re-export other dylibs as sub-libraries, meaning that the
   // symbols in those sub-libraries will be available under the umbrella
@@ -181,7 +183,7 @@ private:
 };
 
 // .a file
-class ArchiveFile : public InputFile {
+class ArchiveFile final : public InputFile {
 public:
   explicit ArchiveFile(std::unique_ptr<llvm::object::Archive> &&file);
   static bool classof(const InputFile *f) { return f->kind() == ArchiveKind; }
@@ -194,7 +196,7 @@ private:
   llvm::DenseSet<uint64_t> seen;
 };
 
-class BitcodeFile : public InputFile {
+class BitcodeFile final : public InputFile {
 public:
   explicit BitcodeFile(MemoryBufferRef mb);
   static bool classof(const InputFile *f) { return f->kind() == BitcodeKind; }

@@ -24,7 +24,7 @@ class Defined;
 // files that are labeled with the same segment and section name. This class
 // contains all such sections and writes the data from each section sequentially
 // in the final binary.
-class ConcatOutputSection : public OutputSection {
+class ConcatOutputSection final : public OutputSection {
 public:
   explicit ConcatOutputSection(StringRef name)
       : OutputSection(ConcatKind, name) {}
@@ -40,6 +40,7 @@ public:
   void finalize() override;
   bool needsThunks() const;
   uint64_t estimateStubsInRangeVA(size_t callIdx) const;
+  void eraseOmittedInputSections();
 
   void writeTo(uint8_t *buf) const override;
 
@@ -51,7 +52,7 @@ public:
   }
 
 private:
-  void mergeFlags(InputSection *input);
+  void finalizeFlags(InputSection *input);
 
   size_t size = 0;
   uint64_t fileSize = 0;

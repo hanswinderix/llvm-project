@@ -420,6 +420,9 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
         ISD::VP_SREM, ISD::VP_UREM, ISD::VP_AND, ISD::VP_OR,   ISD::VP_XOR,
         ISD::VP_ASHR, ISD::VP_LSHR, ISD::VP_SHL};
 
+    static unsigned FloatingPointVPOps[] = {ISD::VP_FADD, ISD::VP_FSUB,
+                                            ISD::VP_FMUL, ISD::VP_FDIV};
+
     if (!Subtarget.is64Bit()) {
       // We must custom-lower certain vXi64 operations on RV32 due to the vector
       // element type being illegal.
@@ -448,7 +451,7 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
       setOperationAction(ISD::INSERT_VECTOR_ELT, VT, Custom);
       setOperationAction(ISD::EXTRACT_VECTOR_ELT, VT, Custom);
 
-      setOperationAction(ISD::SELECT, VT, Expand);
+      setOperationAction(ISD::SELECT, VT, Custom);
       setOperationAction(ISD::SELECT_CC, VT, Expand);
       setOperationAction(ISD::VSELECT, VT, Expand);
 
@@ -523,6 +526,9 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
       for (unsigned VPOpc : IntegerVPOps)
         setOperationAction(VPOpc, VT, Custom);
 
+      setOperationAction(ISD::LOAD, VT, Custom);
+      setOperationAction(ISD::STORE, VT, Custom);
+
       setOperationAction(ISD::MLOAD, VT, Custom);
       setOperationAction(ISD::MSTORE, VT, Custom);
       setOperationAction(ISD::MGATHER, VT, Custom);
@@ -532,7 +538,7 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
       setOperationAction(ISD::INSERT_SUBVECTOR, VT, Custom);
       setOperationAction(ISD::EXTRACT_SUBVECTOR, VT, Custom);
 
-      setOperationAction(ISD::SELECT, VT, Expand);
+      setOperationAction(ISD::SELECT, VT, Custom);
       setOperationAction(ISD::SELECT_CC, VT, Expand);
 
       setOperationAction(ISD::STEP_VECTOR, VT, Custom);
@@ -584,12 +590,15 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
       setOperationAction(ISD::VECREDUCE_FMAX, VT, Custom);
       setOperationAction(ISD::FCOPYSIGN, VT, Legal);
 
+      setOperationAction(ISD::LOAD, VT, Custom);
+      setOperationAction(ISD::STORE, VT, Custom);
+
       setOperationAction(ISD::MLOAD, VT, Custom);
       setOperationAction(ISD::MSTORE, VT, Custom);
       setOperationAction(ISD::MGATHER, VT, Custom);
       setOperationAction(ISD::MSCATTER, VT, Custom);
 
-      setOperationAction(ISD::SELECT, VT, Expand);
+      setOperationAction(ISD::SELECT, VT, Custom);
       setOperationAction(ISD::SELECT_CC, VT, Expand);
 
       setOperationAction(ISD::CONCAT_VECTORS, VT, Custom);
@@ -597,6 +606,9 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
       setOperationAction(ISD::EXTRACT_SUBVECTOR, VT, Custom);
 
       setOperationAction(ISD::VECTOR_REVERSE, VT, Custom);
+
+      for (unsigned VPOpc : FloatingPointVPOps)
+        setOperationAction(VPOpc, VT, Custom);
     };
 
     // Sets common extload/truncstore actions on RVV floating-point vector
@@ -655,6 +667,8 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
         setOperationAction(ISD::STORE, VT, Custom);
 
         setOperationAction(ISD::SETCC, VT, Custom);
+
+        setOperationAction(ISD::SELECT, VT, Custom);
 
         setOperationAction(ISD::TRUNCATE, VT, Custom);
 
@@ -717,7 +731,6 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
         setOperationAction(ISD::MULHU, VT, Custom);
 
         setOperationAction(ISD::VSELECT, VT, Custom);
-        setOperationAction(ISD::SELECT, VT, Expand);
         setOperationAction(ISD::SELECT_CC, VT, Expand);
 
         setOperationAction(ISD::ANY_EXTEND, VT, Custom);
@@ -782,7 +795,7 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
           setCondCodeAction(CC, VT, Expand);
 
         setOperationAction(ISD::VSELECT, VT, Custom);
-        setOperationAction(ISD::SELECT, VT, Expand);
+        setOperationAction(ISD::SELECT, VT, Custom);
         setOperationAction(ISD::SELECT_CC, VT, Expand);
 
         setOperationAction(ISD::BITCAST, VT, Custom);
@@ -791,6 +804,9 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
         setOperationAction(ISD::VECREDUCE_SEQ_FADD, VT, Custom);
         setOperationAction(ISD::VECREDUCE_FMIN, VT, Custom);
         setOperationAction(ISD::VECREDUCE_FMAX, VT, Custom);
+
+        for (unsigned VPOpc : FloatingPointVPOps)
+          setOperationAction(VPOpc, VT, Custom);
       }
 
       // Custom-legalize bitcasts from fixed-length vectors to scalar types.
@@ -1891,6 +1907,66 @@ static SDValue getRVVFPExtendOrRound(SDValue Op, MVT VT, MVT ContainerVT,
   return DAG.getNode(RVVOpc, DL, ContainerVT, Op, Mask, VL);
 }
 
+// While RVV has alignment restrictions, we should always be able to load as a
+// legal equivalently-sized byte-typed vector instead. This method is
+// responsible for re-expressing a ISD::LOAD via a correctly-aligned type. If
+// the load is already correctly-aligned, it returns SDValue().
+SDValue RISCVTargetLowering::expandUnalignedRVVLoad(SDValue Op,
+                                                    SelectionDAG &DAG) const {
+  auto *Load = cast<LoadSDNode>(Op);
+  assert(Load && Load->getMemoryVT().isVector() && "Expected vector load");
+
+  if (allowsMemoryAccessForAlignment(*DAG.getContext(), DAG.getDataLayout(),
+                                     Load->getMemoryVT(),
+                                     *Load->getMemOperand()))
+    return SDValue();
+
+  SDLoc DL(Op);
+  MVT VT = Op.getSimpleValueType();
+  unsigned EltSizeBits = VT.getScalarSizeInBits();
+  assert((EltSizeBits == 16 || EltSizeBits == 32 || EltSizeBits == 64) &&
+         "Unexpected unaligned RVV load type");
+  MVT NewVT =
+      MVT::getVectorVT(MVT::i8, VT.getVectorElementCount() * (EltSizeBits / 8));
+  assert(NewVT.isValid() &&
+         "Expecting equally-sized RVV vector types to be legal");
+  SDValue L = DAG.getLoad(NewVT, DL, Load->getChain(), Load->getBasePtr(),
+                          Load->getPointerInfo(), Load->getOriginalAlign(),
+                          Load->getMemOperand()->getFlags());
+  return DAG.getMergeValues({DAG.getBitcast(VT, L), L.getValue(1)}, DL);
+}
+
+// While RVV has alignment restrictions, we should always be able to store as a
+// legal equivalently-sized byte-typed vector instead. This method is
+// responsible for re-expressing a ISD::STORE via a correctly-aligned type. It
+// returns SDValue() if the store is already correctly aligned.
+SDValue RISCVTargetLowering::expandUnalignedRVVStore(SDValue Op,
+                                                     SelectionDAG &DAG) const {
+  auto *Store = cast<StoreSDNode>(Op);
+  assert(Store && Store->getValue().getValueType().isVector() &&
+         "Expected vector store");
+
+  if (allowsMemoryAccessForAlignment(*DAG.getContext(), DAG.getDataLayout(),
+                                     Store->getMemoryVT(),
+                                     *Store->getMemOperand()))
+    return SDValue();
+
+  SDLoc DL(Op);
+  SDValue StoredVal = Store->getValue();
+  MVT VT = StoredVal.getSimpleValueType();
+  unsigned EltSizeBits = VT.getScalarSizeInBits();
+  assert((EltSizeBits == 16 || EltSizeBits == 32 || EltSizeBits == 64) &&
+         "Unexpected unaligned RVV store type");
+  MVT NewVT =
+      MVT::getVectorVT(MVT::i8, VT.getVectorElementCount() * (EltSizeBits / 8));
+  assert(NewVT.isValid() &&
+         "Expecting equally-sized RVV vector types to be legal");
+  StoredVal = DAG.getBitcast(NewVT, StoredVal);
+  return DAG.getStore(Store->getChain(), DL, StoredVal, Store->getBasePtr(),
+                      Store->getPointerInfo(), Store->getOriginalAlign(),
+                      Store->getMemOperand()->getFlags());
+}
+
 SDValue RISCVTargetLowering::LowerOperation(SDValue Op,
                                             SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
@@ -2310,9 +2386,17 @@ SDValue RISCVTargetLowering::LowerOperation(SDValue Op,
     return Vec;
   }
   case ISD::LOAD:
-    return lowerFixedLengthVectorLoadToRVV(Op, DAG);
+    if (auto V = expandUnalignedRVVLoad(Op, DAG))
+      return V;
+    if (Op.getValueType().isFixedLengthVector())
+      return lowerFixedLengthVectorLoadToRVV(Op, DAG);
+    return Op;
   case ISD::STORE:
-    return lowerFixedLengthVectorStoreToRVV(Op, DAG);
+    if (auto V = expandUnalignedRVVStore(Op, DAG))
+      return V;
+    if (Op.getOperand(1).getValueType().isFixedLengthVector())
+      return lowerFixedLengthVectorStoreToRVV(Op, DAG);
+    return Op;
   case ISD::MLOAD:
     return lowerMLOAD(Op, DAG);
   case ISD::MSTORE:
@@ -2420,6 +2504,14 @@ SDValue RISCVTargetLowering::LowerOperation(SDValue Op,
     return lowerVPOp(Op, DAG, RISCVISD::SRL_VL);
   case ISD::VP_SHL:
     return lowerVPOp(Op, DAG, RISCVISD::SHL_VL);
+  case ISD::VP_FADD:
+    return lowerVPOp(Op, DAG, RISCVISD::FADD_VL);
+  case ISD::VP_FSUB:
+    return lowerVPOp(Op, DAG, RISCVISD::FSUB_VL);
+  case ISD::VP_FMUL:
+    return lowerVPOp(Op, DAG, RISCVISD::FMUL_VL);
+  case ISD::VP_FDIV:
+    return lowerVPOp(Op, DAG, RISCVISD::FDIV_VL);
   }
 }
 
@@ -2645,7 +2737,17 @@ SDValue RISCVTargetLowering::lowerSELECT(SDValue Op, SelectionDAG &DAG) const {
   SDValue TrueV = Op.getOperand(1);
   SDValue FalseV = Op.getOperand(2);
   SDLoc DL(Op);
+  MVT VT = Op.getSimpleValueType();
   MVT XLenVT = Subtarget.getXLenVT();
+
+  // Lower vector SELECTs to VSELECTs by splatting the condition.
+  if (VT.isVector()) {
+    MVT SplatCondVT = VT.changeVectorElementType(MVT::i1);
+    SDValue CondSplat = VT.isScalableVector()
+                            ? DAG.getSplatVector(SplatCondVT, DL, CondV)
+                            : DAG.getSplatBuildVector(SplatCondVT, DL, CondV);
+    return DAG.getNode(ISD::VSELECT, DL, VT, CondSplat, TrueV, FalseV);
+  }
 
   // If the result type is XLenVT and CondV is the output of a SETCC node
   // which also operated on XLenVT inputs, then merge the SETCC node into the
@@ -2653,11 +2755,11 @@ SDValue RISCVTargetLowering::lowerSELECT(SDValue Op, SelectionDAG &DAG) const {
   // compare+branch instructions. i.e.:
   // (select (setcc lhs, rhs, cc), truev, falsev)
   // -> (riscvisd::select_cc lhs, rhs, cc, truev, falsev)
-  if (Op.getSimpleValueType() == XLenVT && CondV.getOpcode() == ISD::SETCC &&
+  if (VT == XLenVT && CondV.getOpcode() == ISD::SETCC &&
       CondV.getOperand(0).getSimpleValueType() == XLenVT) {
     SDValue LHS = CondV.getOperand(0);
     SDValue RHS = CondV.getOperand(1);
-    auto CC = cast<CondCodeSDNode>(CondV.getOperand(2));
+    const auto *CC = cast<CondCodeSDNode>(CondV.getOperand(2));
     ISD::CondCode CCVal = CC->get();
 
     // Special case for a select of 2 constants that have a diffence of 1.
@@ -4031,13 +4133,10 @@ RISCVTargetLowering::lowerFixedLengthVectorLoadToRVV(SDValue Op,
   SDLoc DL(Op);
   auto *Load = cast<LoadSDNode>(Op);
 
-  if (!allowsMemoryAccessForAlignment(*DAG.getContext(), DAG.getDataLayout(),
-                                      Load->getMemoryVT(),
-                                      *Load->getMemOperand())) {
-    SDValue Result, Chain;
-    std::tie(Result, Chain) = expandUnalignedLoad(Load, DAG);
-    return DAG.getMergeValues({Result, Chain}, DL);
-  }
+  assert(allowsMemoryAccessForAlignment(*DAG.getContext(), DAG.getDataLayout(),
+                                        Load->getMemoryVT(),
+                                        *Load->getMemOperand()) &&
+         "Expecting a correctly-aligned load");
 
   MVT VT = Op.getSimpleValueType();
   MVT ContainerVT = getContainerForFixedLengthVector(VT);
@@ -4060,10 +4159,10 @@ RISCVTargetLowering::lowerFixedLengthVectorStoreToRVV(SDValue Op,
   SDLoc DL(Op);
   auto *Store = cast<StoreSDNode>(Op);
 
-  if (!allowsMemoryAccessForAlignment(*DAG.getContext(), DAG.getDataLayout(),
-                                      Store->getMemoryVT(),
-                                      *Store->getMemOperand()))
-    return expandUnalignedStore(Store, DAG);
+  assert(allowsMemoryAccessForAlignment(*DAG.getContext(), DAG.getDataLayout(),
+                                        Store->getMemoryVT(),
+                                        *Store->getMemOperand()) &&
+         "Expecting a correctly-aligned store");
 
   SDValue StoreVal = Store->getValue();
   MVT VT = StoreVal.getSimpleValueType();

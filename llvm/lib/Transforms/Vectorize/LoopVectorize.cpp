@@ -598,7 +598,7 @@ protected:
   void fixReduction(VPWidenPHIRecipe *Phi, VPTransformState &State);
 
   /// Clear NSW/NUW flags from reduction instructions if necessary.
-  void clearReductionWrapFlags(RecurrenceDescriptor &RdxDesc,
+  void clearReductionWrapFlags(const RecurrenceDescriptor &RdxDesc,
                                VPTransformState &State);
 
   /// Fixup the LCSSA phi nodes in the unique exit block.  This simply
@@ -1310,7 +1310,7 @@ public:
   /// RdxDesc. This is true if the -enable-strict-reductions flag is passed,
   /// the IsOrdered flag of RdxDesc is set and we do not allow reordering
   /// of FP operations.
-  bool useOrderedReductions(RecurrenceDescriptor &RdxDesc) {
+  bool useOrderedReductions(const RecurrenceDescriptor &RdxDesc) {
     return EnableStrictReductions && !Hints->allowReordering() &&
            RdxDesc.isOrdered();
   }
@@ -1515,7 +1515,7 @@ public:
   /// variables found for the given VF.
   bool canVectorizeReductions(ElementCount VF) {
     return (all_of(Legal->getReductionVars(), [&](auto &Reduction) -> bool {
-      RecurrenceDescriptor RdxDesc = Reduction.second;
+      const RecurrenceDescriptor &RdxDesc = Reduction.second;
       return TTI.isLegalToVectorizeReduction(RdxDesc, VF);
     }));
   }
@@ -4331,7 +4331,7 @@ void InnerLoopVectorizer::fixReduction(VPWidenPHIRecipe *PhiR,
   // Get it's reduction variable descriptor.
   assert(Legal->isReductionVariable(OrigPhi) &&
          "Unable to find the reduction variable");
-  RecurrenceDescriptor RdxDesc = *PhiR->getRecurrenceDescriptor();
+  const RecurrenceDescriptor &RdxDesc = *PhiR->getRecurrenceDescriptor();
 
   RecurKind RK = RdxDesc.getRecurrenceKind();
   TrackingVH<Value> ReductionStartValue = RdxDesc.getRecurrenceStartValue();
@@ -4512,7 +4512,7 @@ void InnerLoopVectorizer::fixReduction(VPWidenPHIRecipe *PhiR,
   OrigPhi->setIncomingValue(IncomingEdgeBlockIdx, LoopExitInst);
 }
 
-void InnerLoopVectorizer::clearReductionWrapFlags(RecurrenceDescriptor &RdxDesc,
+void InnerLoopVectorizer::clearReductionWrapFlags(const RecurrenceDescriptor &RdxDesc,
                                                   VPTransformState &State) {
   RecurKind RK = RdxDesc.getRecurrenceKind();
   if (RK != RecurKind::Add && RK != RecurKind::Mul)
@@ -5098,6 +5098,7 @@ void InnerLoopVectorizer::widenCallInstruction(CallInst &I, VPValue *Def,
          "Either the intrinsic cost or vector call cost must be valid");
 
   for (unsigned Part = 0; Part < UF; ++Part) {
+    SmallVector<Type *, 2> TysForDecl = {CI->getType()};
     SmallVector<Value *, 4> Args;
     for (auto &I : enumerate(ArgOperands.operands())) {
       // Some intrinsics have a scalar argument - don't replace it with a
@@ -5105,15 +5106,17 @@ void InnerLoopVectorizer::widenCallInstruction(CallInst &I, VPValue *Def,
       Value *Arg;
       if (!UseVectorIntrinsic || !hasVectorInstrinsicScalarOpd(ID, I.index()))
         Arg = State.get(I.value(), Part);
-      else
+      else {
         Arg = State.get(I.value(), VPIteration(0, 0));
+        if (hasVectorInstrinsicOverloadedScalarOpd(ID, I.index()))
+          TysForDecl.push_back(Arg->getType());
+      }
       Args.push_back(Arg);
     }
 
     Function *VectorF;
     if (UseVectorIntrinsic) {
       // Use vector version of the intrinsic.
-      Type *TysForDecl[] = {CI->getType()};
       if (VF.isVector())
         TysForDecl[0] = VectorType::get(CI->getType()->getScalarType(), VF);
       VectorF = Intrinsic::getDeclaration(M, ID, TysForDecl);
@@ -5961,7 +5964,9 @@ ElementCount LoopVectorizationCostModel::getMaximizedVFForTarget(
                     << (MaxVectorElementCount * WidestType) << " bits.\n");
 
   if (!MaxVectorElementCount) {
-    LLVM_DEBUG(dbgs() << "LV: The target has no vector registers.\n");
+    LLVM_DEBUG(dbgs() << "LV: The target has no "
+                      << (ComputeScalableMaxVF ? "scalable" : "fixed")
+                      << " vector registers.\n");
     return ElementCount::getFixed(1);
   }
 
@@ -6273,7 +6278,7 @@ LoopVectorizationCostModel::getSmallestAndWidestTypes() {
       if (auto *PN = dyn_cast<PHINode>(&I)) {
         if (!Legal->isReductionVariable(PN))
           continue;
-        RecurrenceDescriptor RdxDesc = Legal->getReductionVars()[PN];
+        const RecurrenceDescriptor &RdxDesc = Legal->getReductionVars()[PN];
         if (PreferInLoopReductions || useOrderedReductions(RdxDesc) ||
             TTI.preferInLoopReduction(RdxDesc.getOpcode(),
                                       RdxDesc.getRecurrenceType(),
@@ -7173,7 +7178,7 @@ InstructionCost LoopVectorizationCostModel::getReductionPatternCost(
   while (!isa<PHINode>(ReductionPhi))
     ReductionPhi = InLoopReductionImmediateChains[ReductionPhi];
 
-  RecurrenceDescriptor RdxDesc =
+  const RecurrenceDescriptor &RdxDesc =
       Legal->getReductionVars()[cast<PHINode>(ReductionPhi)];
   InstructionCost BaseCost = TTI.getArithmeticReductionCost(
       RdxDesc.getOpcode(), VectorTy, false, CostKind);
@@ -9727,12 +9732,14 @@ Value *VPTransformState::get(VPValue *Def, unsigned Part) {
   }
 
   auto *LastInst = cast<Instruction>(get(Def, {Part, LastLane}));
-
-  // Set the insert point after the last scalarized instruction. This
-  // ensures the insertelement sequence will directly follow the scalar
-  // definitions.
+  // Set the insert point after the last scalarized instruction or after the
+  // last PHI, if LastInst is a PHI. This ensures the insertelement sequence
+  // will directly follow the scalar definitions.
   auto OldIP = Builder.saveIP();
-  auto NewIP = std::next(BasicBlock::iterator(LastInst));
+  auto NewIP =
+      isa<PHINode>(LastInst)
+          ? BasicBlock::iterator(LastInst->getParent()->getFirstNonPHI())
+          : std::next(BasicBlock::iterator(LastInst));
   Builder.SetInsertPoint(&*NewIP);
 
   // However, if we are vectorizing, we need to construct the vector values.

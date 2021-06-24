@@ -367,7 +367,8 @@ def ConvertShapeToStandard : Pass<"convert-shape-to-std", "ModuleOp"> {
   let dependentDialects = [
     "memref::MemRefDialect",
     "StandardOpsDialect",
-    "scf::SCFDialect"
+    "scf::SCFDialect",
+    "tensor::TensorDialect"
   ];
 }
 
@@ -504,13 +505,27 @@ def TosaToSCF : Pass<"tosa-to-scf"> {
 
 def TosaToStandard : Pass<"tosa-to-standard"> {
   let summary = "Lower TOSA to the Standard dialect";
-  let dependentDialects = ["StandardOpsDialect"];
+  let dependentDialects = ["StandardOpsDialect", "tensor::TensorDialect"];
   let description = [{
     Pass that converts TOSA operations to the equivalent operations using the
     operations in the Standard dialect.
   }];
 
   let constructor = "tosa::createTosaToStandard()";
+}
+
+//===----------------------------------------------------------------------===//
+// VectorToGPU
+//===----------------------------------------------------------------------===//
+
+def ConvertVectorToGPU : FunctionPass<"convert-vector-to-gpu"> {
+  let summary = "Lower the operations from the vector dialect into the GPU "
+                "dialect";
+  let constructor = "mlir::createConvertVectorToGPUPass()";
+  let dependentDialects = [
+    "memref::MemRefDialect",
+    "gpu::GPUDialect"
+  ];
 }
 
 //===----------------------------------------------------------------------===//

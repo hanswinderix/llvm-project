@@ -12,6 +12,7 @@
 #include "Symbols.h"
 #include "SyntheticSections.h"
 #include "Target.h"
+#include "UnwindInfoSection.h"
 #include "Writer.h"
 #include "lld/Common/Memory.h"
 #include "llvm/Support/Endian.h"
@@ -24,10 +25,6 @@ using namespace lld;
 using namespace lld::macho;
 
 std::vector<InputSection *> macho::inputSections;
-
-uint64_t ConcatInputSection::getFileOffset(uint64_t off) const {
-  return parent->fileOff + outSecFileOff + off;
-}
 
 uint64_t InputSection::getFileSize() const {
   return isZeroFill(flags) ? 0 : getSize();
@@ -48,7 +45,68 @@ static uint64_t resolveSymbolVA(const Symbol *sym, uint8_t type) {
   return sym->getVA();
 }
 
-void InputSection::writeTo(uint8_t *buf) {
+// ICF needs to hash any section that might potentially be duplicated so
+// that it can match on content rather than identity.
+bool InputSection::isHashableForICF(bool isText) const {
+  if (auto const *concatIsec = dyn_cast<ConcatInputSection>(this))
+    if (concatIsec->shouldOmitFromOutput())
+      return false;
+  switch (sectionType(flags)) {
+  case S_REGULAR:
+    if (isText)
+      return !hasPersonality;
+    // One might hope that we could hash __TEXT,__const subsections to fold
+    // references to duplicated values, but alas, many tests fail.
+    return false;
+  case S_CSTRING_LITERALS:
+  case S_4BYTE_LITERALS:
+  case S_8BYTE_LITERALS:
+  case S_16BYTE_LITERALS:
+  case S_LITERAL_POINTERS:
+    // FIXME(gkm): once literal sections are deduplicated, their content and
+    // identity correlate, so we can assign unique IDs to them rather than hash
+    // them.
+    return true;
+  case S_ZEROFILL:
+  case S_GB_ZEROFILL:
+  case S_NON_LAZY_SYMBOL_POINTERS:
+  case S_LAZY_SYMBOL_POINTERS:
+  case S_SYMBOL_STUBS:
+  case S_MOD_INIT_FUNC_POINTERS:
+  case S_MOD_TERM_FUNC_POINTERS:
+  case S_COALESCED:
+  case S_INTERPOSING:
+  case S_DTRACE_DOF:
+  case S_LAZY_DYLIB_SYMBOL_POINTERS:
+  case S_THREAD_LOCAL_REGULAR:
+  case S_THREAD_LOCAL_ZEROFILL:
+  case S_THREAD_LOCAL_VARIABLES:
+  case S_THREAD_LOCAL_VARIABLE_POINTERS:
+  case S_THREAD_LOCAL_INIT_FUNCTION_POINTERS:
+    return false;
+  default:
+    llvm_unreachable("Section type");
+  }
+}
+
+void InputSection::hashForICF() {
+  assert(data.data()); // zeroFill section data has nullptr with non-zero size
+  assert(icfEqClass[0] == 0); // don't overwrite a unique ID!
+  // Turn-on the top bit to guarantee that valid hashes have no collisions
+  // with the small-integer unique IDs for ICF-ineligible sections
+  icfEqClass[0] = xxHash64(data) | (1ull << 63);
+}
+
+void ConcatInputSection::foldIdentical(ConcatInputSection *copy) {
+  align = std::max(align, copy->align);
+  copy->live = false;
+  copy->wasCoalesced = true;
+  numRefs += copy->numRefs;
+  copy->numRefs = 0;
+  copy->replacement = this;
+}
+
+void ConcatInputSection::writeTo(uint8_t *buf) {
   assert(!shouldOmitFromOutput());
 
   if (getFileSize() == 0)
@@ -68,7 +126,7 @@ void InputSection::writeTo(uint8_t *buf) {
         minuendVA = toSym->getVA() + minuend.addend;
       else {
         auto *referentIsec = minuend.referent.get<InputSection *>();
-        assert(!referentIsec->shouldOmitFromOutput());
+        assert(!::shouldOmitFromOutput(referentIsec));
         minuendVA = referentIsec->getVA(minuend.addend);
       }
       referentVA = minuendVA - fromSym->getVA();
@@ -87,10 +145,10 @@ void InputSection::writeTo(uint8_t *buf) {
           referentVA -= firstTLVDataSection->addr;
       }
     } else if (auto *referentIsec = r.referent.dyn_cast<InputSection *>()) {
-      assert(!referentIsec->shouldOmitFromOutput());
+      assert(!::shouldOmitFromOutput(referentIsec));
       referentVA = referentIsec->getVA(r.addend);
     }
-    target->relocateOne(loc, r, referentVA, getVA(r.offset));
+    target->relocateOne(loc, r, referentVA, getVA() + r.offset);
   }
 }
 
@@ -108,7 +166,7 @@ void CStringInputSection::splitIntoPieces() {
   }
 }
 
-const StringPiece &CStringInputSection::getStringPiece(uint64_t off) const {
+StringPiece &CStringInputSection::getStringPiece(uint64_t off) {
   if (off >= data.size())
     fatal(toString(this) + ": offset is outside the section");
 
@@ -117,8 +175,8 @@ const StringPiece &CStringInputSection::getStringPiece(uint64_t off) const {
   return it[-1];
 }
 
-uint64_t CStringInputSection::getFileOffset(uint64_t off) const {
-  return parent->fileOff + getOffset(off);
+const StringPiece &CStringInputSection::getStringPiece(uint64_t off) const {
+  return const_cast<CStringInputSection *>(this)->getStringPiece(off);
 }
 
 uint64_t CStringInputSection::getOffset(uint64_t off) const {
@@ -127,8 +185,46 @@ uint64_t CStringInputSection::getOffset(uint64_t off) const {
   return piece.outSecOff + addend;
 }
 
+WordLiteralInputSection::WordLiteralInputSection(StringRef segname,
+                                                 StringRef name,
+                                                 InputFile *file,
+                                                 ArrayRef<uint8_t> data,
+                                                 uint32_t align, uint32_t flags)
+    : InputSection(WordLiteralKind, segname, name, file, data, align, flags) {
+  switch (sectionType(flags)) {
+  case S_4BYTE_LITERALS:
+    power2LiteralSize = 2;
+    break;
+  case S_8BYTE_LITERALS:
+    power2LiteralSize = 3;
+    break;
+  case S_16BYTE_LITERALS:
+    power2LiteralSize = 4;
+    break;
+  default:
+    llvm_unreachable("invalid literal section type");
+  }
+
+  live.resize(data.size() >> power2LiteralSize, !config->deadStrip);
+}
+
+uint64_t WordLiteralInputSection::getOffset(uint64_t off) const {
+  auto *osec = cast<WordLiteralSection>(parent);
+  const uint8_t *buf = data.data();
+  switch (sectionType(flags)) {
+  case S_4BYTE_LITERALS:
+    return osec->getLiteral4Offset(buf + off);
+  case S_8BYTE_LITERALS:
+    return osec->getLiteral8Offset(buf + off);
+  case S_16BYTE_LITERALS:
+    return osec->getLiteral16Offset(buf + off);
+  default:
+    llvm_unreachable("invalid literal section type");
+  }
+}
+
 bool macho::isCodeSection(const InputSection *isec) {
-  uint32_t type = isec->flags & SECTION_TYPE;
+  uint32_t type = sectionType(isec->flags);
   if (type != S_REGULAR && type != S_COALESCED)
     return false;
 

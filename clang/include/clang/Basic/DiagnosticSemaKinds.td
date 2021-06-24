@@ -6771,7 +6771,7 @@ def warn_param_mismatched_alignment : Warning<
 def err_objc_object_assignment : Error<
   "cannot assign to class object (%0 invalid)">;
 def err_typecheck_invalid_operands : Error<
-  "invalid operands to binary expression (%0 and %1)">;
+  "invalid operands to binary expression (%0 and %1)">, Deferrable;
 def note_typecheck_invalid_operands_converted : Note<
   "%select{first|second}0 operand was implicitly converted to type %1">;
 def err_typecheck_logical_vector_expr_gnu_cpp_restrict : Error<
@@ -9143,6 +9143,9 @@ def note_defaulted_comparison_cannot_deduce_undeduced_auto : Note<
   "%select{|member|base class}0 %1 declared here">;
 def note_defaulted_comparison_cannot_deduce_callee : Note<
   "selected 'operator<=>' for %select{|member|base class}0 %1 declared here">;
+def note_defaulted_comparison_selected_invalid : Note<
+  "would compare %select{|member|base class}0 %1 "
+  "as %2, which does not support relational comparisons">;
 def err_incorrect_defaulted_comparison_constexpr : Error<
   "defaulted definition of %select{%sub{select_defaulted_comparison_kind}1|"
   "three-way comparison operator}0 "
@@ -9176,6 +9179,14 @@ def warn_array_index_precedes_bounds : Warning<
 def warn_array_index_exceeds_bounds : Warning<
   "array index %0 is past the end of the array (which contains %1 "
   "element%s2)">, InGroup<ArrayBounds>;
+def warn_ptr_arith_exceeds_max_addressable_bounds : Warning<
+  "the pointer incremented by %0 refers past the last possible element for an array in %1-bit "
+  "address space containing %2-bit (%3-byte) elements (max possible %4 element%s5)">,
+  InGroup<ArrayBounds>;
+def warn_array_index_exceeds_max_addressable_bounds : Warning<
+  "array index %0 refers past the last possible element for an array in %1-bit "
+  "address space containing %2-bit (%3-byte) elements (max possible %4 element%s5)">,
+  InGroup<ArrayBounds>;
 def note_array_declared_here : Note<
   "array %0 declared here">;
 

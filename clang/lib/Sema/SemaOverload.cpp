@@ -9867,6 +9867,23 @@ bool clang::isBetterOverloadCandidate(
            S.IdentifyCUDAPreference(Caller, Cand2.Function);
   }
 
+  // General member function overloading is handled above, so this only handles
+  // constructors with address spaces.
+  // This only handles address spaces since C++ has no other
+  // qualifier that can be used with constructors.
+  const auto *CD1 = dyn_cast_or_null<CXXConstructorDecl>(Cand1.Function);
+  const auto *CD2 = dyn_cast_or_null<CXXConstructorDecl>(Cand2.Function);
+  if (CD1 && CD2) {
+    LangAS AS1 = CD1->getMethodQualifiers().getAddressSpace();
+    LangAS AS2 = CD2->getMethodQualifiers().getAddressSpace();
+    if (AS1 != AS2) {
+      if (Qualifiers::isAddressSpaceSupersetOf(AS2, AS1))
+        return true;
+      if (Qualifiers::isAddressSpaceSupersetOf(AS2, AS1))
+        return false;
+    }
+  }
+
   return false;
 }
 
@@ -11624,7 +11641,8 @@ bool OverloadCandidateSet::shouldDeferDiags(Sema &S, ArrayRef<Expr *> Args,
         CompleteCandidates(S, OCD_AllCandidates, Args, OpLoc, [](auto &Cand) {
           return (Cand.Viable == false &&
                   Cand.FailureKind == ovl_fail_bad_target) ||
-                 (Cand.Function->template hasAttr<CUDAHostAttr>() &&
+                 (Cand.Function &&
+                  Cand.Function->template hasAttr<CUDAHostAttr>() &&
                   Cand.Function->template hasAttr<CUDADeviceAttr>());
         });
     DeferHint = !WrongSidedCands.empty();
@@ -13803,6 +13821,8 @@ ExprResult Sema::CreateOverloadedBinOp(SourceLocation OpLoc,
       StringRef OpcStr = BinaryOperator::getOpcodeStr(Opc);
       auto Cands = CandidateSet.CompleteCandidates(*this, OCD_AllCandidates,
                                                    Args, OpLoc);
+      DeferDiagsRAII DDR(*this,
+                         CandidateSet.shouldDeferDiags(*this, Args, OpLoc));
       if (Args[0]->getType()->isRecordType() &&
           Opc >= BO_Assign && Opc <= BO_OrAssign) {
         Diag(OpLoc,  diag::err_ovl_no_viable_oper)

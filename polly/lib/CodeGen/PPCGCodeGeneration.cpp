@@ -278,7 +278,7 @@ static MustKillsInfo computeMustKillsInfo(const Scop &S) {
     isl::union_set KillStmtDomain = isl::set::universe(KillStmtSpace);
 
     isl::schedule KillSchedule = isl::schedule::from_domain(KillStmtDomain);
-    if (Info.KillsSchedule)
+    if (!Info.KillsSchedule.is_null())
       Info.KillsSchedule = isl::manage(
           isl_schedule_set(Info.KillsSchedule.release(), KillSchedule.copy()));
     else
@@ -1415,8 +1415,8 @@ const std::set<std::string> CUDALibDeviceFunctions = {
 const std::map<std::string, std::string> IntrinsicToLibdeviceFunc = {
     {"llvm.exp.f64", "exp"},
     {"llvm.exp.f32", "expf"},
-    {"llvm.powi.f64", "powi"},
-    {"llvm.powi.f32", "powif"}};
+    {"llvm.powi.f64.i32", "powi"},
+    {"llvm.powi.f32.i32", "powif"}};
 
 /// Return the corresponding CUDA libdevice function name @p Name.
 /// Note that this function will try to convert instrinsics in the list

@@ -91,11 +91,22 @@ namespace core {
 hsa_status_t RegisterModuleFromMemory(
     std::map<std::string, atl_kernel_info_t> &KernelInfo,
     std::map<std::string, atl_symbol_info_t> &SymbolInfoTable, void *, size_t,
-    int DeviceId,
+    hsa_agent_t agent,
     hsa_status_t (*on_deserialized_data)(void *data, size_t size,
                                          void *cb_state),
     void *cb_state, std::vector<hsa_executable_t> &HSAExecutables);
 }
+
+namespace hsa {
+template <typename C> hsa_status_t iterate_agents(C cb) {
+  auto L = [](hsa_agent_t agent, void *data) -> hsa_status_t {
+    C *unwrapped = static_cast<C *>(data);
+    return (*unwrapped)(agent);
+  };
+  return hsa_iterate_agents(L, static_cast<void *>(&cb));
+}
+
+} // namespace hsa
 
 /// Keep entries table per device
 struct FuncOrGblEntryTy {
@@ -244,14 +255,10 @@ struct KernelTy {
 /// FIXME: we may need this to be per device and per library.
 std::list<KernelTy> KernelsList;
 
-static std::vector<hsa_agent_t> find_gpu_agents() {
-  std::vector<hsa_agent_t> res;
+template <typename Callback> static hsa_status_t FindAgents(Callback CB) {
 
-  hsa_status_t err = hsa_iterate_agents(
-      [](hsa_agent_t agent, void *data) -> hsa_status_t {
-        std::vector<hsa_agent_t> *res =
-            static_cast<std::vector<hsa_agent_t> *>(data);
-
+  hsa_status_t err =
+      hsa::iterate_agents([&](hsa_agent_t agent) -> hsa_status_t {
         hsa_device_type_t device_type;
         // get_info fails iff HSA runtime not yet initialized
         hsa_status_t err =
@@ -260,18 +267,16 @@ static std::vector<hsa_agent_t> find_gpu_agents() {
           printf("rtl.cpp: err %d\n", err);
         assert(err == HSA_STATUS_SUCCESS);
 
-        if (device_type == HSA_DEVICE_TYPE_GPU) {
-          res->push_back(agent);
-        }
+        CB(device_type, agent);
         return HSA_STATUS_SUCCESS;
-      },
-      &res);
+      });
 
   // iterate_agents fails iff HSA runtime not yet initialized
-  if (print_kernel_trace > 0 && err != HSA_STATUS_SUCCESS)
+  if (print_kernel_trace > 0 && err != HSA_STATUS_SUCCESS) {
     printf("rtl.cpp: err %d\n", err);
-  assert(err == HSA_STATUS_SUCCESS);
-  return res;
+  }
+
+  return err;
 }
 
 static void callbackQueue(hsa_status_t status, hsa_queue_t *source,
@@ -346,8 +351,7 @@ hsa_status_t addKernArgPool(hsa_amd_memory_pool_t MemoryPool, void *Data) {
 std::pair<hsa_status_t, hsa_amd_memory_pool_t>
 FindKernargPool(const std::vector<hsa_agent_t> &HSAAgents) {
   std::vector<hsa_amd_memory_pool_t> KernArgPools;
-  for (const auto &processor : g_atl_machine.processors<ATLCPUProcessor>()) {
-    hsa_agent_t Agent = processor.agent();
+  for (const auto &Agent : HSAAgents) {
     hsa_status_t err = HSA_STATUS_SUCCESS;
     err = hsa_amd_agent_iterate_memory_pools(
         Agent, addKernArgPool, static_cast<void *>(&KernArgPools));
@@ -384,6 +388,9 @@ public:
   std::vector<hsa_agent_t> HSAAgents;
   std::vector<hsa_queue_t *> HSAQueues; // one per gpu
 
+  // CPUs
+  std::vector<hsa_agent_t> CPUAgents;
+
   // Device properties
   std::vector<int> ComputeUnits;
   std::vector<int> GroupsPerDevice;
@@ -398,6 +405,7 @@ public:
   // OpenMP Environment properties
   int EnvNumTeams;
   int EnvTeamLimit;
+  int EnvTeamThreadLimit;
   int EnvMaxTeamsDefault;
 
   // OpenMP Requires Flags
@@ -538,7 +546,16 @@ public:
     // Init hostcall soon after initializing ATMI
     hostrpc_init();
 
-    HSAAgents = find_gpu_agents();
+    err = FindAgents([&](hsa_device_type_t DeviceType, hsa_agent_t Agent) {
+      if (DeviceType == HSA_DEVICE_TYPE_CPU) {
+        CPUAgents.push_back(Agent);
+      } else {
+        HSAAgents.push_back(Agent);
+      }
+    });
+    if (err != HSA_STATUS_SUCCESS)
+      return;
+
     NumberOfDevices = (int)HSAAgents.size();
 
     if (NumberOfDevices == 0) {
@@ -547,8 +564,7 @@ public:
     } else {
       DP("There are %d devices supporting HSA.\n", NumberOfDevices);
     }
-
-    std::tie(err, KernArgPool) = core::FindKernargPool(HSAAgents);
+    std::tie(err, KernArgPool) = core::FindKernargPool(CPUAgents);
     if (err != HSA_STATUS_SUCCESS) {
       DP("Error when reading memory pools\n");
       return;
@@ -629,6 +645,13 @@ public:
       DP("Parsed OMP_MAX_TEAMS_DEFAULT=%d\n", EnvMaxTeamsDefault);
     } else {
       EnvMaxTeamsDefault = -1;
+    }
+    envStr = getenv("OMP_TEAMS_THREAD_LIMIT");
+    if (envStr) {
+      EnvTeamThreadLimit = std::stoi(envStr);
+      DP("Parsed OMP_TEAMS_THREAD_LIMIT=%d\n", EnvTeamThreadLimit);
+    } else {
+      EnvTeamThreadLimit = -1;
     }
 
     // Default state.
@@ -935,6 +958,14 @@ int32_t __tgt_rtl_init_device(int device_id) {
        DeviceInfo.GroupsPerDevice[device_id]);
   }
 
+  // Adjust threads to the env variables
+  if (DeviceInfo.EnvTeamThreadLimit > 0 &&
+      (enforce_upper_bound(&DeviceInfo.NumThreads[device_id],
+                           DeviceInfo.EnvTeamThreadLimit))) {
+    DP("Capping max number of threads to OMP_TEAMS_THREAD_LIMIT=%d\n",
+       DeviceInfo.EnvTeamThreadLimit);
+  }
+
   // Set default number of threads
   DeviceInfo.NumThreads[device_id] = RTLDeviceInfoTy::Default_WG_Size;
   DP("Default number of threads set according to library's default %d\n",
@@ -1104,8 +1135,9 @@ hsa_status_t module_register_from_memory_to_place(
     return (*unwrapped)(data, size);
   };
   return core::RegisterModuleFromMemory(
-      KernelInfoTable, SymbolInfoTable, module_bytes, module_size, DeviceId, L,
-      static_cast<void *>(&cb), HSAExecutables);
+      KernelInfoTable, SymbolInfoTable, module_bytes, module_size,
+      DeviceInfo.HSAAgents[DeviceId], L, static_cast<void *>(&cb),
+      HSAExecutables);
 }
 } // namespace
 
@@ -2102,3 +2134,11 @@ int32_t __tgt_rtl_synchronize(int32_t device_id, __tgt_async_info *AsyncInfo) {
   }
   return OFFLOAD_SUCCESS;
 }
+
+namespace core {
+hsa_status_t allow_access_to_all_gpu_agents(void *ptr) {
+  return hsa_amd_agents_allow_access(DeviceInfo.HSAAgents.size(),
+                                     &DeviceInfo.HSAAgents[0], NULL, ptr);
+}
+
+} // namespace core

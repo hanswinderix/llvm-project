@@ -157,7 +157,7 @@ private:
   bool OkLogicalIntegerAssignment(TypeCategory lhs, TypeCategory rhs);
   int GetRank(std::size_t) const;
   bool IsBOZLiteral(std::size_t i) const {
-    return std::holds_alternative<BOZLiteralConstant>(GetExpr(i).u);
+    return evaluate::IsBOZLiteral(GetExpr(i));
   }
   void SayNoMatch(const std::string &, bool isAssignment = false);
   std::string TypeAsFortran(std::size_t);
@@ -175,14 +175,18 @@ private:
 // or procedure pointer reference in a ProcedureDesignator.
 MaybeExpr ExpressionAnalyzer::Designate(DataRef &&ref) {
   const Symbol &last{ref.GetLastSymbol()};
-  const Symbol &symbol{last.GetUltimate()};
+  const Symbol &symbol{BypassGeneric(last).GetUltimate()};
   if (semantics::IsProcedure(symbol)) {
     if (auto *component{std::get_if<Component>(&ref.u)}) {
       return Expr<SomeType>{ProcedureDesignator{std::move(*component)}};
     } else if (!std::holds_alternative<SymbolRef>(ref.u)) {
       DIE("unexpected alternative in DataRef");
     } else if (!symbol.attrs().test(semantics::Attr::INTRINSIC)) {
-      return Expr<SomeType>{ProcedureDesignator{symbol}};
+      if (symbol.has<semantics::GenericDetails>()) {
+        Say("'%s' is not a specific procedure"_err_en_US, symbol.name());
+      } else {
+        return Expr<SomeType>{ProcedureDesignator{symbol}};
+      }
     } else if (auto interface{context_.intrinsics().IsSpecificIntrinsicFunction(
                    symbol.name().ToString())}) {
       SpecificIntrinsic intrinsic{
@@ -3117,8 +3121,6 @@ void ArgumentAnalyzer::Analyze(
   std::optional<ActualArgument> actual;
   std::visit(common::visitors{
                  [&](const common::Indirection<parser::Expr> &x) {
-                   // TODO: Distinguish & handle procedure name and
-                   // proc-component-ref
                    actual = AnalyzeExpr(x.value());
                  },
                  [&](const parser::AltReturnSpec &label) {

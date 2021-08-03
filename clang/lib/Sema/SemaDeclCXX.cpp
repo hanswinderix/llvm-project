@@ -7869,15 +7869,6 @@ private:
         assert(Best->BuiltinParamTypes[2].isNull() &&
                "invalid builtin comparison");
 
-        // The builtin operator for relational comparisons on function
-        // pointers is the only known case which cannot be used.
-        if (OO != OO_EqualEqual && T->isFunctionPointerType()) {
-          if (Diagnose == ExplainDeleted)
-            S.Diag(Subobj.Loc, diag::note_defaulted_comparison_selected_invalid)
-                << Subobj.Kind << Subobj.Decl << T;
-          return Result::deleted();
-        }
-
         if (NeedsDeducing) {
           Optional<ComparisonCategoryType> Cat =
               getComparisonCategoryForBuiltinCmp(T);
@@ -13243,6 +13234,7 @@ CXXConstructorDecl *Sema::DeclareImplicitDefaultConstructor(
   CXXConstructorDecl *DefaultCon = CXXConstructorDecl::Create(
       Context, ClassDecl, ClassLoc, NameInfo, /*Type*/ QualType(),
       /*TInfo=*/nullptr, ExplicitSpecifier(),
+      getCurFPFeatures().isFPConstrained(),
       /*isInline=*/true, /*isImplicitlyDeclared=*/true,
       Constexpr ? ConstexprSpecKind::Constexpr
                 : ConstexprSpecKind::Unspecified);
@@ -13364,7 +13356,8 @@ Sema::findInheritingConstructor(SourceLocation Loc,
 
   CXXConstructorDecl *DerivedCtor = CXXConstructorDecl::Create(
       Context, Derived, UsingLoc, NameInfo, TInfo->getType(), TInfo,
-      BaseCtor->getExplicitSpecifier(), /*isInline=*/true,
+      BaseCtor->getExplicitSpecifier(), getCurFPFeatures().isFPConstrained(),
+      /*isInline=*/true,
       /*isImplicitlyDeclared=*/true,
       Constexpr ? BaseCtor->getConstexprKind() : ConstexprSpecKind::Unspecified,
       InheritedConstructor(Shadow, BaseCtor),
@@ -13519,12 +13512,13 @@ CXXDestructorDecl *Sema::DeclareImplicitDestructor(CXXRecordDecl *ClassDecl) {
   DeclarationName Name
     = Context.DeclarationNames.getCXXDestructorName(ClassType);
   DeclarationNameInfo NameInfo(Name, ClassLoc);
-  CXXDestructorDecl *Destructor =
-      CXXDestructorDecl::Create(Context, ClassDecl, ClassLoc, NameInfo,
-                                QualType(), nullptr, /*isInline=*/true,
-                                /*isImplicitlyDeclared=*/true,
-                                Constexpr ? ConstexprSpecKind::Constexpr
-                                          : ConstexprSpecKind::Unspecified);
+  CXXDestructorDecl *Destructor = CXXDestructorDecl::Create(
+      Context, ClassDecl, ClassLoc, NameInfo, QualType(), nullptr,
+      getCurFPFeatures().isFPConstrained(),
+      /*isInline=*/true,
+      /*isImplicitlyDeclared=*/true,
+      Constexpr ? ConstexprSpecKind::Constexpr
+                : ConstexprSpecKind::Unspecified);
   Destructor->setAccess(AS_public);
   Destructor->setDefaulted();
 
@@ -14160,6 +14154,7 @@ CXXMethodDecl *Sema::DeclareImplicitCopyAssignment(CXXRecordDecl *ClassDecl) {
   CXXMethodDecl *CopyAssignment = CXXMethodDecl::Create(
       Context, ClassDecl, ClassLoc, NameInfo, QualType(),
       /*TInfo=*/nullptr, /*StorageClass=*/SC_None,
+      getCurFPFeatures().isFPConstrained(),
       /*isInline=*/true,
       Constexpr ? ConstexprSpecKind::Constexpr : ConstexprSpecKind::Unspecified,
       SourceLocation());
@@ -14494,6 +14489,7 @@ CXXMethodDecl *Sema::DeclareImplicitMoveAssignment(CXXRecordDecl *ClassDecl) {
   CXXMethodDecl *MoveAssignment = CXXMethodDecl::Create(
       Context, ClassDecl, ClassLoc, NameInfo, QualType(),
       /*TInfo=*/nullptr, /*StorageClass=*/SC_None,
+      getCurFPFeatures().isFPConstrained(),
       /*isInline=*/true,
       Constexpr ? ConstexprSpecKind::Constexpr : ConstexprSpecKind::Unspecified,
       SourceLocation());
@@ -14873,7 +14869,7 @@ CXXConstructorDecl *Sema::DeclareImplicitCopyConstructor(
   //   member of its class.
   CXXConstructorDecl *CopyConstructor = CXXConstructorDecl::Create(
       Context, ClassDecl, ClassLoc, NameInfo, QualType(), /*TInfo=*/nullptr,
-      ExplicitSpecifier(),
+      ExplicitSpecifier(), getCurFPFeatures().isFPConstrained(),
       /*isInline=*/true,
       /*isImplicitlyDeclared=*/true,
       Constexpr ? ConstexprSpecKind::Constexpr
@@ -15013,7 +15009,7 @@ CXXConstructorDecl *Sema::DeclareImplicitMoveConstructor(
   //   member of its class.
   CXXConstructorDecl *MoveConstructor = CXXConstructorDecl::Create(
       Context, ClassDecl, ClassLoc, NameInfo, QualType(), /*TInfo=*/nullptr,
-      ExplicitSpecifier(),
+      ExplicitSpecifier(), getCurFPFeatures().isFPConstrained(),
       /*isInline=*/true,
       /*isImplicitlyDeclared=*/true,
       Constexpr ? ConstexprSpecKind::Constexpr

@@ -359,6 +359,16 @@ const Symbol *FindExternallyVisibleObject(
   return nullptr;
 }
 
+const Symbol &BypassGeneric(const Symbol &symbol) {
+  const Symbol &ultimate{symbol.GetUltimate()};
+  if (const auto *generic{ultimate.detailsIf<GenericDetails>()}) {
+    if (const Symbol * specific{generic->specific()}) {
+      return *specific;
+    }
+  }
+  return symbol;
+}
+
 bool ExprHasTypeCategory(
     const SomeExpr &expr, const common::TypeCategory &type) {
   auto dynamicType{expr.GetType()};
@@ -587,6 +597,23 @@ bool IsInitialized(const Symbol &symbol, bool ignoreDATAstatements,
       // recursive usage of a derived type
       return derived && &derived->typeSymbol() != derivedTypeSymbol &&
           derived->HasDefaultInitialization();
+    }
+  }
+  return false;
+}
+
+bool IsDestructible(const Symbol &symbol, const Symbol *derivedTypeSymbol) {
+  if (IsAllocatable(symbol) || IsAutomatic(symbol)) {
+    return true;
+  } else if (IsNamedConstant(symbol) || IsFunctionResult(symbol) ||
+      IsPointer(symbol)) {
+    return false;
+  } else if (const auto *object{symbol.detailsIf<ObjectEntityDetails>()}) {
+    if (!object->isDummy() && object->type()) {
+      if (const auto *derived{object->type()->AsDerived()}) {
+        return &derived->typeSymbol() != derivedTypeSymbol &&
+            derived->HasDestruction();
+      }
     }
   }
   return false;

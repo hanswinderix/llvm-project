@@ -88,6 +88,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeWebAssemblyTarget() {
   initializeWebAssemblyRegNumberingPass(PR);
   initializeWebAssemblyDebugFixupPass(PR);
   initializeWebAssemblyPeepholePass(PR);
+  initializeWebAssemblyMCLowerPrePassPass(PR);
 }
 
 //===----------------------------------------------------------------------===//
@@ -119,12 +120,17 @@ WebAssemblyTargetMachine::WebAssemblyTargetMachine(
     const Target &T, const Triple &TT, StringRef CPU, StringRef FS,
     const TargetOptions &Options, Optional<Reloc::Model> RM,
     Optional<CodeModel::Model> CM, CodeGenOpt::Level OL, bool JIT)
-    : LLVMTargetMachine(T,
-                        TT.isArch64Bit()
-                            ? "e-m:e-p:64:64-i64:64-n32:64-S128-ni:1"
-                            : "e-m:e-p:32:32-i64:64-n32:64-S128-ni:1",
-                        TT, CPU, FS, Options, getEffectiveRelocModel(RM, TT),
-                        getEffectiveCodeModel(CM, CodeModel::Large), OL),
+    : LLVMTargetMachine(
+          T,
+          TT.isArch64Bit()
+              ? (TT.isOSEmscripten()
+                     ? "e-m:e-p:64:64-i64:64-f128:64-n32:64-S128-ni:1:10:20"
+                     : "e-m:e-p:64:64-i64:64-n32:64-S128-ni:1:10:20")
+              : (TT.isOSEmscripten()
+                     ? "e-m:e-p:32:32-i64:64-f128:64-n32:64-S128-ni:1:10:20"
+                     : "e-m:e-p:32:32-i64:64-n32:64-S128-ni:1:10:20"),
+          TT, CPU, FS, Options, getEffectiveRelocModel(RM, TT),
+          getEffectiveCodeModel(CM, CodeModel::Large), OL),
       TLOF(new WebAssemblyTargetObjectFile()) {
   // WebAssembly type-checks instructions, but a noreturn function with a return
   // type that doesn't match the context will cause a check failure. So we lower
@@ -326,6 +332,7 @@ public:
   void addPostRegAlloc() override;
   bool addGCPasses() override { return false; }
   void addPreEmitPass() override;
+  bool addPreISel() override;
 
   // No reg alloc
   bool addRegAssignAndRewriteFast() override { return false; }
@@ -507,6 +514,15 @@ void WebAssemblyPassConfig::addPreEmitPass() {
   // Fix debug_values whose defs have been stackified.
   if (!WasmDisableExplicitLocals)
     addPass(createWebAssemblyDebugFixup());
+
+  // Collect information to prepare for MC lowering / asm printing.
+  addPass(createWebAssemblyMCLowerPrePass());
+}
+
+bool WebAssemblyPassConfig::addPreISel() {
+  TargetPassConfig::addPreISel();
+  addPass(createWebAssemblyLowerRefTypesIntPtrConv());
+  return false;
 }
 
 yaml::MachineFunctionInfo *

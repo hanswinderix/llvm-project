@@ -162,6 +162,7 @@
 ; CHECK-NEXT:       Stack Slot Coloring
 ; CHECK-NEXT:       Machine Copy Propagation Pass
 ; CHECK-NEXT:       Machine Loop Invariant Code Motion
+; CHECK-NEXT:       Remove Redundant DEBUG_VALUE analysis
 ; CHECK-NEXT:       Fixup Statepoint Caller Saved
 ; CHECK-NEXT:       PostRA Machine Sink
 ; CHECK-NEXT:       Machine Block Frequency Analysis
@@ -193,10 +194,11 @@
 ; CHECK-NEXT:       PowerPC Pre-Emit Peephole
 ; CHECK-NEXT:       PowerPC Expand ISEL Generation
 ; CHECK-NEXT:       PowerPC Early-Return Creation
-; CHECK-NEXT:       PowerPC Branch Selector
 ; CHECK-NEXT:       Contiguously Lay Out Funclets
 ; CHECK-NEXT:       StackMap Liveness Analysis
 ; CHECK-NEXT:       Live DEBUG_VALUE analysis
+; CHECK-NEXT:       PowerPC Expand Atomic
+; CHECK-NEXT:       PowerPC Branch Selector
 ; CHECK-NEXT:       Lazy Machine Block Frequency Analysis
 ; CHECK-NEXT:       Machine Optimization Remark Emitter
 ; CHECK-NEXT:       Linux PPC Assembly Printer

@@ -233,6 +233,19 @@ public:
   /// Possible exception handling behavior.
   enum class ExceptionHandlingKind { None, SjLj, WinEH, DwarfCFI, Wasm };
 
+  /// Possible float expression evaluation method choices.
+  enum FPEvalMethodKind {
+    /// Use the declared type for fp arithmetic.
+    FEM_Source,
+    /// Use the type double for fp arithmetic.
+    FEM_Double,
+    /// Use extended type for fp arithmetic.
+    FEM_Extended,
+    /// Use the default float eval method specified by Target:
+    //  most targets are defined with evaluation method FEM_Source.
+    FEM_TargetDefault
+  };
+
   enum class LaxVectorConversionKind {
     /// Permit no implicit vector bitcasts.
     None,
@@ -242,6 +255,18 @@ public:
     /// Permit vector bitcasts between all vectors with the same total
     /// bit-width.
     All,
+  };
+
+  enum class AltivecSrcCompatKind {
+    // All vector compares produce scalars except vector pixel and vector bool.
+    // The types vector pixel and vector bool return vector results.
+    Mixed,
+    // All vector compares produce vector results as in GCC.
+    GCC,
+    // All vector compares produce scalars as in XL.
+    XL,
+    // Default clang behaviour.
+    Default = Mixed,
   };
 
   enum class SignReturnAddressScopeKind {
@@ -512,6 +537,7 @@ public:
       setAllowFEnvAccess(true);
     else
       setAllowFEnvAccess(LangOptions::FPM_Off);
+    setFPEvalMethod(LO.getFPEvalMethod());
   }
 
   bool allowFPContractWithinStatement() const {
@@ -685,7 +711,11 @@ enum TranslationUnitKind {
   TU_Prefix,
 
   /// The translation unit is a module.
-  TU_Module
+  TU_Module,
+
+  /// The translation unit is a is a complete translation unit that we might
+  /// incrementally extend later.
+  TU_Incremental
 };
 
 } // namespace clang

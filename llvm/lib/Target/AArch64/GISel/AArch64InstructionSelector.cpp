@@ -588,6 +588,58 @@ static unsigned getMinSizeForRegBank(const RegisterBank &RB) {
   }
 }
 
+/// Create a REG_SEQUENCE instruction using the registers in \p Regs.
+/// Helper function for functions like createDTuple and createQTuple.
+///
+/// \p RegClassIDs - The list of register class IDs available for some tuple of
+/// a scalar class. E.g. QQRegClassID, QQQRegClassID, QQQQRegClassID. This is
+/// expected to contain between 2 and 4 tuple classes.
+///
+/// \p SubRegs - The list of subregister classes associated with each register
+/// class ID in \p RegClassIDs. E.g., QQRegClassID should use the qsub0
+/// subregister class. The index of each subregister class is expected to
+/// correspond with the index of each register class.
+///
+/// \returns Either the destination register of REG_SEQUENCE instruction that
+/// was created, or the 0th element of \p Regs if \p Regs contains a single
+/// element.
+static Register createTuple(ArrayRef<Register> Regs,
+                            const unsigned RegClassIDs[],
+                            const unsigned SubRegs[], MachineIRBuilder &MIB) {
+  unsigned NumRegs = Regs.size();
+  if (NumRegs == 1)
+    return Regs[0];
+  assert(NumRegs >= 2 && NumRegs <= 4 &&
+         "Only support between two and 4 registers in a tuple!");
+  const TargetRegisterInfo *TRI = MIB.getMF().getSubtarget().getRegisterInfo();
+  auto *DesiredClass = TRI->getRegClass(RegClassIDs[NumRegs - 2]);
+  auto RegSequence =
+      MIB.buildInstr(TargetOpcode::REG_SEQUENCE, {DesiredClass}, {});
+  for (unsigned I = 0, E = Regs.size(); I < E; ++I) {
+    RegSequence.addUse(Regs[I]);
+    RegSequence.addImm(SubRegs[I]);
+  }
+  return RegSequence.getReg(0);
+}
+
+/// Create a tuple of D-registers using the registers in \p Regs.
+static Register createDTuple(ArrayRef<Register> Regs, MachineIRBuilder &MIB) {
+  static const unsigned RegClassIDs[] = {
+      AArch64::DDRegClassID, AArch64::DDDRegClassID, AArch64::DDDDRegClassID};
+  static const unsigned SubRegs[] = {AArch64::dsub0, AArch64::dsub1,
+                                     AArch64::dsub2, AArch64::dsub3};
+  return createTuple(Regs, RegClassIDs, SubRegs, MIB);
+}
+
+/// Create a tuple of Q-registers using the registers in \p Regs.
+static Register createQTuple(ArrayRef<Register> Regs, MachineIRBuilder &MIB) {
+  static const unsigned RegClassIDs[] = {
+      AArch64::QQRegClassID, AArch64::QQQRegClassID, AArch64::QQQQRegClassID};
+  static const unsigned SubRegs[] = {AArch64::qsub0, AArch64::qsub1,
+                                     AArch64::qsub2, AArch64::qsub3};
+  return createTuple(Regs, RegClassIDs, SubRegs, MIB);
+}
+
 static Optional<uint64_t> getImmedFromMO(const MachineOperand &Root) {
   auto &MI = *Root.getParent();
   auto &MBB = *MI.getParent();
@@ -1685,19 +1737,19 @@ bool AArch64InstructionSelector::selectVectorSHL(MachineInstr &I,
   Optional<int64_t> ImmVal = getVectorSHLImm(Ty, Src2Reg, MRI);
 
   unsigned Opc = 0;
-  if (Ty == LLT::vector(2, 64)) {
+  if (Ty == LLT::fixed_vector(2, 64)) {
     Opc = ImmVal ? AArch64::SHLv2i64_shift : AArch64::USHLv2i64;
-  } else if (Ty == LLT::vector(4, 32)) {
+  } else if (Ty == LLT::fixed_vector(4, 32)) {
     Opc = ImmVal ? AArch64::SHLv4i32_shift : AArch64::USHLv4i32;
-  } else if (Ty == LLT::vector(2, 32)) {
+  } else if (Ty == LLT::fixed_vector(2, 32)) {
     Opc = ImmVal ? AArch64::SHLv2i32_shift : AArch64::USHLv2i32;
-  } else if (Ty == LLT::vector(4, 16)) {
+  } else if (Ty == LLT::fixed_vector(4, 16)) {
     Opc = ImmVal ? AArch64::SHLv4i16_shift : AArch64::USHLv4i16;
-  } else if (Ty == LLT::vector(8, 16)) {
+  } else if (Ty == LLT::fixed_vector(8, 16)) {
     Opc = ImmVal ? AArch64::SHLv8i16_shift : AArch64::USHLv8i16;
-  } else if (Ty == LLT::vector(16, 8)) {
+  } else if (Ty == LLT::fixed_vector(16, 8)) {
     Opc = ImmVal ? AArch64::SHLv16i8_shift : AArch64::USHLv16i8;
-  } else if (Ty == LLT::vector(8, 8)) {
+  } else if (Ty == LLT::fixed_vector(8, 8)) {
     Opc = ImmVal ? AArch64::SHLv8i8_shift : AArch64::USHLv8i8;
   } else {
     LLVM_DEBUG(dbgs() << "Unhandled G_SHL type");
@@ -1739,25 +1791,25 @@ bool AArch64InstructionSelector::selectVectorAshrLshr(
   unsigned NegOpc = 0;
   const TargetRegisterClass *RC =
       getRegClassForTypeOnBank(Ty, RBI.getRegBank(AArch64::FPRRegBankID), RBI);
-  if (Ty == LLT::vector(2, 64)) {
+  if (Ty == LLT::fixed_vector(2, 64)) {
     Opc = IsASHR ? AArch64::SSHLv2i64 : AArch64::USHLv2i64;
     NegOpc = AArch64::NEGv2i64;
-  } else if (Ty == LLT::vector(4, 32)) {
+  } else if (Ty == LLT::fixed_vector(4, 32)) {
     Opc = IsASHR ? AArch64::SSHLv4i32 : AArch64::USHLv4i32;
     NegOpc = AArch64::NEGv4i32;
-  } else if (Ty == LLT::vector(2, 32)) {
+  } else if (Ty == LLT::fixed_vector(2, 32)) {
     Opc = IsASHR ? AArch64::SSHLv2i32 : AArch64::USHLv2i32;
     NegOpc = AArch64::NEGv2i32;
-  } else if (Ty == LLT::vector(4, 16)) {
+  } else if (Ty == LLT::fixed_vector(4, 16)) {
     Opc = IsASHR ? AArch64::SSHLv4i16 : AArch64::USHLv4i16;
     NegOpc = AArch64::NEGv4i16;
-  } else if (Ty == LLT::vector(8, 16)) {
+  } else if (Ty == LLT::fixed_vector(8, 16)) {
     Opc = IsASHR ? AArch64::SSHLv8i16 : AArch64::USHLv8i16;
     NegOpc = AArch64::NEGv8i16;
-  } else if (Ty == LLT::vector(16, 8)) {
+  } else if (Ty == LLT::fixed_vector(16, 8)) {
     Opc = IsASHR ? AArch64::SSHLv16i8 : AArch64::USHLv16i8;
     NegOpc = AArch64::NEGv16i8;
-  } else if (Ty == LLT::vector(8, 8)) {
+  } else if (Ty == LLT::fixed_vector(8, 8)) {
     Opc = IsASHR ? AArch64::SSHLv8i8 : AArch64::USHLv8i8;
     NegOpc = AArch64::NEGv8i8;
   } else {
@@ -1961,7 +2013,8 @@ bool AArch64InstructionSelector::convertPtrAddToAdd(
   if (PtrTy.getAddressSpace() != 0)
     return false;
 
-  const LLT CastPtrTy = PtrTy.isVector() ? LLT::vector(2, 64) : LLT::scalar(64);
+  const LLT CastPtrTy =
+      PtrTy.isVector() ? LLT::fixed_vector(2, 64) : LLT::scalar(64);
   auto PtrToInt = MIB.buildPtrToInt(CastPtrTy, AddOp1Reg);
   // Set regbanks on the registers.
   if (PtrTy.isVector())
@@ -2092,17 +2145,8 @@ bool AArch64InstructionSelector::earlySelect(MachineInstr &I) {
     I.eraseFromParent();
     return true;
   }
-  case TargetOpcode::G_BR: {
-    // If the branch jumps to the fallthrough block, don't bother emitting it.
-    // Only do this for -O0 for a good code size improvement, because when
-    // optimizations are enabled we want to leave this choice to
-    // MachineBlockPlacement.
-    bool EnableOpt = MF.getTarget().getOptLevel() != CodeGenOpt::None;
-    if (EnableOpt || !MBB.isLayoutSuccessor(I.getOperand(0).getMBB()))
-      return false;
-    I.eraseFromParent();
-    return true;
-  }
+  case TargetOpcode::G_BR:
+    return false;
   case TargetOpcode::G_SHL:
     return earlySelectSHL(I, MRI);
   case TargetOpcode::G_CONSTANT: {
@@ -2918,7 +2962,8 @@ bool AArch64InstructionSelector::select(MachineInstr &I) {
       I.setDesc(TII.get(TargetOpcode::COPY));
       return true;
     } else if (DstRB.getID() == AArch64::FPRRegBankID) {
-      if (DstTy == LLT::vector(4, 16) && SrcTy == LLT::vector(4, 32)) {
+      if (DstTy == LLT::fixed_vector(4, 16) &&
+          SrcTy == LLT::fixed_vector(4, 32)) {
         I.setDesc(TII.get(AArch64::XTNv4i16));
         constrainSelectedInstRegOperands(I, TII, TRI, RBI);
         return true;
@@ -3239,13 +3284,13 @@ bool AArch64InstructionSelector::select(MachineInstr &I) {
         AArch64::GPRRegBankID)
       return false; // We expect the fpr regbank case to be imported.
     LLT VecTy = MRI.getType(I.getOperand(0).getReg());
-    if (VecTy == LLT::vector(8, 8))
+    if (VecTy == LLT::fixed_vector(8, 8))
       I.setDesc(TII.get(AArch64::DUPv8i8gpr));
-    else if (VecTy == LLT::vector(16, 8))
+    else if (VecTy == LLT::fixed_vector(16, 8))
       I.setDesc(TII.get(AArch64::DUPv16i8gpr));
-    else if (VecTy == LLT::vector(4, 16))
+    else if (VecTy == LLT::fixed_vector(4, 16))
       I.setDesc(TII.get(AArch64::DUPv4i16gpr));
-    else if (VecTy == LLT::vector(8, 16))
+    else if (VecTy == LLT::fixed_vector(8, 16))
       I.setDesc(TII.get(AArch64::DUPv8i16gpr));
     else
       return false;
@@ -3286,7 +3331,7 @@ bool AArch64InstructionSelector::selectReduction(MachineInstr &I,
   if (I.getOpcode() == TargetOpcode::G_VECREDUCE_ADD) {
     // For <2 x i32> ADDPv2i32 generates an FPR64 value, so we need to emit
     // a subregister copy afterwards.
-    if (VecTy == LLT::vector(2, 32)) {
+    if (VecTy == LLT::fixed_vector(2, 32)) {
       Register DstReg = I.getOperand(0).getReg();
       auto AddP = MIB.buildInstr(AArch64::ADDPv2i32, {&AArch64::FPR64RegClass},
                                  {VecReg, VecReg});
@@ -3299,13 +3344,13 @@ bool AArch64InstructionSelector::selectReduction(MachineInstr &I,
     }
 
     unsigned Opc = 0;
-    if (VecTy == LLT::vector(16, 8))
+    if (VecTy == LLT::fixed_vector(16, 8))
       Opc = AArch64::ADDVv16i8v;
-    else if (VecTy == LLT::vector(8, 16))
+    else if (VecTy == LLT::fixed_vector(8, 16))
       Opc = AArch64::ADDVv8i16v;
-    else if (VecTy == LLT::vector(4, 32))
+    else if (VecTy == LLT::fixed_vector(4, 32))
       Opc = AArch64::ADDVv4i32v;
-    else if (VecTy == LLT::vector(2, 64))
+    else if (VecTy == LLT::fixed_vector(2, 64))
       Opc = AArch64::ADDPv2i64p;
     else {
       LLVM_DEBUG(dbgs() << "Unhandled type for add reduction");
@@ -3317,9 +3362,9 @@ bool AArch64InstructionSelector::selectReduction(MachineInstr &I,
 
   if (I.getOpcode() == TargetOpcode::G_VECREDUCE_FADD) {
     unsigned Opc = 0;
-    if (VecTy == LLT::vector(2, 32))
+    if (VecTy == LLT::fixed_vector(2, 32))
       Opc = AArch64::FADDPv2i32p;
-    else if (VecTy == LLT::vector(2, 64))
+    else if (VecTy == LLT::fixed_vector(2, 64))
       Opc = AArch64::FADDPv2i64p;
     else {
       LLVM_DEBUG(dbgs() << "Unhandled type for fadd reduction");
@@ -3986,6 +4031,13 @@ bool AArch64InstructionSelector::selectUnmergeValues(MachineInstr &I,
   } else {
     // No. We have to perform subregister inserts. For each insert, create an
     // implicit def and a subregister insert, and save the register we create.
+    const TargetRegisterClass *RC =
+        getMinClassForRegBank(*RBI.getRegBank(SrcReg, MRI, TRI),
+                              WideTy.getScalarSizeInBits() * NumElts);
+    unsigned SubReg = 0;
+    bool Found = getSubRegForClass(RC, TRI, SubReg);
+    (void)Found;
+    assert(Found && "expected to find last operand's subeg idx");
     for (unsigned Idx = 0; Idx < NumInsertRegs; ++Idx) {
       Register ImpDefReg = MRI.createVirtualRegister(&AArch64::FPR128RegClass);
       MachineInstr &ImpDefMI =
@@ -3999,7 +4051,7 @@ bool AArch64InstructionSelector::selectUnmergeValues(MachineInstr &I,
                    TII.get(TargetOpcode::INSERT_SUBREG), InsertReg)
                .addUse(ImpDefReg)
                .addUse(SrcReg)
-               .addImm(AArch64::dsub);
+               .addImm(SubReg);
 
       constrainSelectedInstRegOperands(ImpDefMI, TII, TRI, RBI);
       constrainSelectedInstRegOperands(InsMI, TII, TRI, RBI);
@@ -4691,15 +4743,10 @@ bool AArch64InstructionSelector::selectShuffleVector(
 
   // For TBL2 we need to emit a REG_SEQUENCE to tie together two consecutive
   // Q registers for regalloc.
-  auto RegSeq = MIB.buildInstr(TargetOpcode::REG_SEQUENCE,
-                               {&AArch64::QQRegClass}, {Src1Reg})
-                    .addImm(AArch64::qsub0)
-                    .addUse(Src2Reg)
-                    .addImm(AArch64::qsub1);
-
+  SmallVector<Register, 2> Regs = {Src1Reg, Src2Reg};
+  auto RegSeq = createQTuple(Regs, MIB);
   auto TBL2 = MIB.buildInstr(AArch64::TBLv16i8Two, {I.getOperand(0)},
                              {RegSeq, IndexLoad->getOperand(0)});
-  constrainSelectedInstRegOperands(*RegSeq, TII, TRI, RBI);
   constrainSelectedInstRegOperands(*TBL2, TII, TRI, RBI);
   I.eraseFromParent();
   return true;
@@ -4986,6 +5033,7 @@ bool AArch64InstructionSelector::selectIntrinsicWithSideEffects(
         {I.getOperand(0).getReg(), I.getOperand(1).getReg()},
         {I.getOperand(3)});
     NewI.cloneMemRefs(I);
+    constrainSelectedInstRegOperands(*NewI, TII, TRI, RBI);
     break;
   }
   case Intrinsic::trap:
@@ -4998,6 +5046,43 @@ bool AArch64InstructionSelector::selectIntrinsicWithSideEffects(
     MIB.buildInstr(AArch64::BRK, {}, {})
         .addImm(I.getOperand(1).getImm() | ('U' << 8));
     break;
+  case Intrinsic::aarch64_neon_st2: {
+    Register Src1 = I.getOperand(1).getReg();
+    Register Src2 = I.getOperand(2).getReg();
+    Register Ptr = I.getOperand(3).getReg();
+    LLT Ty = MRI.getType(Src1);
+    const LLT S8 = LLT::scalar(8);
+    const LLT S16 = LLT::scalar(16);
+    const LLT S32 = LLT::scalar(32);
+    const LLT S64 = LLT::scalar(64);
+    const LLT P0 = LLT::pointer(0, 64);
+    unsigned Opc;
+    if (Ty == LLT::fixed_vector(8, S8))
+      Opc = AArch64::ST2Twov8b;
+    else if (Ty == LLT::fixed_vector(16, S8))
+      Opc = AArch64::ST2Twov16b;
+    else if (Ty == LLT::fixed_vector(4, S16))
+      Opc = AArch64::ST2Twov4h;
+    else if (Ty == LLT::fixed_vector(8, S16))
+      Opc = AArch64::ST2Twov8h;
+    else if (Ty == LLT::fixed_vector(2, S32))
+      Opc = AArch64::ST2Twov2s;
+    else if (Ty == LLT::fixed_vector(4, S32))
+      Opc = AArch64::ST2Twov4s;
+    else if (Ty == LLT::fixed_vector(2, S64) || Ty == LLT::fixed_vector(2, P0))
+      Opc = AArch64::ST2Twov2d;
+    else if (Ty == S64 || Ty == P0)
+      Opc = AArch64::ST1Twov1d;
+    else
+      llvm_unreachable("Unexpected type for st2!");
+    SmallVector<Register, 2> Regs = {Src1, Src2};
+    Register Tuple = Ty.getSizeInBits() == 128 ? createQTuple(Regs, MIB)
+                                               : createDTuple(Regs, MIB);
+    auto Store = MIB.buildInstr(Opc, {}, {Tuple, Ptr});
+    Store.cloneMemRefs(I);
+    constrainSelectedInstRegOperands(*Store, TII, TRI, RBI);
+    break;
+  }
   }
 
   I.eraseFromParent();

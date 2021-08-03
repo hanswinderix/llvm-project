@@ -523,6 +523,64 @@ float matrices and add the result to a third 4x4 matrix.
     return a + b * c;
   }
 
+The matrix type extension also supports operations on a matrix and a scalar.
+
+.. code-block:: c++
+
+  typedef float m4x4_t __attribute__((matrix_type(4, 4)));
+
+  m4x4_t f(m4x4_t a) {
+    return (a + 23) * 12;
+  }
+
+The matrix type extension supports division on a matrix and a scalar but not on a matrix and a matrix.
+
+.. code-block:: c++
+
+  typedef float m4x4_t __attribute__((matrix_type(4, 4)));
+
+  m4x4_t f(m4x4_t a) {
+    a = a / 3.0;
+    return a;
+  }
+
+The matrix type extension supports compound assignments for addition, subtraction, and multiplication on matrices
+and on a matrix and a scalar, provided their types are consistent.
+
+.. code-block:: c++
+
+  typedef float m4x4_t __attribute__((matrix_type(4, 4)));
+
+  m4x4_t f(m4x4_t a, m4x4_t b) {
+    a += b;
+    a -= b;
+    a *= b;
+    a += 23;
+    a -= 12;
+    return a;
+  }
+
+The matrix type extension supports explicit casts. Implicit type conversion between matrix types is not allowed.
+
+.. code-block:: c++
+
+  typedef int ix5x5 __attribute__((matrix_type(5, 5)));
+  typedef float fx5x5 __attribute__((matrix_type(5, 5)));
+
+  fx5x5 f1(ix5x5 i, fx5x5 f) {
+    return (fx5x5) i;
+  }
+
+
+  template <typename X>
+  using matrix_4_4 = X __attribute__((matrix_type(4, 4)));
+
+  void f2() {
+    matrix_5_5<double> d;
+    matrix_5_5<int> i;
+    i = (matrix_5_5<int>)d;
+    i = static_cast<matrix_5_5<int>>(d);
+  }
 
 Half-Precision Floating Point
 =============================
@@ -3352,6 +3410,9 @@ to the same code size limit as with ``unroll(enable)``.
 
 Unrolling of a loop can be prevented by specifying ``unroll(disable)``.
 
+Loop unroll parameters can be controlled by options
+`-mllvm -unroll-count=n` and `-mllvm -pragma-unroll-threshold=n`.
+
 Loop Distribution
 -----------------
 
@@ -3483,15 +3544,17 @@ A ``#pragma clang fp`` pragma may contain any number of options:
 
 The ``#pragma float_control`` pragma allows precise floating-point
 semantics and floating-point exception behavior to be specified
-for a section of the source code. This pragma can only appear at file scope or
-at the start of a compound statement (excluding comments). When using within a
-compound statement, the pragma is active within the scope of the compound
-statement.  This pragma is modeled after a Microsoft pragma with the
-same spelling and syntax.  For pragmas specified at file scope, a stack
-is supported so that the ``pragma float_control`` settings can be pushed or popped.
+for a section of the source code. This pragma can only appear at file or
+namespace scope, within a language linkage specification or at the start of a
+compound statement (excluding comments). When used within a compound statement,
+the pragma is active within the scope of the compound statement.  This pragma
+is modeled after a Microsoft pragma with the same spelling and syntax.  For
+pragmas specified at file or namespace scope, or within a language linkage
+specification, a stack is supported so that the ``pragma float_control``
+settings can be pushed or popped.
 
 When ``pragma float_control(precise, on)`` is enabled, the section of code
-governed by the pragma uses precise floating point semantics, effectively
+governed by the pragma uses precise floating-point semantics, effectively
 ``-ffast-math`` is disabled and ``-ffp-contract=on``
 (fused multiply add) is enabled.
 
@@ -3502,8 +3565,29 @@ when ``pragma float_control(precise, off)`` is enabled, the section of code
 governed by the pragma behaves as though the command-line option
 ``-ffp-exception-behavior=ignore`` is enabled.
 
+When ``pragma float_control(source, on)`` is enabled, the section of code governed
+by the pragma behaves as though the command-line option
+``-ffp-eval-method=source`` is enabled. Note: The default
+floating-point evaluation method is target-specific, typically ``source``.
+
+When ``pragma float_control(double, on)`` is enabled, the section of code governed
+by the pragma behaves as though the command-line option
+``-ffp-eval-method=double`` is enabled.
+
+When ``pragma float_control(extended, on)`` is enabled, the section of code governed
+by the pragma behaves as though the command-line option
+``-ffp-eval-method=extended`` is enabled.
+
+When ``pragma float_control(source, off)`` or
+``pragma float_control(double, off)`` or
+``pragma float_control(extended, off)`` is enabled,
+the section of code governed
+by the pragma behaves as though the command-line option
+``-ffp-eval-method=source`` is enabled, returning floating-point evaluation
+method to the default setting.
+
 The full syntax this pragma supports is
-``float_control(except|precise, on|off [, push])`` and
+``float_control(except|precise|source|double|extended, on|off [, push])`` and
 ``float_control(push|pop)``.
 The ``push`` and ``pop`` forms, including using ``push`` as the optional
 third argument, can only occur at file scope.
@@ -3802,6 +3886,25 @@ Since the size of ``buffer`` can't be known at compile time, Clang will fold
 ``__builtin_object_size(buffer, 0)`` into ``-1``. However, if this was written
 as ``__builtin_dynamic_object_size(buffer, 0)``, Clang will fold it into
 ``size``, providing some extra runtime safety.
+
+Deprecating Macros
+==================
+
+Clang supports the pragma ``#pragma clang deprecated``, which can be used to
+provide deprecation warnings for macro uses. For example:
+
+.. code-block:: c
+
+   #define MIN(x, y) x < y ? x : y
+   #pragma clang deprecated(MIN, "use std::min instead")
+
+   void min(int a, int b) {
+     return MIN(a, b); // warning: MIN is deprecated: use std::min instead
+   }
+
+``#pragma clang deprecated`` should be preferred for this purpose over
+``#pragma GCC warning`` because the warning can be controlled with
+``-Wdeprecated``.
 
 Extended Integer Types
 ======================

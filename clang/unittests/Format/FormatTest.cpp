@@ -262,6 +262,128 @@ TEST_F(FormatTest, RemovesEmptyLines) {
                    "}",
                    getGoogleStyle()));
 
+  auto CustomStyle = clang::format::getLLVMStyle();
+  CustomStyle.BreakBeforeBraces = clang::format::FormatStyle::BS_Custom;
+  CustomStyle.BraceWrapping.AfterNamespace = true;
+  CustomStyle.KeepEmptyLinesAtTheStartOfBlocks = false;
+  EXPECT_EQ("namespace N\n"
+            "{\n"
+            "\n"
+            "int i;\n"
+            "}",
+            format("namespace N\n"
+                   "{\n"
+                   "\n"
+                   "\n"
+                   "int    i;\n"
+                   "}",
+                   CustomStyle));
+  EXPECT_EQ("/* something */ namespace N\n"
+            "{\n"
+            "\n"
+            "int i;\n"
+            "}",
+            format("/* something */ namespace N {\n"
+                   "\n"
+                   "\n"
+                   "int    i;\n"
+                   "}",
+                   CustomStyle));
+  EXPECT_EQ("inline namespace N\n"
+            "{\n"
+            "\n"
+            "int i;\n"
+            "}",
+            format("inline namespace N\n"
+                   "{\n"
+                   "\n"
+                   "\n"
+                   "int    i;\n"
+                   "}",
+                   CustomStyle));
+  EXPECT_EQ("/* something */ inline namespace N\n"
+            "{\n"
+            "\n"
+            "int i;\n"
+            "}",
+            format("/* something */ inline namespace N\n"
+                   "{\n"
+                   "\n"
+                   "int    i;\n"
+                   "}",
+                   CustomStyle));
+  EXPECT_EQ("export namespace N\n"
+            "{\n"
+            "\n"
+            "int i;\n"
+            "}",
+            format("export namespace N\n"
+                   "{\n"
+                   "\n"
+                   "int    i;\n"
+                   "}",
+                   CustomStyle));
+  EXPECT_EQ("namespace a\n"
+            "{\n"
+            "namespace b\n"
+            "{\n"
+            "\n"
+            "class AA {};\n"
+            "\n"
+            "} // namespace b\n"
+            "} // namespace a\n",
+            format("namespace a\n"
+                   "{\n"
+                   "namespace b\n"
+                   "{\n"
+                   "\n"
+                   "\n"
+                   "class AA {};\n"
+                   "\n"
+                   "\n"
+                   "}\n"
+                   "}\n",
+                   CustomStyle));
+  EXPECT_EQ("namespace A /* comment */\n"
+            "{\n"
+            "class B {}\n"
+            "} // namespace A",
+            format("namespace A /* comment */ { class B {} }", CustomStyle));
+  EXPECT_EQ("namespace A\n"
+            "{ /* comment */\n"
+            "class B {}\n"
+            "} // namespace A",
+            format("namespace A {/* comment */ class B {} }", CustomStyle));
+  EXPECT_EQ("namespace A\n"
+            "{ /* comment */\n"
+            "\n"
+            "class B {}\n"
+            "\n"
+            ""
+            "} // namespace A",
+            format("namespace A { /* comment */\n"
+                   "\n"
+                   "\n"
+                   "class B {}\n"
+                   "\n"
+                   "\n"
+                   "}",
+                   CustomStyle));
+  EXPECT_EQ("namespace A /* comment */\n"
+            "{\n"
+            "\n"
+            "class B {}\n"
+            "\n"
+            "} // namespace A",
+            format("namespace A/* comment */ {\n"
+                   "\n"
+                   "\n"
+                   "class B {}\n"
+                   "\n"
+                   "\n"
+                   "}",
+                   CustomStyle));
+
   // ...but do keep inlining and removing empty lines for non-block extern "C"
   // functions.
   verifyFormat("extern \"C\" int f() { return 42; }", getGoogleStyle());
@@ -1789,6 +1911,98 @@ TEST_F(FormatTest, ElseIf) {
                getLLVMStyleWithColumns(62));
 }
 
+TEST_F(FormatTest, SeparatePointerReferenceAlignment) {
+  FormatStyle Style = getLLVMStyle();
+  // Check first the default LLVM style
+  // Style.PointerAlignment = FormatStyle::PAS_Right;
+  // Style.ReferenceAlignment = FormatStyle::RAS_Pointer;
+  verifyFormat("int *f1(int *a, int &b, int &&c);", Style);
+  verifyFormat("int &f2(int &&c, int *a, int &b);", Style);
+  verifyFormat("int &&f3(int &b, int &&c, int *a);", Style);
+  verifyFormat("int *f1(int &a) const &;", Style);
+  verifyFormat("int *f1(int &a) const & = 0;", Style);
+  verifyFormat("int *a = f1();", Style);
+  verifyFormat("int &b = f2();", Style);
+  verifyFormat("int &&c = f3();", Style);
+
+  Style.AlignConsecutiveDeclarations = FormatStyle::ACS_Consecutive;
+  verifyFormat("Const unsigned int *c;\n"
+               "const unsigned int *d;\n"
+               "Const unsigned int &e;\n"
+               "const unsigned int &f;\n"
+               "const unsigned    &&g;\n"
+               "Const unsigned      h;",
+               Style);
+
+  Style.PointerAlignment = FormatStyle::PAS_Left;
+  Style.ReferenceAlignment = FormatStyle::RAS_Pointer;
+  verifyFormat("int* f1(int* a, int& b, int&& c);", Style);
+  verifyFormat("int& f2(int&& c, int* a, int& b);", Style);
+  verifyFormat("int&& f3(int& b, int&& c, int* a);", Style);
+  verifyFormat("int* f1(int& a) const& = 0;", Style);
+  verifyFormat("int* a = f1();", Style);
+  verifyFormat("int& b = f2();", Style);
+  verifyFormat("int&& c = f3();", Style);
+
+  Style.AlignConsecutiveDeclarations = FormatStyle::ACS_Consecutive;
+  verifyFormat("Const unsigned int* c;\n"
+               "const unsigned int* d;\n"
+               "Const unsigned int& e;\n"
+               "const unsigned int& f;\n"
+               "const unsigned&&    g;\n"
+               "Const unsigned      h;",
+               Style);
+
+  Style.PointerAlignment = FormatStyle::PAS_Right;
+  Style.ReferenceAlignment = FormatStyle::RAS_Left;
+  verifyFormat("int *f1(int *a, int& b, int&& c);", Style);
+  verifyFormat("int& f2(int&& c, int *a, int& b);", Style);
+  verifyFormat("int&& f3(int& b, int&& c, int *a);", Style);
+  verifyFormat("int *a = f1();", Style);
+  verifyFormat("int& b = f2();", Style);
+  verifyFormat("int&& c = f3();", Style);
+
+  Style.AlignConsecutiveDeclarations = FormatStyle::ACS_Consecutive;
+  verifyFormat("Const unsigned int *c;\n"
+               "const unsigned int *d;\n"
+               "Const unsigned int& e;\n"
+               "const unsigned int& f;\n"
+               "const unsigned      g;\n"
+               "Const unsigned      h;",
+               Style);
+
+  Style.PointerAlignment = FormatStyle::PAS_Left;
+  Style.ReferenceAlignment = FormatStyle::RAS_Middle;
+  verifyFormat("int* f1(int* a, int & b, int && c);", Style);
+  verifyFormat("int & f2(int && c, int* a, int & b);", Style);
+  verifyFormat("int && f3(int & b, int && c, int* a);", Style);
+  verifyFormat("int* a = f1();", Style);
+  verifyFormat("int & b = f2();", Style);
+  verifyFormat("int && c = f3();", Style);
+
+  Style.AlignConsecutiveDeclarations = FormatStyle::ACS_Consecutive;
+  verifyFormat("Const unsigned int*  c;\n"
+               "const unsigned int*  d;\n"
+               "Const unsigned int & e;\n"
+               "const unsigned int & f;\n"
+               "const unsigned &&    g;\n"
+               "Const unsigned       h;",
+               Style);
+
+  Style.PointerAlignment = FormatStyle::PAS_Middle;
+  Style.ReferenceAlignment = FormatStyle::RAS_Right;
+  verifyFormat("int * f1(int * a, int &b, int &&c);", Style);
+  verifyFormat("int &f2(int &&c, int * a, int &b);", Style);
+  verifyFormat("int &&f3(int &b, int &&c, int * a);", Style);
+  verifyFormat("int * a = f1();", Style);
+  verifyFormat("int &b = f2();", Style);
+  verifyFormat("int &&c = f3();", Style);
+
+  // FIXME: we don't handle this yet, so output may be arbitrary until it's
+  // specifically handled
+  // verifyFormat("int Add2(BTree * &Root, char * szToAdd)", Style);
+}
+
 TEST_F(FormatTest, FormatsForLoop) {
   verifyFormat(
       "for (int VeryVeryLongLoopVariable = 0; VeryVeryLongLoopVariable < 10;\n"
@@ -2237,6 +2451,14 @@ TEST_F(FormatTest, ShortEnums) {
   Style.AllowShortEnumsOnASingleLine = true;
   verifyFormat("enum { A, B, C } ShortEnum1, ShortEnum2;", Style);
   Style.AllowShortEnumsOnASingleLine = false;
+  verifyFormat("enum {\n"
+               "  A,\n"
+               "  B,\n"
+               "  C\n"
+               "} ShortEnum1, ShortEnum2;",
+               Style);
+  Style.BreakBeforeBraces = FormatStyle::BS_Custom;
+  Style.BraceWrapping.AfterEnum = true;
   verifyFormat("enum\n"
                "{\n"
                "  A,\n"
@@ -7995,6 +8217,25 @@ TEST_F(FormatTest, ReturnTypeBreakingStyle) {
                "}\n",
                Style);
 
+  Style.BreakBeforeBraces = FormatStyle::BS_Custom;
+  Style.BraceWrapping.AfterFunction = true;
+  verifyFormat("int f(i);\n" // No break here.
+               "int\n"       // Break here.
+               "f(i)\n"
+               "{\n"
+               "  return i + 1;\n"
+               "}",
+               Style);
+  verifyFormat("int f(a, b, c);\n" // No break here.
+               "int\n"             // Break here.
+               "f(a, b, c)\n"      // Break here.
+               "short a, b;\n"
+               "float c;\n"
+               "{\n"
+               "  return a + b < c;\n"
+               "}",
+               Style);
+
   Style = getGNUStyle();
 
   // Test for comments at the end of function declarations.
@@ -9199,7 +9440,7 @@ TEST_F(FormatTest, UnderstandsUsesOfStarAndAmp) {
   verifyFormat("vector<A(uint64_t) * attr> v;", TypeMacros); // multiplication
 
   FormatStyle CustomQualifier = getLLVMStyle();
-  // Add indentifers that should not be parsed as a qualifier by default.
+  // Add identifiers that should not be parsed as a qualifier by default.
   CustomQualifier.AttributeMacros.push_back("__my_qualifier");
   CustomQualifier.AttributeMacros.push_back("_My_qualifier");
   CustomQualifier.AttributeMacros.push_back("my_other_qualifier");
@@ -16178,6 +16419,83 @@ TEST_F(FormatTest, AlignWithLineBreaks) {
                "}",
                Style);
   // clang-format on
+
+  Style = getLLVMStyleWithColumns(120);
+  Style.AlignConsecutiveAssignments = FormatStyle::ACS_Consecutive;
+  Style.ContinuationIndentWidth = 4;
+  Style.IndentWidth = 4;
+
+  // clang-format off
+  verifyFormat("void SomeFunc() {\n"
+               "    newWatcher.maxAgeUsec = ToLegacyTimestamp(GetMaxAge(FromLegacyTimestamp<milliseconds>(monitorFrequencyUsec),\n"
+               "                                                        seconds(std::uint64_t(maxSampleAge)), maxKeepSamples));\n"
+               "    newWatcher.maxAge     = ToLegacyTimestamp(GetMaxAge(FromLegacyTimestamp<milliseconds>(monitorFrequencyUsec),\n"
+               "                                                        seconds(std::uint64_t(maxSampleAge)), maxKeepSamples));\n"
+               "    newWatcher.max        = ToLegacyTimestamp(GetMaxAge(FromLegacyTimestamp<milliseconds>(monitorFrequencyUsec),\n"
+               "                                                        seconds(std::uint64_t(maxSampleAge)), maxKeepSamples));\n"
+               "}",
+               Style);
+  // clang-format on
+
+  Style.BinPackArguments = false;
+
+  // clang-format off
+  verifyFormat("void SomeFunc() {\n"
+               "    newWatcher.maxAgeUsec = ToLegacyTimestamp(GetMaxAge(\n"
+               "        FromLegacyTimestamp<milliseconds>(monitorFrequencyUsec), seconds(std::uint64_t(maxSampleAge)), maxKeepSamples));\n"
+               "    newWatcher.maxAge     = ToLegacyTimestamp(GetMaxAge(\n"
+               "        FromLegacyTimestamp<milliseconds>(monitorFrequencyUsec), seconds(std::uint64_t(maxSampleAge)), maxKeepSamples));\n"
+               "    newWatcher.max        = ToLegacyTimestamp(GetMaxAge(\n"
+               "        FromLegacyTimestamp<milliseconds>(monitorFrequencyUsec), seconds(std::uint64_t(maxSampleAge)), maxKeepSamples));\n"
+               "}",
+               Style);
+  // clang-format on
+}
+
+TEST_F(FormatTest, AlignWithInitializerPeriods) {
+  auto Style = getLLVMStyleWithColumns(60);
+
+  verifyFormat("void foo1(void) {\n"
+               "  BYTE p[1] = 1;\n"
+               "  A B = {.one_foooooooooooooooo = 2,\n"
+               "         .two_fooooooooooooo = 3,\n"
+               "         .three_fooooooooooooo = 4};\n"
+               "  BYTE payload = 2;\n"
+               "}",
+               Style);
+
+  Style.AlignConsecutiveAssignments = FormatStyle::ACS_Consecutive;
+  Style.AlignConsecutiveDeclarations = FormatStyle::ACS_None;
+  verifyFormat("void foo2(void) {\n"
+               "  BYTE p[1]    = 1;\n"
+               "  A B          = {.one_foooooooooooooooo = 2,\n"
+               "                  .two_fooooooooooooo    = 3,\n"
+               "                  .three_fooooooooooooo  = 4};\n"
+               "  BYTE payload = 2;\n"
+               "}",
+               Style);
+
+  Style.AlignConsecutiveAssignments = FormatStyle::ACS_None;
+  Style.AlignConsecutiveDeclarations = FormatStyle::ACS_Consecutive;
+  verifyFormat("void foo3(void) {\n"
+               "  BYTE p[1] = 1;\n"
+               "  A    B = {.one_foooooooooooooooo = 2,\n"
+               "            .two_fooooooooooooo = 3,\n"
+               "            .three_fooooooooooooo = 4};\n"
+               "  BYTE payload = 2;\n"
+               "}",
+               Style);
+
+  Style.AlignConsecutiveAssignments = FormatStyle::ACS_Consecutive;
+  Style.AlignConsecutiveDeclarations = FormatStyle::ACS_Consecutive;
+  verifyFormat("void foo4(void) {\n"
+               "  BYTE p[1]    = 1;\n"
+               "  A    B       = {.one_foooooooooooooooo = 2,\n"
+               "                  .two_fooooooooooooo    = 3,\n"
+               "                  .three_fooooooooooooo  = 4};\n"
+               "  BYTE payload = 2;\n"
+               "}",
+               Style);
 }
 
 TEST_F(FormatTest, LinuxBraceBreaking) {
@@ -18013,6 +18331,15 @@ TEST_F(FormatTest, ParsesConfiguration) {
               FormatStyle::PAS_Right);
   CHECK_PARSE("PointerAlignment: Middle", PointerAlignment,
               FormatStyle::PAS_Middle);
+  Style.ReferenceAlignment = FormatStyle::RAS_Middle;
+  CHECK_PARSE("ReferenceAlignment: Pointer", ReferenceAlignment,
+              FormatStyle::RAS_Pointer);
+  CHECK_PARSE("ReferenceAlignment: Left", ReferenceAlignment,
+              FormatStyle::RAS_Left);
+  CHECK_PARSE("ReferenceAlignment: Right", ReferenceAlignment,
+              FormatStyle::RAS_Right);
+  CHECK_PARSE("ReferenceAlignment: Middle", ReferenceAlignment,
+              FormatStyle::RAS_Middle);
   // For backward compatibility:
   CHECK_PARSE("PointerBindsToType: Left", PointerAlignment,
               FormatStyle::PAS_Left);
@@ -19449,8 +19776,7 @@ TEST_F(FormatTest, FormatsLambdas) {
                "          });\n"
                "    });",
                LLVMWithBeforeLambdaBody);
-  verifyFormat("void Fct()\n"
-               "{\n"
+  verifyFormat("void Fct() {\n"
                "  return {[]()\n"
                "          {\n"
                "            return 17;\n"
@@ -19653,6 +19979,35 @@ TEST_F(FormatTest, FormatsLambdas) {
                "            return 17;\n"
                "          });\n"
                "    });",
+               LLVMWithBeforeLambdaBody);
+
+  LLVMWithBeforeLambdaBody.AllowShortLambdasOnASingleLine =
+      FormatStyle::ShortLambdaStyle::SLS_None;
+
+  verifyFormat("auto select = [this]() -> const Library::Object *\n"
+               "{\n"
+               "  return MyAssignment::SelectFromList(this);\n"
+               "};\n",
+               LLVMWithBeforeLambdaBody);
+
+  verifyFormat("auto select = [this]() -> const Library::Object &\n"
+               "{\n"
+               "  return MyAssignment::SelectFromList(this);\n"
+               "};\n",
+               LLVMWithBeforeLambdaBody);
+
+  verifyFormat("auto select = [this]() -> std::unique_ptr<Object>\n"
+               "{\n"
+               "  return MyAssignment::SelectFromList(this);\n"
+               "};\n",
+               LLVMWithBeforeLambdaBody);
+
+  verifyFormat("namespace test {\n"
+               "class Test {\n"
+               "public:\n"
+               "  Test() = default;\n"
+               "};\n"
+               "} // namespace test",
                LLVMWithBeforeLambdaBody);
 
   // Lambdas with different indentation styles.
@@ -21807,8 +22162,7 @@ TEST_F(FormatTest, IndentAccessModifiers) {
                Style);
   // Enumerations are not records and should be unaffected.
   Style.AllowShortEnumsOnASingleLine = false;
-  verifyFormat("enum class E\n"
-               "{\n"
+  verifyFormat("enum class E {\n"
                "  A,\n"
                "  B\n"
                "};\n",

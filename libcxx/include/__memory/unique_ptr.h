@@ -11,9 +11,12 @@
 #define _LIBCPP___MEMORY_UNIQUE_PTR_H
 
 #include <__config>
-#include <__functional_base> // std::less
+#include <__functional_base>
+#include <__functional/hash.h>
+#include <__functional/operations.h>
 #include <__memory/allocator_traits.h> // __pointer
 #include <__memory/compressed_pair.h>
+#include <__utility/forward.h>
 #include <cstddef>
 #include <type_traits>
 #include <utility>

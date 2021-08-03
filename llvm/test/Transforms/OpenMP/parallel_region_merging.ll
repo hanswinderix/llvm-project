@@ -782,11 +782,12 @@ entry:
 }
 
 
-!llvm.module.flags = !{!0}
+!llvm.module.flags = !{!0, !3}
 
 !0 = !{i32 1, !"wchar_size", i32 4}
 !1 = !{!2}
 !2 = !{i64 2, i64 -1, i64 -1, i1 true}
+!3 = !{i32 7, !"openmp", i32 50}
 ; CHECK-LABEL: define {{[^@]+}}@merge
 ; CHECK-SAME: (i32 [[A:%.*]]) local_unnamed_addr {
 ; CHECK-NEXT:  entry:
@@ -4687,6 +4688,7 @@ entry:
 ; CHECK-NEXT:    [[TMP0:%.*]] = load i32, i32* [[A]], align 4
 ; CHECK-NEXT:    call void @use(i32 [[TMP0]])
 ; CHECK-NEXT:    ret void
+
 ; CHECK1-LABEL: define {{[^@]+}}@merge
 ; CHECK1-SAME: (i32 [[A:%.*]]) local_unnamed_addr {
 ; CHECK1-NEXT:  entry:
@@ -4916,12 +4918,14 @@ entry:
 ; CHECK1-LABEL: define {{[^@]+}}@merge_seq_float
 ; CHECK1-SAME: (float [[F:%.*]], float* nocapture nofree writeonly [[P:%.*]]) local_unnamed_addr {
 ; CHECK1-NEXT:  entry:
+; CHECK1-NEXT:    [[F_RELOADED:%.*]] = alloca float, align 4
 ; CHECK1-NEXT:    [[F_ADDR:%.*]] = alloca float, align 4
 ; CHECK1-NEXT:    store float [[F]], float* [[F_ADDR]], align 4
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM2:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
+; CHECK1-NEXT:    store float [[F]], float* [[F_RELOADED]], align 4
 ; CHECK1-NEXT:    br label [[OMP_PARALLEL:%.*]]
 ; CHECK1:       omp_parallel:
-; CHECK1-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* @[[GLOB1]], i32 2, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, float*, float*)* @merge_seq_float..omp_par to void (i32*, i32*, ...)*), float* [[F_ADDR]], float* [[P]])
+; CHECK1-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* @[[GLOB1]], i32 3, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, float*, float*, float*)* @merge_seq_float..omp_par to void (i32*, i32*, ...)*), float* [[F_RELOADED]], float* [[F_ADDR]], float* [[P]])
 ; CHECK1-NEXT:    br label [[OMP_PAR_OUTLINED_EXIT:%.*]]
 ; CHECK1:       omp.par.outlined.exit:
 ; CHECK1-NEXT:    br label [[OMP_PAR_EXIT_SPLIT:%.*]]
@@ -4932,12 +4936,13 @@ entry:
 ;
 ;
 ; CHECK1-LABEL: define {{[^@]+}}@merge_seq_float..omp_par
-; CHECK1-SAME: (i32* noalias [[TID_ADDR:%.*]], i32* noalias [[ZERO_ADDR:%.*]], float* [[F_ADDR:%.*]], float* [[P:%.*]]) #[[ATTR0]] {
+; CHECK1-SAME: (i32* noalias [[TID_ADDR:%.*]], i32* noalias [[ZERO_ADDR:%.*]], float* [[F_RELOADED:%.*]], float* [[F_ADDR:%.*]], float* [[P:%.*]]) #[[ATTR0]] {
 ; CHECK1-NEXT:  omp.par.entry:
 ; CHECK1-NEXT:    [[TID_ADDR_LOCAL:%.*]] = alloca i32, align 4
 ; CHECK1-NEXT:    [[TMP0:%.*]] = load i32, i32* [[TID_ADDR]], align 4
 ; CHECK1-NEXT:    store i32 [[TMP0]], i32* [[TID_ADDR_LOCAL]], align 4
 ; CHECK1-NEXT:    [[TID:%.*]] = load i32, i32* [[TID_ADDR_LOCAL]], align 4
+; CHECK1-NEXT:    [[TMP1:%.*]] = load float, float* [[F_RELOADED]], align 4
 ; CHECK1-NEXT:    br label [[OMP_PAR_REGION:%.*]]
 ; CHECK1:       omp.par.outlined.exit.exitStub:
 ; CHECK1-NEXT:    ret void
@@ -4948,9 +4953,9 @@ entry:
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM2:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK1-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM2]])
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
-; CHECK1-NEXT:    [[TMP1:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM]])
-; CHECK1-NEXT:    [[TMP2:%.*]] = icmp ne i32 [[TMP1]], 0
-; CHECK1-NEXT:    br i1 [[TMP2]], label [[OMP_REGION_BODY:%.*]], label [[OMP_REGION_END:%.*]]
+; CHECK1-NEXT:    [[TMP2:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM]])
+; CHECK1-NEXT:    [[TMP3:%.*]] = icmp ne i32 [[TMP2]], 0
+; CHECK1-NEXT:    br i1 [[TMP3]], label [[OMP_REGION_BODY:%.*]], label [[OMP_REGION_END:%.*]]
 ; CHECK1:       omp_region.end:
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM1:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK1-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM1]])
@@ -4967,8 +4972,7 @@ entry:
 ; CHECK1:       omp_region.body:
 ; CHECK1-NEXT:    br label [[SEQ_PAR_MERGED:%.*]]
 ; CHECK1:       seq.par.merged:
-; CHECK1-NEXT:    [[TMP3:%.*]] = load float, float* [[F_ADDR]], align 4
-; CHECK1-NEXT:    [[ADD:%.*]] = fadd float [[TMP3]], 0x40091EB860000000
+; CHECK1-NEXT:    [[ADD:%.*]] = fadd float [[TMP1]], 0x40091EB860000000
 ; CHECK1-NEXT:    store float [[ADD]], float* [[P]], align 4
 ; CHECK1-NEXT:    br label [[OMP_PAR_MERGED_SPLIT:%.*]]
 ; CHECK1:       omp.par.merged.split:
@@ -5171,15 +5175,17 @@ entry:
 ; CHECK1-LABEL: define {{[^@]+}}@merge_seq_par_use
 ; CHECK1-SAME: (i32 [[A:%.*]]) local_unnamed_addr {
 ; CHECK1-NEXT:  entry:
+; CHECK1-NEXT:    [[A_RELOADED:%.*]] = alloca i32, align 4
 ; CHECK1-NEXT:    [[A_ADDR:%.*]] = alloca i32, align 4
 ; CHECK1-NEXT:    [[B:%.*]] = alloca i32, align 4
 ; CHECK1-NEXT:    store i32 [[A]], i32* [[A_ADDR]], align 4
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM2:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
+; CHECK1-NEXT:    store i32 [[A]], i32* [[A_RELOADED]], align 4
 ; CHECK1-NEXT:    br label [[OMP_PARALLEL:%.*]]
 ; CHECK1:       omp_parallel:
 ; CHECK1-NEXT:    [[LT_CAST3:%.*]] = bitcast i32* [[B]] to i8*
 ; CHECK1-NEXT:    call void @llvm.lifetime.start.p0i8(i64 -1, i8* [[LT_CAST3]])
-; CHECK1-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* @[[GLOB1]], i32 2, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, i32*, i32*)* @merge_seq_par_use..omp_par to void (i32*, i32*, ...)*), i32* [[A_ADDR]], i32* [[B]])
+; CHECK1-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* @[[GLOB1]], i32 3, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, i32*, i32*, i32*)* @merge_seq_par_use..omp_par to void (i32*, i32*, ...)*), i32* [[A_RELOADED]], i32* [[A_ADDR]], i32* [[B]])
 ; CHECK1-NEXT:    br label [[OMP_PAR_OUTLINED_EXIT:%.*]]
 ; CHECK1:       omp.par.outlined.exit:
 ; CHECK1-NEXT:    br label [[OMP_PAR_EXIT_SPLIT:%.*]]
@@ -5192,12 +5198,13 @@ entry:
 ;
 ;
 ; CHECK1-LABEL: define {{[^@]+}}@merge_seq_par_use..omp_par
-; CHECK1-SAME: (i32* noalias [[TID_ADDR:%.*]], i32* noalias [[ZERO_ADDR:%.*]], i32* [[A_ADDR:%.*]], i32* [[B:%.*]]) #[[ATTR0]] {
+; CHECK1-SAME: (i32* noalias [[TID_ADDR:%.*]], i32* noalias [[ZERO_ADDR:%.*]], i32* [[A_RELOADED:%.*]], i32* [[A_ADDR:%.*]], i32* [[B:%.*]]) #[[ATTR0]] {
 ; CHECK1-NEXT:  omp.par.entry:
 ; CHECK1-NEXT:    [[TID_ADDR_LOCAL:%.*]] = alloca i32, align 4
 ; CHECK1-NEXT:    [[TMP0:%.*]] = load i32, i32* [[TID_ADDR]], align 4
 ; CHECK1-NEXT:    store i32 [[TMP0]], i32* [[TID_ADDR_LOCAL]], align 4
 ; CHECK1-NEXT:    [[TID:%.*]] = load i32, i32* [[TID_ADDR_LOCAL]], align 4
+; CHECK1-NEXT:    [[TMP1:%.*]] = load i32, i32* [[A_RELOADED]], align 4
 ; CHECK1-NEXT:    br label [[OMP_PAR_REGION:%.*]]
 ; CHECK1:       omp.par.outlined.exit.exitStub:
 ; CHECK1-NEXT:    ret void
@@ -5208,9 +5215,9 @@ entry:
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM2:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK1-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM2]])
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
-; CHECK1-NEXT:    [[TMP1:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM]])
-; CHECK1-NEXT:    [[TMP2:%.*]] = icmp ne i32 [[TMP1]], 0
-; CHECK1-NEXT:    br i1 [[TMP2]], label [[OMP_REGION_BODY:%.*]], label [[OMP_REGION_END:%.*]]
+; CHECK1-NEXT:    [[TMP2:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM]])
+; CHECK1-NEXT:    [[TMP3:%.*]] = icmp ne i32 [[TMP2]], 0
+; CHECK1-NEXT:    br i1 [[TMP3]], label [[OMP_REGION_BODY:%.*]], label [[OMP_REGION_END:%.*]]
 ; CHECK1:       omp_region.end:
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM1:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK1-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM1]])
@@ -5227,9 +5234,8 @@ entry:
 ; CHECK1:       omp_region.body:
 ; CHECK1-NEXT:    br label [[SEQ_PAR_MERGED:%.*]]
 ; CHECK1:       seq.par.merged:
-; CHECK1-NEXT:    [[TMP3:%.*]] = bitcast i32* [[B]] to i8*
-; CHECK1-NEXT:    [[TMP4:%.*]] = load i32, i32* [[A_ADDR]], align 4
-; CHECK1-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP4]], 1
+; CHECK1-NEXT:    [[TMP4:%.*]] = bitcast i32* [[B]] to i8*
+; CHECK1-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP1]], 1
 ; CHECK1-NEXT:    store i32 [[ADD]], i32* [[B]], align 4
 ; CHECK1-NEXT:    br label [[OMP_PAR_MERGED_SPLIT:%.*]]
 ; CHECK1:       omp.par.merged.split:
@@ -5334,14 +5340,16 @@ entry:
 ; CHECK1-LABEL: define {{[^@]+}}@merge_cancellable_regions_seq
 ; CHECK1-SAME: (i32 [[CANCEL1:%.*]], i32 [[CANCEL2:%.*]]) local_unnamed_addr {
 ; CHECK1-NEXT:  entry:
+; CHECK1-NEXT:    [[CANCEL1_RELOADED:%.*]] = alloca i32, align 4
 ; CHECK1-NEXT:    [[CANCEL1_ADDR:%.*]] = alloca i32, align 4
 ; CHECK1-NEXT:    [[CANCEL2_ADDR:%.*]] = alloca i32, align 4
 ; CHECK1-NEXT:    store i32 [[CANCEL1]], i32* [[CANCEL1_ADDR]], align 4
 ; CHECK1-NEXT:    store i32 [[CANCEL2]], i32* [[CANCEL2_ADDR]], align 4
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM2:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
+; CHECK1-NEXT:    store i32 [[CANCEL1]], i32* [[CANCEL1_RELOADED]], align 4
 ; CHECK1-NEXT:    br label [[OMP_PARALLEL:%.*]]
 ; CHECK1:       omp_parallel:
-; CHECK1-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* @[[GLOB1]], i32 2, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, i32*, i32*)* @merge_cancellable_regions_seq..omp_par to void (i32*, i32*, ...)*), i32* [[CANCEL1_ADDR]], i32* [[CANCEL2_ADDR]])
+; CHECK1-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* @[[GLOB1]], i32 3, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, i32*, i32*, i32*)* @merge_cancellable_regions_seq..omp_par to void (i32*, i32*, ...)*), i32* [[CANCEL1_RELOADED]], i32* [[CANCEL1_ADDR]], i32* [[CANCEL2_ADDR]])
 ; CHECK1-NEXT:    br label [[OMP_PAR_OUTLINED_EXIT:%.*]]
 ; CHECK1:       omp.par.outlined.exit:
 ; CHECK1-NEXT:    br label [[OMP_PAR_EXIT_SPLIT:%.*]]
@@ -5352,12 +5360,13 @@ entry:
 ;
 ;
 ; CHECK1-LABEL: define {{[^@]+}}@merge_cancellable_regions_seq..omp_par
-; CHECK1-SAME: (i32* noalias [[TID_ADDR:%.*]], i32* noalias [[ZERO_ADDR:%.*]], i32* [[CANCEL1_ADDR:%.*]], i32* [[CANCEL2_ADDR:%.*]]) #[[ATTR0]] {
+; CHECK1-SAME: (i32* noalias [[TID_ADDR:%.*]], i32* noalias [[ZERO_ADDR:%.*]], i32* [[CANCEL1_RELOADED:%.*]], i32* [[CANCEL1_ADDR:%.*]], i32* [[CANCEL2_ADDR:%.*]]) #[[ATTR0]] {
 ; CHECK1-NEXT:  omp.par.entry:
 ; CHECK1-NEXT:    [[TID_ADDR_LOCAL:%.*]] = alloca i32, align 4
 ; CHECK1-NEXT:    [[TMP0:%.*]] = load i32, i32* [[TID_ADDR]], align 4
 ; CHECK1-NEXT:    store i32 [[TMP0]], i32* [[TID_ADDR_LOCAL]], align 4
 ; CHECK1-NEXT:    [[TID:%.*]] = load i32, i32* [[TID_ADDR_LOCAL]], align 4
+; CHECK1-NEXT:    [[TMP1:%.*]] = load i32, i32* [[CANCEL1_RELOADED]], align 4
 ; CHECK1-NEXT:    br label [[OMP_PAR_REGION:%.*]]
 ; CHECK1:       omp.par.outlined.exit.exitStub:
 ; CHECK1-NEXT:    ret void
@@ -5368,9 +5377,9 @@ entry:
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM2:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK1-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM2]])
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
-; CHECK1-NEXT:    [[TMP1:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM]])
-; CHECK1-NEXT:    [[TMP2:%.*]] = icmp ne i32 [[TMP1]], 0
-; CHECK1-NEXT:    br i1 [[TMP2]], label [[OMP_REGION_BODY:%.*]], label [[OMP_REGION_END:%.*]]
+; CHECK1-NEXT:    [[TMP2:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM]])
+; CHECK1-NEXT:    [[TMP3:%.*]] = icmp ne i32 [[TMP2]], 0
+; CHECK1-NEXT:    br i1 [[TMP3]], label [[OMP_REGION_BODY:%.*]], label [[OMP_REGION_END:%.*]]
 ; CHECK1:       omp_region.end:
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM1:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK1-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM1]])
@@ -5387,8 +5396,7 @@ entry:
 ; CHECK1:       omp_region.body:
 ; CHECK1-NEXT:    br label [[SEQ_PAR_MERGED:%.*]]
 ; CHECK1:       seq.par.merged:
-; CHECK1-NEXT:    [[TMP3:%.*]] = load i32, i32* [[CANCEL1_ADDR]], align 4
-; CHECK1-NEXT:    [[TOBOOL_NOT:%.*]] = icmp eq i32 [[TMP3]], 0
+; CHECK1-NEXT:    [[TOBOOL_NOT:%.*]] = icmp eq i32 [[TMP1]], 0
 ; CHECK1-NEXT:    [[LNOT_EXT:%.*]] = zext i1 [[TOBOOL_NOT]] to i32
 ; CHECK1-NEXT:    store i32 [[LNOT_EXT]], i32* [[CANCEL2_ADDR]], align 4
 ; CHECK1-NEXT:    br label [[OMP_PAR_MERGED_SPLIT:%.*]]
@@ -5501,14 +5509,16 @@ entry:
 ; CHECK1-LABEL: define {{[^@]+}}@merge_3_seq
 ; CHECK1-SAME: (i32 [[A:%.*]], i32 [[B:%.*]]) local_unnamed_addr {
 ; CHECK1-NEXT:  entry:
+; CHECK1-NEXT:    [[A_RELOADED:%.*]] = alloca i32, align 4
 ; CHECK1-NEXT:    [[ADD1_SEQ_OUTPUT_ALLOC:%.*]] = alloca i32, align 4
 ; CHECK1-NEXT:    [[ADD_SEQ_OUTPUT_ALLOC:%.*]] = alloca i32, align 4
 ; CHECK1-NEXT:    [[A_ADDR:%.*]] = alloca i32, align 4
 ; CHECK1-NEXT:    store i32 [[A]], i32* [[A_ADDR]], align 4
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM7:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
+; CHECK1-NEXT:    store i32 [[A]], i32* [[A_RELOADED]], align 4
 ; CHECK1-NEXT:    br label [[OMP_PARALLEL:%.*]]
 ; CHECK1:       omp_parallel:
-; CHECK1-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* @[[GLOB1]], i32 3, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, i32*, i32*, i32*)* @merge_3_seq..omp_par to void (i32*, i32*, ...)*), i32* [[A_ADDR]], i32* [[ADD_SEQ_OUTPUT_ALLOC]], i32* [[ADD1_SEQ_OUTPUT_ALLOC]])
+; CHECK1-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* @[[GLOB1]], i32 4, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, i32*, i32*, i32*, i32*)* @merge_3_seq..omp_par to void (i32*, i32*, ...)*), i32* [[A_RELOADED]], i32* [[A_ADDR]], i32* [[ADD_SEQ_OUTPUT_ALLOC]], i32* [[ADD1_SEQ_OUTPUT_ALLOC]])
 ; CHECK1-NEXT:    br label [[OMP_PAR_OUTLINED_EXIT:%.*]]
 ; CHECK1:       omp.par.outlined.exit:
 ; CHECK1-NEXT:    br label [[OMP_PAR_EXIT_SPLIT:%.*]]
@@ -5521,12 +5531,13 @@ entry:
 ;
 ;
 ; CHECK1-LABEL: define {{[^@]+}}@merge_3_seq..omp_par
-; CHECK1-SAME: (i32* noalias [[TID_ADDR:%.*]], i32* noalias [[ZERO_ADDR:%.*]], i32* [[A_ADDR:%.*]], i32* [[ADD_SEQ_OUTPUT_ALLOC:%.*]], i32* [[ADD1_SEQ_OUTPUT_ALLOC:%.*]]) #[[ATTR0]] {
+; CHECK1-SAME: (i32* noalias [[TID_ADDR:%.*]], i32* noalias [[ZERO_ADDR:%.*]], i32* [[A_RELOADED:%.*]], i32* [[A_ADDR:%.*]], i32* [[ADD_SEQ_OUTPUT_ALLOC:%.*]], i32* [[ADD1_SEQ_OUTPUT_ALLOC:%.*]]) #[[ATTR0]] {
 ; CHECK1-NEXT:  omp.par.entry:
 ; CHECK1-NEXT:    [[TID_ADDR_LOCAL:%.*]] = alloca i32, align 4
 ; CHECK1-NEXT:    [[TMP0:%.*]] = load i32, i32* [[TID_ADDR]], align 4
 ; CHECK1-NEXT:    store i32 [[TMP0]], i32* [[TID_ADDR_LOCAL]], align 4
 ; CHECK1-NEXT:    [[TID:%.*]] = load i32, i32* [[TID_ADDR_LOCAL]], align 4
+; CHECK1-NEXT:    [[TMP1:%.*]] = load i32, i32* [[A_RELOADED]], align 4
 ; CHECK1-NEXT:    br label [[OMP_PAR_REGION:%.*]]
 ; CHECK1:       omp.par.outlined.exit.exitStub:
 ; CHECK1-NEXT:    ret void
@@ -5537,9 +5548,9 @@ entry:
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM2:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK1-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM2]])
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
-; CHECK1-NEXT:    [[TMP1:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM]])
-; CHECK1-NEXT:    [[TMP2:%.*]] = icmp ne i32 [[TMP1]], 0
-; CHECK1-NEXT:    br i1 [[TMP2]], label [[OMP_REGION_BODY:%.*]], label [[OMP_REGION_END:%.*]]
+; CHECK1-NEXT:    [[TMP2:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM]])
+; CHECK1-NEXT:    [[TMP3:%.*]] = icmp ne i32 [[TMP2]], 0
+; CHECK1-NEXT:    br i1 [[TMP3]], label [[OMP_REGION_BODY:%.*]], label [[OMP_REGION_END:%.*]]
 ; CHECK1:       omp_region.end:
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM1:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK1-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM1]])
@@ -5549,9 +5560,9 @@ entry:
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM4:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK1-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM4]])
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM3:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
-; CHECK1-NEXT:    [[TMP3:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM3]])
-; CHECK1-NEXT:    [[TMP4:%.*]] = icmp ne i32 [[TMP3]], 0
-; CHECK1-NEXT:    br i1 [[TMP4]], label [[OMP_REGION_BODY5:%.*]], label [[OMP_REGION_END4:%.*]]
+; CHECK1-NEXT:    [[TMP4:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM3]])
+; CHECK1-NEXT:    [[TMP5:%.*]] = icmp ne i32 [[TMP4]], 0
+; CHECK1-NEXT:    br i1 [[TMP5]], label [[OMP_REGION_BODY5:%.*]], label [[OMP_REGION_END4:%.*]]
 ; CHECK1:       omp_region.end4:
 ; CHECK1-NEXT:    [[OMP_GLOBAL_THREAD_NUM6:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK1-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM6]])
@@ -5568,9 +5579,8 @@ entry:
 ; CHECK1:       omp_region.body5:
 ; CHECK1-NEXT:    br label [[SEQ_PAR_MERGED2:%.*]]
 ; CHECK1:       seq.par.merged2:
-; CHECK1-NEXT:    [[TMP5:%.*]] = load i32, i32* [[A_ADDR]], align 4
 ; CHECK1-NEXT:    [[ADD_SEQ_OUTPUT_LOAD:%.*]] = load i32, i32* [[ADD_SEQ_OUTPUT_ALLOC]], align 4
-; CHECK1-NEXT:    [[ADD1:%.*]] = add nsw i32 [[ADD_SEQ_OUTPUT_LOAD]], [[TMP5]]
+; CHECK1-NEXT:    [[ADD1:%.*]] = add nsw i32 [[ADD_SEQ_OUTPUT_LOAD]], [[TMP1]]
 ; CHECK1-NEXT:    store i32 [[ADD1]], i32* [[ADD1_SEQ_OUTPUT_ALLOC]], align 4
 ; CHECK1-NEXT:    br label [[OMP_PAR_MERGED_SPLIT_SPLIT_SPLIT:%.*]]
 ; CHECK1:       omp.par.merged.split.split.split:
@@ -5581,8 +5591,7 @@ entry:
 ; CHECK1:       omp_region.body:
 ; CHECK1-NEXT:    br label [[SEQ_PAR_MERGED:%.*]]
 ; CHECK1:       seq.par.merged:
-; CHECK1-NEXT:    [[TMP6:%.*]] = load i32, i32* [[A_ADDR]], align 4
-; CHECK1-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP6]], 1
+; CHECK1-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP1]], 1
 ; CHECK1-NEXT:    store i32 [[ADD]], i32* [[ADD_SEQ_OUTPUT_ALLOC]], align 4
 ; CHECK1-NEXT:    br label [[OMP_PAR_MERGED_SPLIT:%.*]]
 ; CHECK1:       omp.par.merged.split:
@@ -5697,8 +5706,7 @@ entry:
 ; CHECK1-NEXT:    [[TMP0:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* noundef nonnull align 8 dereferenceable(24) @[[GLOB1]])
 ; CHECK1-NEXT:    store i32 [[A]], i32* [[A_ADDR]], align 4
 ; CHECK1-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* noundef nonnull align 8 dereferenceable(24) @[[GLOB1]], i32 noundef 1, void (i32*, i32*, ...)* noundef bitcast (void (i32*, i32*, i32*)* @.omp_outlined..34 to void (i32*, i32*, ...)*), i32* nocapture nofree noundef nonnull readonly align 4 dereferenceable(4) [[A_ADDR]])
-; CHECK1-NEXT:    [[TMP1:%.*]] = load i32, i32* [[A_ADDR]], align 4
-; CHECK1-NEXT:    call void @__kmpc_push_num_threads(%struct.ident_t* noundef nonnull align 8 dereferenceable(24) @[[GLOB1]], i32 [[TMP0]], i32 [[TMP1]])
+; CHECK1-NEXT:    call void @__kmpc_push_num_threads(%struct.ident_t* noundef nonnull align 8 dereferenceable(24) @[[GLOB1]], i32 [[TMP0]], i32 [[A]])
 ; CHECK1-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* noundef nonnull align 8 dereferenceable(24) @[[GLOB1]], i32 noundef 1, void (i32*, i32*, ...)* noundef bitcast (void (i32*, i32*, i32*)* @.omp_outlined..35 to void (i32*, i32*, ...)*), i32* nocapture nofree noundef nonnull readonly align 4 dereferenceable(4) [[A_ADDR]])
 ; CHECK1-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* noundef nonnull align 8 dereferenceable(24) @[[GLOB1]], i32 noundef 1, void (i32*, i32*, ...)* noundef bitcast (void (i32*, i32*, i32*)* @.omp_outlined..36 to void (i32*, i32*, ...)*), i32* nocapture nofree noundef nonnull readonly align 4 dereferenceable(4) [[A_ADDR]])
 ; CHECK1-NEXT:    ret void
@@ -6027,12 +6035,14 @@ entry:
 ; CHECK2-LABEL: define {{[^@]+}}@merge_seq_float
 ; CHECK2-SAME: (float [[F:%.*]], float* nocapture nofree writeonly [[P:%.*]]) local_unnamed_addr {
 ; CHECK2-NEXT:  entry:
+; CHECK2-NEXT:    [[F_RELOADED:%.*]] = alloca float, align 4
 ; CHECK2-NEXT:    [[F_ADDR:%.*]] = alloca float, align 4
 ; CHECK2-NEXT:    store float [[F]], float* [[F_ADDR]], align 4
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM2:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
+; CHECK2-NEXT:    store float [[F]], float* [[F_RELOADED]], align 4
 ; CHECK2-NEXT:    br label [[OMP_PARALLEL:%.*]]
 ; CHECK2:       omp_parallel:
-; CHECK2-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* @[[GLOB1]], i32 2, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, float*, float*)* @merge_seq_float..omp_par to void (i32*, i32*, ...)*), float* [[F_ADDR]], float* [[P]])
+; CHECK2-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* @[[GLOB1]], i32 3, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, float*, float*, float*)* @merge_seq_float..omp_par to void (i32*, i32*, ...)*), float* [[F_RELOADED]], float* [[F_ADDR]], float* [[P]])
 ; CHECK2-NEXT:    br label [[OMP_PAR_OUTLINED_EXIT:%.*]]
 ; CHECK2:       omp.par.outlined.exit:
 ; CHECK2-NEXT:    br label [[OMP_PAR_EXIT_SPLIT:%.*]]
@@ -6043,12 +6053,13 @@ entry:
 ;
 ;
 ; CHECK2-LABEL: define {{[^@]+}}@merge_seq_float..omp_par
-; CHECK2-SAME: (i32* noalias [[TID_ADDR:%.*]], i32* noalias [[ZERO_ADDR:%.*]], float* [[F_ADDR:%.*]], float* [[P:%.*]]) #[[ATTR0]] {
+; CHECK2-SAME: (i32* noalias [[TID_ADDR:%.*]], i32* noalias [[ZERO_ADDR:%.*]], float* [[F_RELOADED:%.*]], float* [[F_ADDR:%.*]], float* [[P:%.*]]) #[[ATTR0]] {
 ; CHECK2-NEXT:  omp.par.entry:
 ; CHECK2-NEXT:    [[TID_ADDR_LOCAL:%.*]] = alloca i32, align 4
 ; CHECK2-NEXT:    [[TMP0:%.*]] = load i32, i32* [[TID_ADDR]], align 4
 ; CHECK2-NEXT:    store i32 [[TMP0]], i32* [[TID_ADDR_LOCAL]], align 4
 ; CHECK2-NEXT:    [[TID:%.*]] = load i32, i32* [[TID_ADDR_LOCAL]], align 4
+; CHECK2-NEXT:    [[TMP1:%.*]] = load float, float* [[F_RELOADED]], align 4
 ; CHECK2-NEXT:    br label [[OMP_PAR_REGION:%.*]]
 ; CHECK2:       omp.par.outlined.exit.exitStub:
 ; CHECK2-NEXT:    ret void
@@ -6059,9 +6070,9 @@ entry:
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM2:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK2-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM2]])
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
-; CHECK2-NEXT:    [[TMP1:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM]])
-; CHECK2-NEXT:    [[TMP2:%.*]] = icmp ne i32 [[TMP1]], 0
-; CHECK2-NEXT:    br i1 [[TMP2]], label [[OMP_REGION_BODY:%.*]], label [[OMP_REGION_END:%.*]]
+; CHECK2-NEXT:    [[TMP2:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM]])
+; CHECK2-NEXT:    [[TMP3:%.*]] = icmp ne i32 [[TMP2]], 0
+; CHECK2-NEXT:    br i1 [[TMP3]], label [[OMP_REGION_BODY:%.*]], label [[OMP_REGION_END:%.*]]
 ; CHECK2:       omp_region.end:
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM1:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK2-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM1]])
@@ -6078,8 +6089,7 @@ entry:
 ; CHECK2:       omp_region.body:
 ; CHECK2-NEXT:    br label [[SEQ_PAR_MERGED:%.*]]
 ; CHECK2:       seq.par.merged:
-; CHECK2-NEXT:    [[TMP3:%.*]] = load float, float* [[F_ADDR]], align 4
-; CHECK2-NEXT:    [[ADD:%.*]] = fadd float [[TMP3]], 0x40091EB860000000
+; CHECK2-NEXT:    [[ADD:%.*]] = fadd float [[TMP1]], 0x40091EB860000000
 ; CHECK2-NEXT:    store float [[ADD]], float* [[P]], align 4
 ; CHECK2-NEXT:    br label [[OMP_PAR_MERGED_SPLIT:%.*]]
 ; CHECK2:       omp.par.merged.split:
@@ -6282,15 +6292,17 @@ entry:
 ; CHECK2-LABEL: define {{[^@]+}}@merge_seq_par_use
 ; CHECK2-SAME: (i32 [[A:%.*]]) local_unnamed_addr {
 ; CHECK2-NEXT:  entry:
+; CHECK2-NEXT:    [[A_RELOADED:%.*]] = alloca i32, align 4
 ; CHECK2-NEXT:    [[A_ADDR:%.*]] = alloca i32, align 4
 ; CHECK2-NEXT:    [[B:%.*]] = alloca i32, align 4
 ; CHECK2-NEXT:    store i32 [[A]], i32* [[A_ADDR]], align 4
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM2:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
+; CHECK2-NEXT:    store i32 [[A]], i32* [[A_RELOADED]], align 4
 ; CHECK2-NEXT:    br label [[OMP_PARALLEL:%.*]]
 ; CHECK2:       omp_parallel:
 ; CHECK2-NEXT:    [[LT_CAST3:%.*]] = bitcast i32* [[B]] to i8*
 ; CHECK2-NEXT:    call void @llvm.lifetime.start.p0i8(i64 -1, i8* [[LT_CAST3]])
-; CHECK2-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* @[[GLOB1]], i32 2, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, i32*, i32*)* @merge_seq_par_use..omp_par to void (i32*, i32*, ...)*), i32* [[A_ADDR]], i32* [[B]])
+; CHECK2-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* @[[GLOB1]], i32 3, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, i32*, i32*, i32*)* @merge_seq_par_use..omp_par to void (i32*, i32*, ...)*), i32* [[A_RELOADED]], i32* [[A_ADDR]], i32* [[B]])
 ; CHECK2-NEXT:    br label [[OMP_PAR_OUTLINED_EXIT:%.*]]
 ; CHECK2:       omp.par.outlined.exit:
 ; CHECK2-NEXT:    br label [[OMP_PAR_EXIT_SPLIT:%.*]]
@@ -6303,12 +6315,13 @@ entry:
 ;
 ;
 ; CHECK2-LABEL: define {{[^@]+}}@merge_seq_par_use..omp_par
-; CHECK2-SAME: (i32* noalias [[TID_ADDR:%.*]], i32* noalias [[ZERO_ADDR:%.*]], i32* [[A_ADDR:%.*]], i32* [[B:%.*]]) #[[ATTR0]] {
+; CHECK2-SAME: (i32* noalias [[TID_ADDR:%.*]], i32* noalias [[ZERO_ADDR:%.*]], i32* [[A_RELOADED:%.*]], i32* [[A_ADDR:%.*]], i32* [[B:%.*]]) #[[ATTR0]] {
 ; CHECK2-NEXT:  omp.par.entry:
 ; CHECK2-NEXT:    [[TID_ADDR_LOCAL:%.*]] = alloca i32, align 4
 ; CHECK2-NEXT:    [[TMP0:%.*]] = load i32, i32* [[TID_ADDR]], align 4
 ; CHECK2-NEXT:    store i32 [[TMP0]], i32* [[TID_ADDR_LOCAL]], align 4
 ; CHECK2-NEXT:    [[TID:%.*]] = load i32, i32* [[TID_ADDR_LOCAL]], align 4
+; CHECK2-NEXT:    [[TMP1:%.*]] = load i32, i32* [[A_RELOADED]], align 4
 ; CHECK2-NEXT:    br label [[OMP_PAR_REGION:%.*]]
 ; CHECK2:       omp.par.outlined.exit.exitStub:
 ; CHECK2-NEXT:    ret void
@@ -6319,9 +6332,9 @@ entry:
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM2:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK2-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM2]])
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
-; CHECK2-NEXT:    [[TMP1:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM]])
-; CHECK2-NEXT:    [[TMP2:%.*]] = icmp ne i32 [[TMP1]], 0
-; CHECK2-NEXT:    br i1 [[TMP2]], label [[OMP_REGION_BODY:%.*]], label [[OMP_REGION_END:%.*]]
+; CHECK2-NEXT:    [[TMP2:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM]])
+; CHECK2-NEXT:    [[TMP3:%.*]] = icmp ne i32 [[TMP2]], 0
+; CHECK2-NEXT:    br i1 [[TMP3]], label [[OMP_REGION_BODY:%.*]], label [[OMP_REGION_END:%.*]]
 ; CHECK2:       omp_region.end:
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM1:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK2-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM1]])
@@ -6338,9 +6351,8 @@ entry:
 ; CHECK2:       omp_region.body:
 ; CHECK2-NEXT:    br label [[SEQ_PAR_MERGED:%.*]]
 ; CHECK2:       seq.par.merged:
-; CHECK2-NEXT:    [[TMP3:%.*]] = bitcast i32* [[B]] to i8*
-; CHECK2-NEXT:    [[TMP4:%.*]] = load i32, i32* [[A_ADDR]], align 4
-; CHECK2-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP4]], 1
+; CHECK2-NEXT:    [[TMP4:%.*]] = bitcast i32* [[B]] to i8*
+; CHECK2-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP1]], 1
 ; CHECK2-NEXT:    store i32 [[ADD]], i32* [[B]], align 4
 ; CHECK2-NEXT:    br label [[OMP_PAR_MERGED_SPLIT:%.*]]
 ; CHECK2:       omp.par.merged.split:
@@ -6445,14 +6457,16 @@ entry:
 ; CHECK2-LABEL: define {{[^@]+}}@merge_cancellable_regions_seq
 ; CHECK2-SAME: (i32 [[CANCEL1:%.*]], i32 [[CANCEL2:%.*]]) local_unnamed_addr {
 ; CHECK2-NEXT:  entry:
+; CHECK2-NEXT:    [[CANCEL1_RELOADED:%.*]] = alloca i32, align 4
 ; CHECK2-NEXT:    [[CANCEL1_ADDR:%.*]] = alloca i32, align 4
 ; CHECK2-NEXT:    [[CANCEL2_ADDR:%.*]] = alloca i32, align 4
 ; CHECK2-NEXT:    store i32 [[CANCEL1]], i32* [[CANCEL1_ADDR]], align 4
 ; CHECK2-NEXT:    store i32 [[CANCEL2]], i32* [[CANCEL2_ADDR]], align 4
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM2:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
+; CHECK2-NEXT:    store i32 [[CANCEL1]], i32* [[CANCEL1_RELOADED]], align 4
 ; CHECK2-NEXT:    br label [[OMP_PARALLEL:%.*]]
 ; CHECK2:       omp_parallel:
-; CHECK2-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* @[[GLOB1]], i32 2, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, i32*, i32*)* @merge_cancellable_regions_seq..omp_par to void (i32*, i32*, ...)*), i32* [[CANCEL1_ADDR]], i32* [[CANCEL2_ADDR]])
+; CHECK2-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* @[[GLOB1]], i32 3, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, i32*, i32*, i32*)* @merge_cancellable_regions_seq..omp_par to void (i32*, i32*, ...)*), i32* [[CANCEL1_RELOADED]], i32* [[CANCEL1_ADDR]], i32* [[CANCEL2_ADDR]])
 ; CHECK2-NEXT:    br label [[OMP_PAR_OUTLINED_EXIT:%.*]]
 ; CHECK2:       omp.par.outlined.exit:
 ; CHECK2-NEXT:    br label [[OMP_PAR_EXIT_SPLIT:%.*]]
@@ -6463,12 +6477,13 @@ entry:
 ;
 ;
 ; CHECK2-LABEL: define {{[^@]+}}@merge_cancellable_regions_seq..omp_par
-; CHECK2-SAME: (i32* noalias [[TID_ADDR:%.*]], i32* noalias [[ZERO_ADDR:%.*]], i32* [[CANCEL1_ADDR:%.*]], i32* [[CANCEL2_ADDR:%.*]]) #[[ATTR0]] {
+; CHECK2-SAME: (i32* noalias [[TID_ADDR:%.*]], i32* noalias [[ZERO_ADDR:%.*]], i32* [[CANCEL1_RELOADED:%.*]], i32* [[CANCEL1_ADDR:%.*]], i32* [[CANCEL2_ADDR:%.*]]) #[[ATTR0]] {
 ; CHECK2-NEXT:  omp.par.entry:
 ; CHECK2-NEXT:    [[TID_ADDR_LOCAL:%.*]] = alloca i32, align 4
 ; CHECK2-NEXT:    [[TMP0:%.*]] = load i32, i32* [[TID_ADDR]], align 4
 ; CHECK2-NEXT:    store i32 [[TMP0]], i32* [[TID_ADDR_LOCAL]], align 4
 ; CHECK2-NEXT:    [[TID:%.*]] = load i32, i32* [[TID_ADDR_LOCAL]], align 4
+; CHECK2-NEXT:    [[TMP1:%.*]] = load i32, i32* [[CANCEL1_RELOADED]], align 4
 ; CHECK2-NEXT:    br label [[OMP_PAR_REGION:%.*]]
 ; CHECK2:       omp.par.outlined.exit.exitStub:
 ; CHECK2-NEXT:    ret void
@@ -6479,9 +6494,9 @@ entry:
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM2:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK2-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM2]])
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
-; CHECK2-NEXT:    [[TMP1:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM]])
-; CHECK2-NEXT:    [[TMP2:%.*]] = icmp ne i32 [[TMP1]], 0
-; CHECK2-NEXT:    br i1 [[TMP2]], label [[OMP_REGION_BODY:%.*]], label [[OMP_REGION_END:%.*]]
+; CHECK2-NEXT:    [[TMP2:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM]])
+; CHECK2-NEXT:    [[TMP3:%.*]] = icmp ne i32 [[TMP2]], 0
+; CHECK2-NEXT:    br i1 [[TMP3]], label [[OMP_REGION_BODY:%.*]], label [[OMP_REGION_END:%.*]]
 ; CHECK2:       omp_region.end:
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM1:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK2-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM1]])
@@ -6498,8 +6513,7 @@ entry:
 ; CHECK2:       omp_region.body:
 ; CHECK2-NEXT:    br label [[SEQ_PAR_MERGED:%.*]]
 ; CHECK2:       seq.par.merged:
-; CHECK2-NEXT:    [[TMP3:%.*]] = load i32, i32* [[CANCEL1_ADDR]], align 4
-; CHECK2-NEXT:    [[TOBOOL_NOT:%.*]] = icmp eq i32 [[TMP3]], 0
+; CHECK2-NEXT:    [[TOBOOL_NOT:%.*]] = icmp eq i32 [[TMP1]], 0
 ; CHECK2-NEXT:    [[LNOT_EXT:%.*]] = zext i1 [[TOBOOL_NOT]] to i32
 ; CHECK2-NEXT:    store i32 [[LNOT_EXT]], i32* [[CANCEL2_ADDR]], align 4
 ; CHECK2-NEXT:    br label [[OMP_PAR_MERGED_SPLIT:%.*]]
@@ -6612,14 +6626,16 @@ entry:
 ; CHECK2-LABEL: define {{[^@]+}}@merge_3_seq
 ; CHECK2-SAME: (i32 [[A:%.*]], i32 [[B:%.*]]) local_unnamed_addr {
 ; CHECK2-NEXT:  entry:
+; CHECK2-NEXT:    [[A_RELOADED:%.*]] = alloca i32, align 4
 ; CHECK2-NEXT:    [[ADD1_SEQ_OUTPUT_ALLOC:%.*]] = alloca i32, align 4
 ; CHECK2-NEXT:    [[ADD_SEQ_OUTPUT_ALLOC:%.*]] = alloca i32, align 4
 ; CHECK2-NEXT:    [[A_ADDR:%.*]] = alloca i32, align 4
 ; CHECK2-NEXT:    store i32 [[A]], i32* [[A_ADDR]], align 4
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM7:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
+; CHECK2-NEXT:    store i32 [[A]], i32* [[A_RELOADED]], align 4
 ; CHECK2-NEXT:    br label [[OMP_PARALLEL:%.*]]
 ; CHECK2:       omp_parallel:
-; CHECK2-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* @[[GLOB1]], i32 3, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, i32*, i32*, i32*)* @merge_3_seq..omp_par to void (i32*, i32*, ...)*), i32* [[A_ADDR]], i32* [[ADD_SEQ_OUTPUT_ALLOC]], i32* [[ADD1_SEQ_OUTPUT_ALLOC]])
+; CHECK2-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* @[[GLOB1]], i32 4, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, i32*, i32*, i32*, i32*)* @merge_3_seq..omp_par to void (i32*, i32*, ...)*), i32* [[A_RELOADED]], i32* [[A_ADDR]], i32* [[ADD_SEQ_OUTPUT_ALLOC]], i32* [[ADD1_SEQ_OUTPUT_ALLOC]])
 ; CHECK2-NEXT:    br label [[OMP_PAR_OUTLINED_EXIT:%.*]]
 ; CHECK2:       omp.par.outlined.exit:
 ; CHECK2-NEXT:    br label [[OMP_PAR_EXIT_SPLIT:%.*]]
@@ -6632,12 +6648,13 @@ entry:
 ;
 ;
 ; CHECK2-LABEL: define {{[^@]+}}@merge_3_seq..omp_par
-; CHECK2-SAME: (i32* noalias [[TID_ADDR:%.*]], i32* noalias [[ZERO_ADDR:%.*]], i32* [[A_ADDR:%.*]], i32* [[ADD_SEQ_OUTPUT_ALLOC:%.*]], i32* [[ADD1_SEQ_OUTPUT_ALLOC:%.*]]) #[[ATTR0]] {
+; CHECK2-SAME: (i32* noalias [[TID_ADDR:%.*]], i32* noalias [[ZERO_ADDR:%.*]], i32* [[A_RELOADED:%.*]], i32* [[A_ADDR:%.*]], i32* [[ADD_SEQ_OUTPUT_ALLOC:%.*]], i32* [[ADD1_SEQ_OUTPUT_ALLOC:%.*]]) #[[ATTR0]] {
 ; CHECK2-NEXT:  omp.par.entry:
 ; CHECK2-NEXT:    [[TID_ADDR_LOCAL:%.*]] = alloca i32, align 4
 ; CHECK2-NEXT:    [[TMP0:%.*]] = load i32, i32* [[TID_ADDR]], align 4
 ; CHECK2-NEXT:    store i32 [[TMP0]], i32* [[TID_ADDR_LOCAL]], align 4
 ; CHECK2-NEXT:    [[TID:%.*]] = load i32, i32* [[TID_ADDR_LOCAL]], align 4
+; CHECK2-NEXT:    [[TMP1:%.*]] = load i32, i32* [[A_RELOADED]], align 4
 ; CHECK2-NEXT:    br label [[OMP_PAR_REGION:%.*]]
 ; CHECK2:       omp.par.outlined.exit.exitStub:
 ; CHECK2-NEXT:    ret void
@@ -6648,9 +6665,9 @@ entry:
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM2:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK2-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM2]])
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
-; CHECK2-NEXT:    [[TMP1:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM]])
-; CHECK2-NEXT:    [[TMP2:%.*]] = icmp ne i32 [[TMP1]], 0
-; CHECK2-NEXT:    br i1 [[TMP2]], label [[OMP_REGION_BODY:%.*]], label [[OMP_REGION_END:%.*]]
+; CHECK2-NEXT:    [[TMP2:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM]])
+; CHECK2-NEXT:    [[TMP3:%.*]] = icmp ne i32 [[TMP2]], 0
+; CHECK2-NEXT:    br i1 [[TMP3]], label [[OMP_REGION_BODY:%.*]], label [[OMP_REGION_END:%.*]]
 ; CHECK2:       omp_region.end:
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM1:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK2-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM1]])
@@ -6660,9 +6677,9 @@ entry:
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM4:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK2-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM4]])
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM3:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
-; CHECK2-NEXT:    [[TMP3:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM3]])
-; CHECK2-NEXT:    [[TMP4:%.*]] = icmp ne i32 [[TMP3]], 0
-; CHECK2-NEXT:    br i1 [[TMP4]], label [[OMP_REGION_BODY5:%.*]], label [[OMP_REGION_END4:%.*]]
+; CHECK2-NEXT:    [[TMP4:%.*]] = call i32 @__kmpc_master(%struct.ident_t* @[[GLOB1]], i32 [[OMP_GLOBAL_THREAD_NUM3]])
+; CHECK2-NEXT:    [[TMP5:%.*]] = icmp ne i32 [[TMP4]], 0
+; CHECK2-NEXT:    br i1 [[TMP5]], label [[OMP_REGION_BODY5:%.*]], label [[OMP_REGION_END4:%.*]]
 ; CHECK2:       omp_region.end4:
 ; CHECK2-NEXT:    [[OMP_GLOBAL_THREAD_NUM6:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
 ; CHECK2-NEXT:    call void @__kmpc_barrier(%struct.ident_t* @[[GLOB2]], i32 [[OMP_GLOBAL_THREAD_NUM6]])
@@ -6679,9 +6696,8 @@ entry:
 ; CHECK2:       omp_region.body5:
 ; CHECK2-NEXT:    br label [[SEQ_PAR_MERGED2:%.*]]
 ; CHECK2:       seq.par.merged2:
-; CHECK2-NEXT:    [[TMP5:%.*]] = load i32, i32* [[A_ADDR]], align 4
 ; CHECK2-NEXT:    [[ADD_SEQ_OUTPUT_LOAD:%.*]] = load i32, i32* [[ADD_SEQ_OUTPUT_ALLOC]], align 4
-; CHECK2-NEXT:    [[ADD1:%.*]] = add nsw i32 [[ADD_SEQ_OUTPUT_LOAD]], [[TMP5]]
+; CHECK2-NEXT:    [[ADD1:%.*]] = add nsw i32 [[ADD_SEQ_OUTPUT_LOAD]], [[TMP1]]
 ; CHECK2-NEXT:    store i32 [[ADD1]], i32* [[ADD1_SEQ_OUTPUT_ALLOC]], align 4
 ; CHECK2-NEXT:    br label [[OMP_PAR_MERGED_SPLIT_SPLIT_SPLIT:%.*]]
 ; CHECK2:       omp.par.merged.split.split.split:
@@ -6692,8 +6708,7 @@ entry:
 ; CHECK2:       omp_region.body:
 ; CHECK2-NEXT:    br label [[SEQ_PAR_MERGED:%.*]]
 ; CHECK2:       seq.par.merged:
-; CHECK2-NEXT:    [[TMP6:%.*]] = load i32, i32* [[A_ADDR]], align 4
-; CHECK2-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP6]], 1
+; CHECK2-NEXT:    [[ADD:%.*]] = add nsw i32 [[TMP1]], 1
 ; CHECK2-NEXT:    store i32 [[ADD]], i32* [[ADD_SEQ_OUTPUT_ALLOC]], align 4
 ; CHECK2-NEXT:    br label [[OMP_PAR_MERGED_SPLIT:%.*]]
 ; CHECK2:       omp.par.merged.split:
@@ -6808,8 +6823,7 @@ entry:
 ; CHECK2-NEXT:    [[TMP0:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* noundef nonnull align 8 dereferenceable(24) @[[GLOB1]])
 ; CHECK2-NEXT:    store i32 [[A]], i32* [[A_ADDR]], align 4
 ; CHECK2-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* noundef nonnull align 8 dereferenceable(24) @[[GLOB1]], i32 noundef 1, void (i32*, i32*, ...)* noundef bitcast (void (i32*, i32*, i32*)* @.omp_outlined..34 to void (i32*, i32*, ...)*), i32* nocapture nofree noundef nonnull readonly align 4 dereferenceable(4) [[A_ADDR]])
-; CHECK2-NEXT:    [[TMP1:%.*]] = load i32, i32* [[A_ADDR]], align 4
-; CHECK2-NEXT:    call void @__kmpc_push_num_threads(%struct.ident_t* noundef nonnull align 8 dereferenceable(24) @[[GLOB1]], i32 [[TMP0]], i32 [[TMP1]])
+; CHECK2-NEXT:    call void @__kmpc_push_num_threads(%struct.ident_t* noundef nonnull align 8 dereferenceable(24) @[[GLOB1]], i32 [[TMP0]], i32 [[A]])
 ; CHECK2-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* noundef nonnull align 8 dereferenceable(24) @[[GLOB1]], i32 noundef 1, void (i32*, i32*, ...)* noundef bitcast (void (i32*, i32*, i32*)* @.omp_outlined..35 to void (i32*, i32*, ...)*), i32* nocapture nofree noundef nonnull readonly align 4 dereferenceable(4) [[A_ADDR]])
 ; CHECK2-NEXT:    call void (%struct.ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_call(%struct.ident_t* noundef nonnull align 8 dereferenceable(24) @[[GLOB1]], i32 noundef 1, void (i32*, i32*, ...)* noundef bitcast (void (i32*, i32*, i32*)* @.omp_outlined..36 to void (i32*, i32*, ...)*), i32* nocapture nofree noundef nonnull readonly align 4 dereferenceable(4) [[A_ADDR]])
 ; CHECK2-NEXT:    ret void

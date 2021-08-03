@@ -445,8 +445,8 @@ func @should_fuse_no_top_level_access() {
 
 #set0 = affine_set<(d0) : (1 == 0)>
 
-// CHECK-LABEL: func @should_not_fuse_if_inst_at_top_level() {
-func @should_not_fuse_if_inst_at_top_level() {
+// CHECK-LABEL: func @should_not_fuse_if_op_at_top_level() {
+func @should_not_fuse_if_op_at_top_level() {
   %m = memref.alloc() : memref<10xf32>
   %cf7 = constant 7.0 : f32
 
@@ -473,8 +473,8 @@ func @should_not_fuse_if_inst_at_top_level() {
 
 #set0 = affine_set<(d0) : (1 == 0)>
 
-// CHECK-LABEL: func @should_not_fuse_if_inst_in_loop_nest() {
-func @should_not_fuse_if_inst_in_loop_nest() {
+// CHECK-LABEL: func @should_not_fuse_if_op_in_loop_nest() {
+func @should_not_fuse_if_op_in_loop_nest() {
   %m = memref.alloc() : memref<10xf32>
   %cf7 = constant 7.0 : f32
   %c4 = constant 4 : index
@@ -488,7 +488,7 @@ func @should_not_fuse_if_inst_in_loop_nest() {
     %v0 = affine.load %m[%i1] : memref<10xf32>
   }
 
-  // IfOp in ForInst should prevent fusion.
+  // IfOp in ForOp should prevent fusion.
   // CHECK:      affine.for %{{.*}} = 0 to 10 {
   // CHECK-NEXT:   affine.store %{{.*}}, %{{.*}}[%{{.*}}] : memref<10xf32>
   // CHECK-NEXT: }
@@ -498,6 +498,83 @@ func @should_not_fuse_if_inst_in_loop_nest() {
   // CHECK-NEXT:   affine.load %{{.*}}[%{{.*}}] : memref<10xf32>
   // CHECK-NEXT: }
   return
+}
+
+// -----
+
+#set = affine_set<(d0) : (d0 - 1 >= 0)>
+
+// CHECK-LABEL: func @should_fuse_if_op_in_loop_nest_not_sandwiched() -> memref<10xf32> {
+func @should_fuse_if_op_in_loop_nest_not_sandwiched() -> memref<10xf32> {
+  %a = memref.alloc() : memref<10xf32>
+  %b = memref.alloc() : memref<10xf32>
+  %cf7 = constant 7.0 : f32
+
+  affine.for %i0 = 0 to 10 {
+    affine.store %cf7, %a[%i0] : memref<10xf32>
+  }
+  affine.for %i1 = 0 to 10 {
+    %v0 = affine.load %a[%i1] : memref<10xf32>
+    affine.store %v0, %b[%i1] : memref<10xf32>
+  }
+  affine.for %i2 = 0 to 10 {
+    affine.if #set(%i2) {
+      %v0 = affine.load %b[%i2] : memref<10xf32>
+    }
+  }
+
+  // IfOp in ForOp should not prevent fusion if it does not in between the
+  // source and dest ForOp ops.
+
+  // CHECK:      affine.for
+  // CHECK-NEXT:   affine.store
+  // CHECK-NEXT:   affine.load
+  // CHECK-NEXT:   affine.store
+  // CHECK:      affine.for
+  // CHECK-NEXT:   affine.if
+  // CHECK-NEXT:     affine.load
+  // CHECK-NOT:  affine.for
+  // CHECK:      return
+
+  return %a : memref<10xf32>
+}
+
+// -----
+
+#set = affine_set<(d0) : (d0 - 1 >= 0)>
+
+// CHECK-LABEL: func @should_not_fuse_if_op_in_loop_nest_between_src_and_dest() -> memref<10xf32> {
+func @should_not_fuse_if_op_in_loop_nest_between_src_and_dest() -> memref<10xf32> {
+  %a = memref.alloc() : memref<10xf32>
+  %b = memref.alloc() : memref<10xf32>
+  %cf7 = constant 7.0 : f32
+
+  affine.for %i0 = 0 to 10 {
+    affine.store %cf7, %a[%i0] : memref<10xf32>
+  }
+  affine.for %i1 = 0 to 10 {
+    affine.if #set(%i1) {
+      affine.store %cf7, %a[%i1] : memref<10xf32>
+    }
+  }
+  affine.for %i3 = 0 to 10 {
+    %v0 = affine.load %a[%i3] : memref<10xf32>
+    affine.store %v0, %b[%i3] : memref<10xf32>
+  }
+  return %b : memref<10xf32>
+
+  // IfOp in ForOp which modifies the memref should prevent fusion if it is in
+  // between the source and dest ForOp.
+
+  // CHECK:      affine.for
+  // CHECK-NEXT:   affine.store
+  // CHECK:      affine.for
+  // CHECK-NEXT:   affine.if
+  // CHECK-NEXT:     affine.store
+  // CHECK:      affine.for
+  // CHECK-NEXT:   affine.load
+  // CHECK-NEXT:   affine.store
+  // CHECK:      return
 }
 
 // -----
@@ -3147,6 +3224,143 @@ func @no_fusion_cannot_compute_valid_slice() {
 // CHECK-NEXT:      affine.load
 // CHECK-NEXT:      mulf
 // CHECK-NEXT:      affine.store
+
+// -----
+
+// MAXIMAL-LABEL:   func @reduce_add_f32_f32(
+func @reduce_add_f32_f32(%arg0: memref<64x64xf32, 1>, %arg1: memref<1x64xf32, 1>, %arg2: memref<1x64xf32, 1>) {
+  %cst_0 = constant 0.000000e+00 : f32
+  %cst_1 = constant 1.000000e+00 : f32
+  %0 = memref.alloca() : memref<f32, 1>
+  %1 = memref.alloca() : memref<f32, 1>
+  affine.for %arg3 = 0 to 1 {
+    affine.for %arg4 = 0 to 64 {
+      %accum = affine.for %arg5 = 0 to 64 iter_args (%prevAccum = %cst_0) -> f32 {
+        %4 = affine.load %arg0[%arg5, %arg4] : memref<64x64xf32, 1>
+        %5 = addf %prevAccum, %4 : f32
+        affine.yield %5 : f32
+      }
+      %accum_dbl = addf %accum, %accum : f32
+      affine.store %accum_dbl, %arg1[%arg3, %arg4] : memref<1x64xf32, 1>
+    }
+  }
+  affine.for %arg3 = 0 to 1 {
+    affine.for %arg4 = 0 to 64 {
+      %accum = affine.for %arg5 = 0 to 64 iter_args (%prevAccum = %cst_1) -> f32 {
+        %4 = affine.load %arg0[%arg5, %arg4] : memref<64x64xf32, 1>
+        %5 = mulf %prevAccum, %4 : f32
+        affine.yield %5 : f32
+      }
+      %accum_sqr = mulf %accum, %accum : f32
+      affine.store %accum_sqr, %arg2[%arg3, %arg4] : memref<1x64xf32, 1>
+    }
+  }
+  return
+}
+// The two loops here get maximally sibling-fused at the innermost
+// insertion point. Test checks  if the innermost reduction loop of the fused loop
+// gets promoted into its outerloop.
+// MAXIMAL-SAME:                             %[[arg_0:.*]]: memref<64x64xf32, 1>,
+// MAXIMAL-SAME:                             %[[arg_1:.*]]: memref<1x64xf32, 1>,
+// MAXIMAL-SAME:                             %[[arg_2:.*]]: memref<1x64xf32, 1>) {
+// MAXIMAL:             %[[cst:.*]] = constant 0 : index
+// MAXIMAL-NEXT:        %[[cst_0:.*]] = constant 0.000000e+00 : f32
+// MAXIMAL-NEXT:        %[[cst_1:.*]] = constant 1.000000e+00 : f32
+// MAXIMAL:             affine.for %[[idx_0:.*]] = 0 to 1 {
+// MAXIMAL-NEXT:          affine.for %[[idx_1:.*]] = 0 to 64 {
+// MAXIMAL-NEXT:            %[[results:.*]]:2 = affine.for %[[idx_2:.*]] = 0 to 64 iter_args(%[[iter_0:.*]] = %[[cst_1]], %[[iter_1:.*]] = %[[cst_0]]) -> (f32, f32) {
+// MAXIMAL-NEXT:              %[[val_0:.*]] = affine.load %[[arg_0]][%[[idx_2]], %[[idx_1]]] : memref<64x64xf32, 1>
+// MAXIMAL-NEXT:              %[[reduc_0:.*]] = addf %[[iter_1]], %[[val_0]] : f32
+// MAXIMAL-NEXT:              %[[val_1:.*]] = affine.load %[[arg_0]][%[[idx_2]], %[[idx_1]]] : memref<64x64xf32, 1>
+// MAXIMAL-NEXT:              %[[reduc_1:.*]] = mulf %[[iter_0]], %[[val_1]] : f32
+// MAXIMAL-NEXT:              affine.yield %[[reduc_1]], %[[reduc_0]] : f32, f32
+// MAXIMAL-NEXT:            }
+// MAXIMAL-NEXT:            %[[reduc_0_dbl:.*]] = addf %[[results:.*]]#1, %[[results]]#1 : f32
+// MAXIMAL-NEXT:            affine.store %[[reduc_0_dbl]], %[[arg_1]][%[[cst]], %[[idx_1]]] : memref<1x64xf32, 1>
+// MAXIMAL-NEXT:            %[[reduc_1_sqr:.*]] = mulf %[[results]]#0, %[[results]]#0 : f32
+// MAXIMAL-NEXT:            affine.store %[[reduc_1_sqr]], %[[arg_2]][%[[idx_0]], %[[idx_1]]] : memref<1x64xf32, 1>
+// MAXIMAL-NEXT:          }
+// MAXIMAL-NEXT:        }
+// MAXIMAL-NEXT:        return
+// MAXIMAL-NEXT:      }
+
+// -----
+
+// CHECK-LABEL:   func @reduce_add_non_innermost
+func @reduce_add_non_innermost(%arg0: memref<64x64xf32, 1>, %arg1: memref<1x64xf32, 1>, %arg2: memref<1x64xf32, 1>) {
+  %cst = constant 0.000000e+00 : f32
+  %cst_0 = constant 1.000000e+00 : f32
+  %0 = memref.alloca() : memref<f32, 1>
+  %1 = memref.alloca() : memref<f32, 1>
+  affine.for %arg3 = 0 to 1 {
+    affine.for %arg4 = 0 to 64 {
+      %accum = affine.for %arg5 = 0 to 64 iter_args (%prevAccum = %cst) -> f32 {
+        %4 = affine.load %arg0[%arg5, %arg4] : memref<64x64xf32, 1>
+        %5 = addf %prevAccum, %4 : f32
+        affine.yield %5 : f32
+      }
+      %accum_dbl = addf %accum, %accum : f32
+      affine.store %accum_dbl, %arg1[%arg3, %arg4] : memref<1x64xf32, 1>
+    }
+  }
+  affine.for %arg3 = 0 to 1 {
+    affine.for %arg4 = 0 to 64 {
+      %accum = affine.for %arg5 = 0 to 64 iter_args (%prevAccum = %cst_0) -> f32 {
+        %4 = affine.load %arg0[%arg5, %arg4] : memref<64x64xf32, 1>
+        %5 = mulf %prevAccum, %4 : f32
+        affine.yield %5 : f32
+      }
+      %accum_sqr = mulf %accum, %accum : f32
+      affine.store %accum_sqr, %arg2[%arg3, %arg4] : memref<1x64xf32, 1>
+    }
+  }
+  return
+}
+// Test checks the loop structure is preserved after sibling fusion.
+// CHECK:         affine.for
+// CHECK-NEXT:      affine.for
+// CHECK-NEXT:        affine.for
+// CHECK             affine.for
+
+// -----
+func @reduce_add_non_maximal_f32_f32(%arg0: memref<64x64xf32, 1>, %arg1 : memref<1x64xf32, 1>, %arg2 : memref<1x64xf32, 1>) {
+    %cst_0 = constant 0.000000e+00 : f32
+    %cst_1 = constant 1.000000e+00 : f32
+    affine.for %arg3 = 0 to 1 {
+      affine.for %arg4 = 0 to 64 {
+        %accum = affine.for %arg5 = 0 to 64 iter_args (%prevAccum = %cst_0) -> f32 {
+          %4 = affine.load %arg0[%arg5, %arg4] : memref<64x64xf32, 1>
+          %5 = addf %prevAccum, %4 : f32
+          affine.yield %5 : f32
+        }
+        %accum_dbl = addf %accum, %accum : f32
+        affine.store %accum_dbl, %arg1[%arg3, %arg4] : memref<1x64xf32, 1>
+      }
+    }
+    affine.for %arg3 = 0 to 1 {
+      affine.for %arg4 = 0 to 64 {
+        // Following loop  trip count does not match the corresponding source trip count.
+        %accum = affine.for %arg5 = 0 to 32 iter_args (%prevAccum = %cst_1) -> f32 {
+          %4 = affine.load %arg0[%arg5, %arg4] : memref<64x64xf32, 1>
+          %5 = mulf %prevAccum, %4 : f32
+          affine.yield %5 : f32
+        }
+        %accum_sqr = mulf %accum, %accum : f32
+        affine.store %accum_sqr, %arg2[%arg3, %arg4] : memref<1x64xf32, 1>
+      }
+    }
+    return
+}
+// Test checks the loop structure is preserved after sibling fusion
+// since the destination loop and source loop trip counts do not
+// match.
+// MAXIMAL-LABEL:   func @reduce_add_non_maximal_f32_f32(
+// MAXIMAL:        %[[cst_0:.*]] = constant 0.000000e+00 : f32
+// MAXIMAL-NEXT:        %[[cst_1:.*]] = constant 1.000000e+00 : f32
+// MAXIMAL-NEXT:           affine.for %[[idx_0:.*]]= 0 to 1 {
+// MAXIMAL-NEXT:             affine.for %[[idx_1:.*]] = 0 to 64 {
+// MAXIMAL-NEXT:               %[[result_1:.*]] = affine.for %[[idx_2:.*]] = 0 to 32 iter_args(%[[iter_0:.*]] = %[[cst_1]]) -> (f32) {
+// MAXIMAL-NEXT:                 %[[result_0:.*]] = affine.for %[[idx_3:.*]] = 0 to 64 iter_args(%[[iter_1:.*]] = %[[cst_0]]) -> (f32) {
 
 // -----
 

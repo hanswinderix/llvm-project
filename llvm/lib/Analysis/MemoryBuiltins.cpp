@@ -142,9 +142,8 @@ static Optional<AllocFnsTy>
 getAllocationDataForFunction(const Function *Callee, AllocType AllocTy,
                              const TargetLibraryInfo *TLI) {
   // Make sure that the function is available.
-  StringRef FnName = Callee->getName();
   LibFunc TLIFn;
-  if (!TLI || !TLI->getLibFunc(FnName, TLIFn) || !TLI->has(TLIFn))
+  if (!TLI || !TLI->getLibFunc(*Callee, TLIFn) || !TLI->has(TLIFn))
     return None;
 
   const auto *Iter = find_if(
@@ -435,7 +434,6 @@ const CallInst *llvm::extractCallocCall(const Value *I,
 bool llvm::isLibFreeFunction(const Function *F, const LibFunc TLIFn) {
   unsigned ExpectedNumParams;
   if (TLIFn == LibFunc_free ||
-      TLIFn == LibFunc___kmpc_free_shared || // OpenMP Offloading RTL free
       TLIFn == LibFunc_ZdlPv || // operator delete(void*)
       TLIFn == LibFunc_ZdaPv || // operator delete[](void*)
       TLIFn == LibFunc_msvc_delete_ptr32 || // operator delete(void*)
@@ -458,7 +456,8 @@ bool llvm::isLibFreeFunction(const Function *F, const LibFunc TLIFn) {
            TLIFn == LibFunc_msvc_delete_array_ptr32_int ||      // delete[](void*, uint)
            TLIFn == LibFunc_msvc_delete_array_ptr64_longlong || // delete[](void*, ulonglong)
            TLIFn == LibFunc_msvc_delete_array_ptr32_nothrow || // delete[](void*, nothrow)
-           TLIFn == LibFunc_msvc_delete_array_ptr64_nothrow)   // delete[](void*, nothrow)
+           TLIFn == LibFunc_msvc_delete_array_ptr64_nothrow || // delete[](void*, nothrow)
+           TLIFn == LibFunc___kmpc_free_shared) // OpenMP Offloading RTL free
     ExpectedNumParams = 2;
   else if (TLIFn == LibFunc_ZdaPvSt11align_val_tRKSt9nothrow_t || // delete(void*, align_val_t, nothrow)
            TLIFn == LibFunc_ZdlPvSt11align_val_tRKSt9nothrow_t || // delete[](void*, align_val_t, nothrow)
@@ -492,9 +491,8 @@ const CallInst *llvm::isFreeCall(const Value *I, const TargetLibraryInfo *TLI) {
   if (Callee == nullptr || IsNoBuiltinCall)
     return nullptr;
 
-  StringRef FnName = Callee->getName();
   LibFunc TLIFn;
-  if (!TLI || !TLI->getLibFunc(FnName, TLIFn) || !TLI->has(TLIFn))
+  if (!TLI || !TLI->getLibFunc(*Callee, TLIFn) || !TLI->has(TLIFn))
     return nullptr;
 
   return isLibFreeFunction(Callee, TLIFn) ? dyn_cast<CallInst>(I) : nullptr;

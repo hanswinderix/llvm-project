@@ -2087,7 +2087,7 @@ MachineInstrExpressionTrait::getHashValue(const MachineInstr* const &MI) {
 
 void MachineInstr::emitError(StringRef Msg) const {
   // Find the source location cookie.
-  unsigned LocCookie = 0;
+  uint64_t LocCookie = 0;
   const MDNode *LocMD = nullptr;
   for (unsigned i = getNumOperands(); i != 0; --i) {
     if (getOperand(i-1).isMetadata() &&
@@ -2376,5 +2376,11 @@ MachineInstr::getFoldedRestoreSize(const TargetInstrInfo *TII) const {
 unsigned MachineInstr::getDebugInstrNum() {
   if (DebugInstrNum == 0)
     DebugInstrNum = getParent()->getParent()->getNewDebugInstrNum();
+  return DebugInstrNum;
+}
+
+unsigned MachineInstr::getDebugInstrNum(MachineFunction &MF) {
+  if (DebugInstrNum == 0)
+    DebugInstrNum = MF.getNewDebugInstrNum();
   return DebugInstrNum;
 }

@@ -34,6 +34,7 @@ public:
   void printUnwindInfo() override;
   void printStackMap() const override;
   void printNeededLibraries() override;
+  void printStringTable() override;
 
 private:
   template <typename T> void printSectionHeaders(ArrayRef<T> Sections);
@@ -454,6 +455,14 @@ void XCOFFDumper::printSymbols() {
   ListScope Group(W, "Symbols");
   for (const SymbolRef &S : Obj.symbols())
     printSymbol(S);
+}
+
+void XCOFFDumper::printStringTable() {
+  DictScope DS(W, "StringTable");
+  StringRef StrTable = Obj.getStringTable();
+  // Print strings from the fifth byte, since the first four bytes contain the
+  // length (in bytes) of the string table (including the length field).
+  printAsStringList(StrTable, 4);
 }
 
 void XCOFFDumper::printDynamicSymbols() {

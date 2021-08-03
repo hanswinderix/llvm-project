@@ -16,6 +16,9 @@
 #include <__ranges/concepts.h>
 #include <__ranges/ref_view.h>
 #include <__ranges/subrange.h>
+#include <__utility/__decay_copy.h>
+#include <__utility/declval.h>
+#include <__utility/forward.h>
 #include <type_traits>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
@@ -35,6 +38,7 @@ namespace __all {
   struct __fn {
     template<class _Tp>
       requires ranges::view<decay_t<_Tp>>
+    _LIBCPP_HIDE_FROM_ABI
     constexpr auto operator()(_Tp&& __t) const
       noexcept(noexcept(_VSTD::__decay_copy(_VSTD::forward<_Tp>(__t))))
     {
@@ -44,6 +48,7 @@ namespace __all {
     template<class _Tp>
       requires (!ranges::view<decay_t<_Tp>>) &&
                requires (_Tp&& __t) { ranges::ref_view{_VSTD::forward<_Tp>(__t)}; }
+    _LIBCPP_HIDE_FROM_ABI
     constexpr auto operator()(_Tp&& __t) const
       noexcept(noexcept(ranges::ref_view{_VSTD::forward<_Tp>(__t)}))
     {
@@ -54,6 +59,7 @@ namespace __all {
       requires (!ranges::view<decay_t<_Tp>> &&
                 !requires (_Tp&& __t) { ranges::ref_view{_VSTD::forward<_Tp>(__t)}; } &&
                  requires (_Tp&& __t) { ranges::subrange{_VSTD::forward<_Tp>(__t)}; })
+    _LIBCPP_HIDE_FROM_ABI
     constexpr auto operator()(_Tp&& __t) const
       noexcept(noexcept(ranges::subrange{_VSTD::forward<_Tp>(__t)}))
     {
@@ -65,6 +71,9 @@ namespace __all {
 inline namespace __cpo {
   inline constexpr auto all = __all::__fn{};
 } // namespace __cpo
+
+template<ranges::viewable_range _Range>
+using all_t = decltype(views::all(declval<_Range>()));
 
 } // namespace views
 

@@ -1,15 +1,14 @@
 // RUN:   mlir-opt %s                                                          \
-// RUN:               -linalg-tile-to-parallel-loops="linalg-tile-sizes=256"   \
-// RUN:               -async-parallel-for="num-concurrent-async-execute=4"     \
+// RUN:               -convert-linalg-to-parallel-loops                        \
+// RUN:               -async-parallel-for                                      \
 // RUN:               -async-to-async-runtime                                  \
 // RUN:               -async-runtime-ref-counting                              \
 // RUN:               -async-runtime-ref-counting-opt                          \
 // RUN:               -convert-async-to-llvm                                   \
-// RUN:               -lower-affine                                            \
-// RUN:               -convert-linalg-to-loops                                 \
 // RUN:               -convert-scf-to-std                                      \
 // RUN:               -std-expand                                              \
 // RUN:               -convert-vector-to-llvm                                  \
+// RUN:               -convert-memref-to-llvm                                  \
 // RUN:               -convert-std-to-llvm                                     \
 // RUN: | mlir-cpu-runner                                                      \
 // RUN: -e entry -entry-point-result=void -O3                                  \
@@ -22,6 +21,7 @@
 // RUN:               -convert-linalg-to-loops                                 \
 // RUN:               -convert-scf-to-std                                      \
 // RUN:               -convert-vector-to-llvm                                  \
+// RUN:               -convert-memref-to-llvm                                  \
 // RUN:               -convert-std-to-llvm                                     \
 // RUN: | mlir-cpu-runner                                                      \
 // RUN: -e entry -entry-point-result=void -O3                                  \

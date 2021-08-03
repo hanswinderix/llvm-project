@@ -107,8 +107,9 @@ InputArgList MachOOptTable::parse(ArrayRef<const char *> argv) {
 }
 
 void MachOOptTable::printHelp(const char *argv0, bool showHidden) const {
-  PrintHelp(lld::outs(), (std::string(argv0) + " [options] file...").c_str(),
-            "LLVM Linker", showHidden);
+  OptTable::printHelp(lld::outs(),
+                      (std::string(argv0) + " [options] file...").c_str(),
+                      "LLVM Linker", showHidden);
   lld::outs() << "\n";
 }
 
@@ -279,7 +280,8 @@ StringRef macho::rerootPath(StringRef path) {
 Optional<InputFile *> macho::loadArchiveMember(MemoryBufferRef mb,
                                                uint32_t modTime,
                                                StringRef archiveName,
-                                               bool objCOnly) {
+                                               bool objCOnly,
+                                               uint64_t offsetInArchive) {
   if (config->zeroModTime)
     modTime = 0;
 
@@ -290,7 +292,7 @@ Optional<InputFile *> macho::loadArchiveMember(MemoryBufferRef mb,
     return None;
   case file_magic::bitcode:
     if (!objCOnly || check(isBitcodeContainingObjCCategory(mb)))
-      return make<BitcodeFile>(mb);
+      return make<BitcodeFile>(mb, archiveName, offsetInArchive);
     return None;
   default:
     error(archiveName + ": archive member " + mb.getBufferIdentifier() +
@@ -328,14 +330,14 @@ macho::DependencyTracker::DependencyTracker(StringRef path)
   }
 }
 
-void macho::DependencyTracker::write(llvm::StringRef version,
-                                     const llvm::SetVector<InputFile *> &inputs,
-                                     llvm::StringRef output) {
+void macho::DependencyTracker::write(StringRef version,
+                                     const SetVector<InputFile *> &inputs,
+                                     StringRef output) {
   if (!active)
     return;
 
   std::error_code ec;
-  llvm::raw_fd_ostream os(path, ec, llvm::sys::fs::OF_None);
+  raw_fd_ostream os(path, ec, fs::OF_None);
   if (ec) {
     warn("Error writing dependency info to file");
     return;

@@ -74,7 +74,7 @@ bool PrescanAndParseAction::BeginSourceFileAction(CompilerInstance &c1) {
 
   Fortran::parser::Options parserOptions = ci.invocation().fortranOpts();
 
-  if (ci.invocation().frontendOpts().fortranForm_ == FortranForm::Unknown) {
+  if (ci.invocation().frontendOpts().fortranForm == FortranForm::Unknown) {
     // Switch between fixed and free form format based on the input file
     // extension.
     //
@@ -208,9 +208,14 @@ void PrintPreprocessedAction::ExecuteAction() {
   std::string buf;
   llvm::raw_string_ostream outForPP{buf};
 
-  // Run the preprocessor
+  // Format or dump the prescanner's output
   CompilerInstance &ci = this->instance();
-  ci.parsing().DumpCookedChars(outForPP);
+  if (ci.invocation().preprocessorOpts().noReformat) {
+    ci.parsing().DumpCookedChars(outForPP);
+  } else {
+    ci.parsing().EmitPreprocessedSource(
+        outForPP, !ci.invocation().preprocessorOpts().noLineDirectives);
+  }
 
   // If a pre-defined output stream exists, dump the preprocessed content there
   if (!ci.IsOutputStreamNull()) {
@@ -219,7 +224,7 @@ void PrintPreprocessedAction::ExecuteAction() {
     return;
   }
 
-  // Print diagnostics from the preprocessor
+  // Print diagnostics from the prescanner
   ci.parsing().messages().Emit(llvm::errs(), ci.allCookedSources());
 
   // Create a file and save the preprocessed output there
@@ -228,7 +233,6 @@ void PrintPreprocessedAction::ExecuteAction() {
     (*os) << outForPP.str();
   } else {
     llvm::errs() << "Unable to create the output file\n";
-    return;
   }
 }
 
@@ -242,28 +246,31 @@ void ParseSyntaxOnlyAction::ExecuteAction() {
 }
 
 void DebugUnparseNoSemaAction::ExecuteAction() {
+  auto &invoc = this->instance().invocation();
   auto &parseTree{instance().parsing().parseTree()};
-
-  Fortran::parser::AnalyzedObjectsAsFortran asFortran =
-      Fortran::frontend::getBasicAsFortran();
 
   // TODO: Options should come from CompilerInvocation
   Unparse(llvm::outs(), *parseTree,
       /*encoding=*/Fortran::parser::Encoding::UTF_8,
       /*capitalizeKeywords=*/true, /*backslashEscapes=*/false,
-      /*preStatement=*/nullptr, &asFortran);
+      /*preStatement=*/nullptr,
+      invoc.useAnalyzedObjectsForUnparse() ? &invoc.asFortran() : nullptr);
 }
 
 void DebugUnparseAction::ExecuteAction() {
+  auto &invoc = this->instance().invocation();
   auto &parseTree{instance().parsing().parseTree()};
-  Fortran::parser::AnalyzedObjectsAsFortran asFortran =
-      Fortran::frontend::getBasicAsFortran();
+
+  CompilerInstance &ci = this->instance();
+  auto os{ci.CreateDefaultOutputFile(
+      /*Binary=*/false, /*InFile=*/GetCurrentFileOrBufferName())};
 
   // TODO: Options should come from CompilerInvocation
-  Unparse(llvm::outs(), *parseTree,
+  Unparse(*os, *parseTree,
       /*encoding=*/Fortran::parser::Encoding::UTF_8,
       /*capitalizeKeywords=*/true, /*backslashEscapes=*/false,
-      /*preStatement=*/nullptr, &asFortran);
+      /*preStatement=*/nullptr,
+      invoc.useAnalyzedObjectsForUnparse() ? &invoc.asFortran() : nullptr);
 
   // Report fatal semantic errors
   reportFatalSemanticErrors(semantics(), this->instance().diagnostics(),
@@ -310,12 +317,11 @@ void DebugDumpAllAction::ExecuteAction() {
 
   // Dump parse tree
   auto &parseTree{instance().parsing().parseTree()};
-  Fortran::parser::AnalyzedObjectsAsFortran asFortran =
-      Fortran::frontend::getBasicAsFortran();
   llvm::outs() << "========================";
   llvm::outs() << " Flang: parse tree dump ";
   llvm::outs() << "========================\n";
-  Fortran::parser::DumpTree(llvm::outs(), parseTree, &asFortran);
+  Fortran::parser::DumpTree(
+      llvm::outs(), parseTree, &ci.invocation().asFortran());
 
   auto &semantics = this->semantics();
   auto tables{Fortran::semantics::BuildRuntimeDerivedTypeTables(
@@ -343,20 +349,19 @@ void DebugDumpAllAction::ExecuteAction() {
 
 void DebugDumpParseTreeNoSemaAction::ExecuteAction() {
   auto &parseTree{instance().parsing().parseTree()};
-  Fortran::parser::AnalyzedObjectsAsFortran asFortran =
-      Fortran::frontend::getBasicAsFortran();
 
   // Dump parse tree
-  Fortran::parser::DumpTree(llvm::outs(), parseTree, &asFortran);
+  Fortran::parser::DumpTree(
+      llvm::outs(), parseTree, &this->instance().invocation().asFortran());
 }
 
 void DebugDumpParseTreeAction::ExecuteAction() {
   auto &parseTree{instance().parsing().parseTree()};
-  Fortran::parser::AnalyzedObjectsAsFortran asFortran =
-      Fortran::frontend::getBasicAsFortran();
 
   // Dump parse tree
-  Fortran::parser::DumpTree(llvm::outs(), parseTree, &asFortran);
+  Fortran::parser::DumpTree(
+      llvm::outs(), parseTree, &this->instance().invocation().asFortran());
+
   // Report fatal semantic errors
   reportFatalSemanticErrors(semantics(), this->instance().diagnostics(),
       GetCurrentFileOrBufferName());
@@ -432,7 +437,7 @@ void GetDefinitionAction::ExecuteAction() {
   unsigned diagID = ci.diagnostics().getCustomDiagID(
       clang::DiagnosticsEngine::Error, "Symbol not found");
 
-  auto gdv = ci.invocation().frontendOpts().getDefVals_;
+  auto gdv = ci.invocation().frontendOpts().getDefVals;
   auto charBlock{cs.GetCharBlockFromLineAndColumns(
       gdv.line, gdv.startColumn, gdv.endColumn)};
   if (!charBlock) {

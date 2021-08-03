@@ -50,6 +50,7 @@
 ! HELP-NEXT: -nocpp                 Disable predefined and command line preprocessor macros
 ! HELP-NEXT: -o <file>              Write output to <file>
 ! HELP-NEXT: -pedantic              Warn on language extensions
+! HELP-NEXT: -P                     Disable linemarker output in -E mode
 ! HELP-NEXT: -std=<value>           Language standard to compile for
 ! HELP-NEXT: -U <macro>             Undefine macro <macro>
 ! HELP-NEXT: --version              Print version information
@@ -101,6 +102,9 @@
 ! HELP-FC1-NEXT:                        Specify where to find the compiled intrinsic modules
 ! HELP-FC1-NEXT: -flarge-sizes          Use INTEGER(KIND=8) for the result type in size-related intrinsics
 ! HELP-FC1-NEXT: -flogical-abbreviations Enable logical abbreviations
+! HELP-FC1-NEXT: -fno-analyzed-objects-for-unparse
+! HELP-FC1-NEXT:                        Do not use the analyzed objects when unparsing
+! HELP-FC1-NEXT: -fno-reformat          Dump the cooked character stream in -E mode
 ! HELP-FC1-NEXT: -fopenacc              Enable OpenACC
 ! HELP-FC1-NEXT: -fopenmp               Parse OpenMP pragmas and generate parallel code.
 ! HELP-FC1-NEXT: -fxor-operator         Enable .XOR. as a synonym of .NEQV.
@@ -112,6 +116,7 @@
 ! HELP-FC1-NEXT: -nocpp                 Disable predefined and command line preprocessor macros
 ! HELP-FC1-NEXT: -o <file>              Write output to <file>
 ! HELP-FC1-NEXT: -pedantic              Warn on language extensions
+! HELP-FC1-NEXT: -P                     Disable linemarker output in -E mode
 ! HELP-FC1-NEXT: -std=<value>           Language standard to compile for
 ! HELP-FC1-NEXT: -test-io               Run the InputOuputTest action. Use for development and testing only.
 ! HELP-FC1-NEXT: -U <macro>             Undefine macro <macro>

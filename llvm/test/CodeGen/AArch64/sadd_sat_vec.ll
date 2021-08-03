@@ -112,22 +112,10 @@ define void @v8i8(<8 x i8>* %px, <8 x i8>* %py, <8 x i8>* %pz) nounwind {
 define void @v4i8(<4 x i8>* %px, <4 x i8>* %py, <4 x i8>* %pz) nounwind {
 ; CHECK-LABEL: v4i8:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    ldrsb w8, [x0]
-; CHECK-NEXT:    ldrsb w9, [x1]
-; CHECK-NEXT:    ldrsb w10, [x0, #1]
-; CHECK-NEXT:    ldrsb w11, [x1, #1]
-; CHECK-NEXT:    fmov s0, w8
-; CHECK-NEXT:    fmov s1, w9
-; CHECK-NEXT:    ldrsb w8, [x0, #2]
-; CHECK-NEXT:    ldrsb w9, [x1, #2]
-; CHECK-NEXT:    mov v0.h[1], w10
-; CHECK-NEXT:    mov v1.h[1], w11
-; CHECK-NEXT:    ldrsb w10, [x0, #3]
-; CHECK-NEXT:    ldrsb w11, [x1, #3]
-; CHECK-NEXT:    mov v0.h[2], w8
-; CHECK-NEXT:    mov v1.h[2], w9
-; CHECK-NEXT:    mov v0.h[3], w10
-; CHECK-NEXT:    mov v1.h[3], w11
+; CHECK-NEXT:    ldr s0, [x0]
+; CHECK-NEXT:    ldr s1, [x1]
+; CHECK-NEXT:    sshll v0.8h, v0.8b, #0
+; CHECK-NEXT:    sshll v1.8h, v1.8b, #0
 ; CHECK-NEXT:    shl v1.4h, v1.4h, #8
 ; CHECK-NEXT:    shl v0.4h, v0.4h, #8
 ; CHECK-NEXT:    sqadd v0.4h, v0.4h, v1.4h
@@ -147,8 +135,8 @@ define void @v2i8(<2 x i8>* %px, <2 x i8>* %py, <2 x i8>* %pz) nounwind {
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    ld1 { v0.b }[0], [x1]
 ; CHECK-NEXT:    ld1 { v1.b }[0], [x0]
-; CHECK-NEXT:    add x8, x0, #1 // =1
-; CHECK-NEXT:    add x9, x1, #1 // =1
+; CHECK-NEXT:    add x8, x0, #1
+; CHECK-NEXT:    add x9, x1, #1
 ; CHECK-NEXT:    ld1 { v0.b }[4], [x9]
 ; CHECK-NEXT:    ld1 { v1.b }[4], [x8]
 ; CHECK-NEXT:    shl v0.2s, v0.2s, #24
@@ -187,8 +175,8 @@ define void @v2i16(<2 x i16>* %px, <2 x i16>* %py, <2 x i16>* %pz) nounwind {
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    ld1 { v0.h }[0], [x1]
 ; CHECK-NEXT:    ld1 { v1.h }[0], [x0]
-; CHECK-NEXT:    add x8, x0, #2 // =2
-; CHECK-NEXT:    add x9, x1, #2 // =2
+; CHECK-NEXT:    add x8, x0, #2
+; CHECK-NEXT:    add x9, x1, #2
 ; CHECK-NEXT:    ld1 { v0.h }[2], [x9]
 ; CHECK-NEXT:    ld1 { v1.h }[2], [x8]
 ; CHECK-NEXT:    shl v0.2s, v0.2s, #16
@@ -366,7 +354,7 @@ define <2 x i128> @v2i128(<2 x i128> %x, <2 x i128> %y) nounwind {
 ; CHECK-NEXT:    adcs x12, x3, x7
 ; CHECK-NEXT:    mov x9, #9223372036854775807
 ; CHECK-NEXT:    eor x10, x3, x7
-; CHECK-NEXT:    cmp x12, #0 // =0
+; CHECK-NEXT:    cmp x12, #0
 ; CHECK-NEXT:    eor x13, x3, x12
 ; CHECK-NEXT:    cinv x14, x9, ge
 ; CHECK-NEXT:    bics xzr, x13, x10
@@ -376,7 +364,7 @@ define <2 x i128> @v2i128(<2 x i128> %x, <2 x i128> %y) nounwind {
 ; CHECK-NEXT:    adds x8, x0, x4
 ; CHECK-NEXT:    adcs x10, x1, x5
 ; CHECK-NEXT:    eor x11, x1, x5
-; CHECK-NEXT:    cmp x10, #0 // =0
+; CHECK-NEXT:    cmp x10, #0
 ; CHECK-NEXT:    eor x12, x1, x10
 ; CHECK-NEXT:    cinv x9, x9, ge
 ; CHECK-NEXT:    bics xzr, x12, x11

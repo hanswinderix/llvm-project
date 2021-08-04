@@ -157,7 +157,7 @@ void SancusTransformation::createGlobals(Module &M) {
     ConstantInt::get(Int16Ty, 0),
     ConstantInt::get(Int16Ty, StackSize-1)
   };
-  auto C = ConstantExpr::getGetElementPtr(nullptr, S, IdxList);
+  auto C = ConstantExpr::getGetElementPtr(ArTy, S, IdxList);
   auto lr1 = newSecretVariable(M, getLocalR1Name(&M), C->getType());
   lr1->setInitializer(C);
 

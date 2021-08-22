@@ -437,15 +437,20 @@ ParseListTableHeader(const llvm::DWARFDataExtractor &data, uint64_t offset,
   // We are expected to be called with Offset 0 or pointing just past the table
   // header. Correct Offset in the latter case so that it points to the start
   // of the header.
-  if (offset > 0) {
-    uint64_t HeaderSize = llvm::DWARFListTableHeader::getHeaderSize(format);
-    if (offset < HeaderSize)
-      return llvm::createStringError(errc::invalid_argument,
-                                     "did not detect a valid"
-                                     " list table with base = 0x%" PRIx64 "\n",
-                                     offset);
-    offset -= HeaderSize;
+  if (offset == 0) {
+    // This means DW_AT_rnglists_base is missing and therefore DW_FORM_rnglistx
+    // cannot be handled. Returning a default-constructed ListTableType allows
+    // DW_FORM_sec_offset to be supported.
+    return ListTableType();
   }
+
+  uint64_t HeaderSize = llvm::DWARFListTableHeader::getHeaderSize(format);
+  if (offset < HeaderSize)
+    return llvm::createStringError(errc::invalid_argument,
+                                   "did not detect a valid"
+                                   " list table with base = 0x%" PRIx64 "\n",
+                                   offset);
+  offset -= HeaderSize;
   ListTableType Table;
   if (llvm::Error E = Table.extractHeaderAndOffsets(data, &offset))
     return std::move(E);
@@ -453,6 +458,18 @@ ParseListTableHeader(const llvm::DWARFDataExtractor &data, uint64_t offset,
 }
 
 void DWARFUnit::SetLoclistsBase(dw_addr_t loclists_base) {
+  uint64_t offset = 0;
+  if (const llvm::DWARFUnitIndex::Entry *entry = m_header.GetIndexEntry()) {
+    const auto *contribution = entry->getContribution(llvm::DW_SECT_LOCLISTS);
+    if (!contribution) {
+      GetSymbolFileDWARF().GetObjectFile()->GetModule()->ReportError(
+          "Failed to find location list contribution for CU with DWO Id "
+          "0x%" PRIx64,
+          this->GetDWOId());
+      return;
+    }
+    offset += contribution->Offset;
+  }
   m_loclists_base = loclists_base;
 
   uint64_t header_size = llvm::DWARFListTableHeader::getHeaderSize(DWARF32);
@@ -460,13 +477,14 @@ void DWARFUnit::SetLoclistsBase(dw_addr_t loclists_base) {
     return;
 
   m_loclist_table_header.emplace(".debug_loclists", "locations");
-  uint64_t offset = loclists_base - header_size;
+  offset += loclists_base - header_size;
   if (llvm::Error E = m_loclist_table_header->extract(
           m_dwarf.GetDWARFContext().getOrLoadLocListsData().GetAsLLVM(),
           &offset)) {
     GetSymbolFileDWARF().GetObjectFile()->GetModule()->ReportError(
-        "Failed to extract location list table at offset 0x%" PRIx64 ": %s",
-        loclists_base, toString(std::move(E)).c_str());
+        "Failed to extract location list table at offset 0x%" PRIx64
+        " (location list base: 0x%" PRIx64 "): %s",
+        offset, loclists_base, toString(std::move(E)).c_str());
   }
 }
 
@@ -486,7 +504,8 @@ DWARFDataExtractor DWARFUnit::GetLocationData() const {
   const DWARFDataExtractor &data =
       GetVersion() >= 5 ? Ctx.getOrLoadLocListsData() : Ctx.getOrLoadLocData();
   if (const llvm::DWARFUnitIndex::Entry *entry = m_header.GetIndexEntry()) {
-    if (const auto *contribution = entry->getContribution(llvm::DW_SECT_EXT_LOC))
+    if (const auto *contribution = entry->getContribution(
+            GetVersion() >= 5 ? llvm::DW_SECT_LOCLISTS : llvm::DW_SECT_EXT_LOC))
       return DWARFDataExtractor(data, contribution->Offset,
                                 contribution->Length);
     return DWARFDataExtractor();
@@ -982,8 +1001,12 @@ DWARFUnit::FindRnglistFromOffset(dw_offset_t offset) {
     return llvm::createStringError(errc::invalid_argument,
                                    "missing or invalid range list table");
 
-  auto range_list_or_error = GetRnglistTable()->findList(
-      m_dwarf.GetDWARFContext().getOrLoadRngListsData().GetAsLLVM(), offset);
+  llvm::DWARFDataExtractor data =
+      m_dwarf.GetDWARFContext().getOrLoadRngListsData().GetAsLLVM();
+
+  // As DW_AT_rnglists_base may be missing we need to call setAddressSize.
+  data.setAddressSize(m_header.GetAddressByteSize());
+  auto range_list_or_error = GetRnglistTable()->findList(data, offset);
   if (!range_list_or_error)
     return range_list_or_error.takeError();
 

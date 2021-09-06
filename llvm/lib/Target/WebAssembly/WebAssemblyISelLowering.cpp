@@ -303,6 +303,7 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
       setLoadExtAction(Ext, MVT::v4i32, MVT::v4i16, Legal);
       setLoadExtAction(Ext, MVT::v2i64, MVT::v2i32, Legal);
     }
+    setLoadExtAction(ISD::EXTLOAD, MVT::v2f64, MVT::v2f32, Legal);
   }
 
   // Don't do anything clever with build_pairs
@@ -1571,9 +1572,10 @@ WebAssemblyTargetLowering::LowerGlobalTLSAddress(SDValue Op,
 
   SDValue TLSOffset = DAG.getTargetGlobalAddress(
       GV, DL, PtrVT, GA->getOffset(), WebAssemblyII::MO_TLS_BASE_REL);
-  SDValue SymAddr = DAG.getNode(WebAssemblyISD::Wrapper, DL, PtrVT, TLSOffset);
+  SDValue SymOffset =
+      DAG.getNode(WebAssemblyISD::WrapperREL, DL, PtrVT, TLSOffset);
 
-  return DAG.getNode(ISD::ADD, DL, PtrVT, BaseAddr, SymAddr);
+  return DAG.getNode(ISD::ADD, DL, PtrVT, BaseAddr, SymOffset);
 }
 
 SDValue WebAssemblyTargetLowering::LowerGlobalAddress(SDValue Op,
@@ -1606,14 +1608,13 @@ SDValue WebAssemblyTargetLowering::LowerGlobalAddress(SDValue Op,
                       DAG.getTargetExternalSymbol(BaseName, PtrVT));
 
       SDValue SymAddr = DAG.getNode(
-          WebAssemblyISD::WrapperPIC, DL, VT,
+          WebAssemblyISD::WrapperREL, DL, VT,
           DAG.getTargetGlobalAddress(GA->getGlobal(), DL, VT, GA->getOffset(),
                                      OperandFlags));
 
       return DAG.getNode(ISD::ADD, DL, VT, BaseAddr, SymAddr);
-    } else {
-      OperandFlags = WebAssemblyII::MO_GOT;
     }
+    OperandFlags = WebAssemblyII::MO_GOT;
   }
 
   return DAG.getNode(WebAssemblyISD::Wrapper, DL, VT,
@@ -2046,7 +2047,23 @@ SDValue WebAssemblyTargetLowering::LowerBUILD_VECTOR(SDValue Op,
     SmallVector<SDValue, 16> ConstLanes;
     for (const SDValue &Lane : Op->op_values()) {
       if (IsConstant(Lane)) {
-        ConstLanes.push_back(Lane);
+        // Values may need to be fixed so that they will sign extend to be
+        // within the expected range during ISel. Check whether the value is in
+        // bounds based on the lane bit width and if it is out of bounds, lop
+        // off the extra bits and subtract 2^n to reflect giving the high bit
+        // value -2^(n-1) rather than +2^(n-1). Skip the i64 case because it
+        // cannot possibly be out of range.
+        auto *Const = dyn_cast<ConstantSDNode>(Lane.getNode());
+        int64_t Val = Const ? Const->getSExtValue() : 0;
+        uint64_t LaneBits = 128 / Lanes;
+        assert((LaneBits == 64 || Val >= -(1ll << (LaneBits - 1))) &&
+               "Unexpected out of bounds negative value");
+        if (Const && LaneBits != 64 && Val > (1ll << (LaneBits - 1)) - 1) {
+          auto NewVal = ((uint64_t)Val % (1ll << LaneBits)) - (1ll << LaneBits);
+          ConstLanes.push_back(DAG.getConstant(NewVal, SDLoc(Lane), LaneT));
+        } else {
+          ConstLanes.push_back(Lane);
+        }
       } else if (LaneT.isFloatingPoint()) {
         ConstLanes.push_back(DAG.getConstantFP(0, DL, LaneT));
       } else {

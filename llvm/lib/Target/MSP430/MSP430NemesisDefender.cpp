@@ -303,8 +303,8 @@ void MSP430NemesisDefenderPass::getAnalysisUsage(AnalysisUsage &AU) const {
 // TODO: Is there a better way to pass information about confidentiality from
 //        frontend via middle-end to backend ?
 static bool IsSecret(const Argument &Arg) {
-  return Arg.getParent()->getAttributes().hasAttribute(Arg.getArgNo() + 1,
-                                                       "secret");
+  return Arg.getParent()->getAttributes().hasAttributeAtIndex(Arg.getArgNo()+1,
+                                                              "secret");
 }
 
 static std::string GetName(MachineBasicBlock *MBB) {

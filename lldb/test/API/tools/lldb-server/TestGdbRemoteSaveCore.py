@@ -15,7 +15,8 @@ class TestGdbSaveCore(gdbremote_testcase.GdbRemoteTestCaseBase):
         procs = self.prep_debug_monitor_and_inferior()
         self.add_qSupported_packets()
         ret = self.expect_gdbremote_sequence()
-        self.assertIn("qSaveCore+", ret["qSupported_response"])
+        if "qSaveCore+" not in ret["qSupported_response"]:
+            self.skipTest("qSaveCore not supported by lldb-server")
         self.reset_test_sequence()
 
         packet = "$qSaveCore"
@@ -38,15 +39,15 @@ class TestGdbSaveCore(gdbremote_testcase.GdbRemoteTestCaseBase):
         self.assertTrue(process, PROCESS_IS_VALID)
         self.assertEqual(process.GetProcessID(), procs["inferior"].pid)
 
-    @skipUnlessPlatform(oslist=["netbsd"])
+    @skipUnlessPlatform(oslist=["freebsd", "netbsd"])
     def test_netbsd_path(self):
         core = lldbutil.append_to_process_working_directory(self, "core")
         self.coredump_test(core, core)
 
-    @skipUnlessPlatform(oslist=["netbsd"])
+    @skipUnlessPlatform(oslist=["freebsd", "netbsd"])
     def test_netbsd_no_path(self):
         self.coredump_test()
 
-    @skipUnlessPlatform(oslist=["netbsd"])
+    @skipUnlessPlatform(oslist=["freebsd", "netbsd"])
     def test_netbsd_bad_path(self):
         self.coredump_test("/dev/null/cantwritehere")

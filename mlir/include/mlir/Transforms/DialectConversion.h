@@ -118,9 +118,8 @@ public:
   /// must return a Value of the converted type on success, an `llvm::None` if
   /// it failed but other materialization can be attempted, and `nullptr` on
   /// unrecoverable failure. It will only be called for (sub)types of `T`.
-  /// Materialization functions must be provided when a type conversion
-  /// results in more than one type, or if a type conversion may persist after
-  /// the conversion has finished.
+  /// Materialization functions must be provided when a type conversion may
+  /// persist after the conversion has finished.
   ///
   /// This method registers a materialization that will be called when
   /// converting an illegal block argument type, to a legal type.
@@ -366,13 +365,91 @@ private:
   using RewritePattern::rewrite;
 };
 
-namespace detail {
-/// OpOrInterfaceConversionPatternBase is a wrapper around ConversionPattern
-/// that allows for matching and rewriting against an instance of a derived
-/// operation class or an Interface as opposed to a raw Operation.
+/// OpConversionPattern is a wrapper around ConversionPattern that allows for
+/// matching and rewriting against an instance of a derived operation class as
+/// opposed to a raw Operation.
 template <typename SourceOp>
-struct OpOrInterfaceConversionPatternBase : public ConversionPattern {
-  using ConversionPattern::ConversionPattern;
+class OpConversionPattern : public ConversionPattern {
+public:
+  using OpAdaptor = typename SourceOp::Adaptor;
+
+  OpConversionPattern(MLIRContext *context, PatternBenefit benefit = 1)
+      : ConversionPattern(SourceOp::getOperationName(), benefit, context) {}
+  OpConversionPattern(TypeConverter &typeConverter, MLIRContext *context,
+                      PatternBenefit benefit = 1)
+      : ConversionPattern(typeConverter, SourceOp::getOperationName(), benefit,
+                          context) {}
+
+  /// Wrappers around the ConversionPattern methods that pass the derived op
+  /// type.
+  void rewrite(Operation *op, ArrayRef<Value> operands,
+               ConversionPatternRewriter &rewriter) const final {
+    rewrite(cast<SourceOp>(op), OpAdaptor(operands, op->getAttrDictionary()),
+            rewriter);
+  }
+  LogicalResult
+  matchAndRewrite(Operation *op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const final {
+    return matchAndRewrite(cast<SourceOp>(op),
+                           OpAdaptor(operands, op->getAttrDictionary()),
+                           rewriter);
+  }
+
+  /// Rewrite and Match methods that operate on the SourceOp type and accept the
+  /// raw operand values.
+  /// NOTICE: These methods are deprecated and will be removed. All new code
+  /// should use the adaptor methods below instead.
+  virtual void rewrite(SourceOp op, ArrayRef<Value> operands,
+                       ConversionPatternRewriter &rewriter) const {
+    llvm_unreachable("must override matchAndRewrite or a rewrite method");
+  }
+  virtual LogicalResult
+  matchAndRewrite(SourceOp op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const {
+    if (failed(match(op)))
+      return failure();
+    rewrite(op, OpAdaptor(operands, op->getAttrDictionary()), rewriter);
+    return success();
+  }
+
+  /// Rewrite and Match methods that operate on the SourceOp type. These must be
+  /// overridden by the derived pattern class.
+  virtual void rewrite(SourceOp op, OpAdaptor adaptor,
+                       ConversionPatternRewriter &rewriter) const {
+    ValueRange operands = adaptor.getOperands();
+    rewrite(op,
+            ArrayRef<Value>(operands.getBase().get<const Value *>(),
+                            operands.size()),
+            rewriter);
+  }
+  virtual LogicalResult
+  matchAndRewrite(SourceOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const {
+    ValueRange operands = adaptor.getOperands();
+    return matchAndRewrite(
+        op,
+        ArrayRef<Value>(operands.getBase().get<const Value *>(),
+                        operands.size()),
+        rewriter);
+  }
+
+private:
+  using ConversionPattern::matchAndRewrite;
+};
+
+/// OpInterfaceConversionPattern is a wrapper around ConversionPattern that
+/// allows for matching and rewriting against an instance of an OpInterface
+/// class as opposed to a raw Operation.
+template <typename SourceOp>
+class OpInterfaceConversionPattern : public ConversionPattern {
+public:
+  OpInterfaceConversionPattern(MLIRContext *context, PatternBenefit benefit = 1)
+      : ConversionPattern(Pattern::MatchInterfaceOpTypeTag(),
+                          SourceOp::getInterfaceID(), benefit, context) {}
+  OpInterfaceConversionPattern(TypeConverter &typeConverter,
+                               MLIRContext *context, PatternBenefit benefit = 1)
+      : ConversionPattern(typeConverter, Pattern::MatchInterfaceOpTypeTag(),
+                          SourceOp::getInterfaceID(), benefit, context) {}
 
   /// Wrappers around the ConversionPattern methods that pass the derived op
   /// type.
@@ -386,15 +463,12 @@ struct OpOrInterfaceConversionPatternBase : public ConversionPattern {
     return matchAndRewrite(cast<SourceOp>(op), operands, rewriter);
   }
 
-  // TODO: Use OperandAdaptor when it supports access to unnamed operands.
-
   /// Rewrite and Match methods that operate on the SourceOp type. These must be
   /// overridden by the derived pattern class.
   virtual void rewrite(SourceOp op, ArrayRef<Value> operands,
                        ConversionPatternRewriter &rewriter) const {
     llvm_unreachable("must override matchAndRewrite or a rewrite method");
   }
-
   virtual LogicalResult
   matchAndRewrite(SourceOp op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const {
@@ -406,39 +480,6 @@ struct OpOrInterfaceConversionPatternBase : public ConversionPattern {
 
 private:
   using ConversionPattern::matchAndRewrite;
-};
-} // namespace detail
-
-/// OpConversionPattern is a wrapper around ConversionPattern that allows for
-/// matching and rewriting against an instance of a derived operation class as
-/// opposed to a raw Operation.
-template <typename SourceOp>
-struct OpConversionPattern
-    : public detail::OpOrInterfaceConversionPatternBase<SourceOp> {
-  OpConversionPattern(MLIRContext *context, PatternBenefit benefit = 1)
-      : detail::OpOrInterfaceConversionPatternBase<SourceOp>(
-            SourceOp::getOperationName(), benefit, context) {}
-  OpConversionPattern(TypeConverter &typeConverter, MLIRContext *context,
-                      PatternBenefit benefit = 1)
-      : detail::OpOrInterfaceConversionPatternBase<SourceOp>(
-            typeConverter, SourceOp::getOperationName(), benefit, context) {}
-};
-
-/// OpInterfaceConversionPattern is a wrapper around ConversionPattern that
-/// allows for matching and rewriting against an instance of an OpInterface
-/// class as opposed to a raw Operation.
-template <typename SourceOp>
-struct OpInterfaceConversionPattern
-    : public detail::OpOrInterfaceConversionPatternBase<SourceOp> {
-  OpInterfaceConversionPattern(MLIRContext *context, PatternBenefit benefit = 1)
-      : detail::OpOrInterfaceConversionPatternBase<SourceOp>(
-            Pattern::MatchInterfaceOpTypeTag(), SourceOp::getInterfaceID(),
-            benefit, context) {}
-  OpInterfaceConversionPattern(TypeConverter &typeConverter,
-                               MLIRContext *context, PatternBenefit benefit = 1)
-      : detail::OpOrInterfaceConversionPatternBase<SourceOp>(
-            typeConverter, Pattern::MatchInterfaceOpTypeTag(),
-            SourceOp::getInterfaceID(), benefit, context) {}
 };
 
 /// Add a pattern to the given pattern list to convert the signature of a
@@ -509,9 +550,16 @@ public:
   /// Replace all the uses of the block argument `from` with value `to`.
   void replaceUsesOfBlockArgument(BlockArgument from, Value to);
 
-  /// Return the converted value that replaces 'key'. Return 'key' if there is
-  /// no such a converted value.
+  /// Return the converted value of 'key' with a type defined by the type
+  /// converter of the currently executing pattern. Return nullptr in the case
+  /// of failure, the remapped value otherwise.
   Value getRemappedValue(Value key);
+
+  /// Return the converted values that replace 'keys' with types defined by the
+  /// type converter of the currently executing pattern. Returns failure if the
+  /// remap failed, success otherwise.
+  LogicalResult getRemappedValues(ValueRange keys,
+                                  SmallVectorImpl<Value> &results);
 
   //===--------------------------------------------------------------------===//
   // PatternRewriter Hooks
@@ -619,7 +667,7 @@ public:
 
   /// The signature of the callback used to determine if an operation is
   /// dynamically legal on the target.
-  using DynamicLegalityCallbackFn = std::function<bool(Operation *)>;
+  using DynamicLegalityCallbackFn = std::function<Optional<bool>(Operation *)>;
 
   ConversionTarget(MLIRContext &ctx) : ctx(ctx) {}
   virtual ~ConversionTarget() = default;
@@ -785,10 +833,10 @@ private:
   /// The set of information that configures the legalization of an operation.
   struct LegalizationInfo {
     /// The legality action this operation was given.
-    LegalizationAction action;
+    LegalizationAction action = LegalizationAction::Illegal;
 
     /// If some legal instances of this operation may also be recursively legal.
-    bool isRecursivelyLegal;
+    bool isRecursivelyLegal = false;
 
     /// The legality callback if this operation is dynamically legal.
     DynamicLegalityCallbackFn legalityFn;

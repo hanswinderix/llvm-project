@@ -74,11 +74,6 @@ template <> struct IRTraits<BasicBlock> {
 
 } // end namespace afdo_detail
 
-extern cl::opt<unsigned> SampleProfileMaxPropagateIterations;
-extern cl::opt<unsigned> SampleProfileRecordCoverage;
-extern cl::opt<unsigned> SampleProfileSampleCoverage;
-extern cl::opt<bool> NoWarnSampleUnused;
-
 template <typename BT> class SampleProfileLoaderBaseImpl {
 public:
   SampleProfileLoaderBaseImpl(std::string Name, std::string RemapName)
@@ -114,7 +109,7 @@ public:
       DenseMap<const BasicBlockT *, SmallVector<const BasicBlockT *, 8>>;
 
 protected:
-  virtual ~SampleProfileLoaderBaseImpl() = default;
+  ~SampleProfileLoaderBaseImpl() = default;
   friend class SampleCoverageTracker;
 
   Function &getFunction(FunctionT &F) {

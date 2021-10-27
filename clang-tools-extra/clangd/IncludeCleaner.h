@@ -25,6 +25,7 @@
 #include "ParsedAST.h"
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/DenseSet.h"
+#include <vector>
 
 namespace clang {
 namespace clangd {
@@ -32,11 +33,12 @@ namespace clangd {
 using ReferencedLocations = llvm::DenseSet<SourceLocation>;
 /// Finds locations of all symbols used in the main file.
 ///
-/// Uses RecursiveASTVisitor to go through main file AST and computes all the
-/// locations used symbols are coming from. Returned locations may be macro
-/// expansions, and are not resolved to their spelling/expansion location. These
-/// locations are later used to determine which headers should be marked as
-/// "used" and "directly used".
+/// - RecursiveASTVisitor finds references to symbols and records their
+///   associated locations. These may be macro expansions, and are not resolved
+///   to their spelling or expansion location. These locations are later used to
+///   determine which headers should be marked as "used" and "directly used".
+/// - We also examine all identifier tokens in the file in case they reference
+///   macros.
 ///
 /// We use this to compute unused headers, so we:
 ///
@@ -45,6 +47,25 @@ using ReferencedLocations = llvm::DenseSet<SourceLocation>;
 ///   ambiguous cases (e.g. implicitly used symbols, multiple declarations)
 /// - err on the side of reporting all possible locations
 ReferencedLocations findReferencedLocations(ParsedAST &AST);
+
+/// Retrieves IDs of all files containing SourceLocations from \p Locs.
+llvm::DenseSet<FileID> findReferencedFiles(const ReferencedLocations &Locs,
+                                           const SourceManager &SM);
+
+/// Maps FileIDs to the internal IncludeStructure representation (HeaderIDs).
+llvm::DenseSet<IncludeStructure::HeaderID>
+translateToHeaderIDs(const llvm::DenseSet<FileID> &Files,
+                     const IncludeStructure &Includes, const SourceManager &SM);
+
+/// Retrieves headers that are referenced from the main file but not used.
+std::vector<const Inclusion *>
+getUnused(const IncludeStructure &Includes,
+          const llvm::DenseSet<IncludeStructure::HeaderID> &ReferencedFiles);
+
+std::vector<const Inclusion *> computeUnusedIncludes(ParsedAST &AST);
+
+std::vector<Diag> issueUnusedIncludesDiagnostics(ParsedAST &AST,
+                                                 llvm::StringRef Code);
 
 } // namespace clangd
 } // namespace clang

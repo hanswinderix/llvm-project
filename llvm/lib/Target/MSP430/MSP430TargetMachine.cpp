@@ -18,7 +18,7 @@
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/MC/MCAsmInfo.h"
-#include "llvm/Support/TargetRegistry.h"
+#include "llvm/MC/TargetRegistry.h"
 using namespace llvm;
 
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeMSP430Target() {
@@ -83,5 +83,5 @@ void MSP430PassConfig::addPreEmitPass() {
   addPass(createMSP430NemesisDefenderPass(), false);
   addPass(createMSP430RTLInternalizationPass(), false);
   // Must run branch selection immediately preceding the asm printer.
-  addPass(createMSP430BranchSelectionPass(), false);
+  addPass(createMSP430BranchSelectionPass());
 }

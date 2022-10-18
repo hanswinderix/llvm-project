@@ -285,6 +285,8 @@ private:
   void WriteCFG(std::string label);
   void DumpCFG();
   void DumpDebugInfo();
+
+  unsigned getLeakageClass(const MachineInstr &MI);
 };
 
 } // end anonymous namespace
@@ -1688,7 +1690,7 @@ void MSP430NemesisDefenderPass::AlignNonTerminatingInstructions(
       //       types of instruction when no call has been detected
       if (! isCall) {
         auto &RI = *MII[Ref]++;
-        auto RIL = TII->getInstrLatency(nullptr, RI);
+        auto RIL = getLeakageClass(RI);
         LLVM_DEBUG(dbgs() << " " << RI << " (latency=" << RIL << ")\n");
         for (auto BB : L) {
           if (BB != Ref) {
@@ -1701,7 +1703,7 @@ void MSP430NemesisDefenderPass::AlignNonTerminatingInstructions(
               CompensateInstr(RI, *BB, MII[BB]);
             } else {
               auto &MI = *MII[BB];
-              auto MIL = TII->getInstrLatency(nullptr, MI);
+              auto MIL = getLeakageClass(MI);
               LLVM_DEBUG(dbgs() << MI << " (latency=" << MIL << "): ");
               if (RIL != MIL) {
                 LLVM_DEBUG(dbgs() << "insert nop (non-matching-latency)");
@@ -2268,7 +2270,7 @@ void MSP430NemesisDefenderPass::ClassifyBranches() {
 void MSP430NemesisDefenderPass::CompensateInstr(const MachineInstr &MI,
                                                 MachineBasicBlock &MBB,
                                                 MachineBasicBlock::iterator I) {
-  auto Latency = TII->getInstrLatency(nullptr, MI);
+  auto LClass = getLeakageClass(MI);
 
   if (MI.isAnnotationLabel())
     return;
@@ -2276,7 +2278,7 @@ void MSP430NemesisDefenderPass::CompensateInstr(const MachineInstr &MI,
   // TODO: This code is MSP430-specific. It must be target-independent and
   //        should probably be described in the target description files.
   // TODO: What about non-deterministic Sancus crypto instructions?
-  switch (Latency) {
+  switch (LClass) {
     case 1: BuildNOP1(MBB, I, TII); break;
     case 2: BuildNOP2(MBB, I, TII); break;
     case 3: BuildNOP3(MBB, I, TII); break;
@@ -2287,7 +2289,7 @@ void MSP430NemesisDefenderPass::CompensateInstr(const MachineInstr &MI,
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
       MI.dump();
 #endif
-      llvm_unreachable("Unexpected instruction latency");
+      llvm_unreachable("Unexpected leakage class");
   }
 }
 
@@ -3430,6 +3432,10 @@ void MSP430NemesisDefenderPass::CanonicalizeCFG() {
 
     LLVM_DEBUG(dbgs() << "Canonicalization done\n");
   }
+}
+
+unsigned MSP430NemesisDefenderPass::getLeakageClass(const MachineInstr &MI) {
+  return 1;
 }
 
 bool MSP430NemesisDefenderPass::runOnMachineFunction(MachineFunction &MF) {

@@ -1129,7 +1129,9 @@ static void BuildNOP1(MachineBasicBlock &MBB,
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
   //CLASS 1: BIC16rc  bic #1, r3
-  BuildMI(MBB, I, DL, TII->get(MSP430::BIC16rc), MSP430::CG).addReg(MSP430::PC).addImm(1);
+  BuildMI(MBB, I, DL, TII->get(MSP430::BIC16rc), MSP430::CG)
+    .addReg(MSP430::PC)
+    .addImm(1);
 }
 
 static void BuildNOP2(MachineBasicBlock &MBB,
@@ -1138,7 +1140,9 @@ static void BuildNOP2(MachineBasicBlock &MBB,
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
   //CLASS 2: BIC16ri  bic #42, r3
-  BuildMI(MBB, I, DL, TII->get(MSP430::BIC16ri), MSP430::CG).addReg(MSP430::PC).addImm(42);
+  BuildMI(MBB, I, DL, TII->get(MSP430::BIC16ri), MSP430::CG)
+    .addReg(MSP430::PC)
+    .addImm(42);
 }
 
 static void BuildNOP3(MachineBasicBlock &MBB,
@@ -1146,9 +1150,10 @@ static void BuildNOP3(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
   
-  //3: BIC16rm  bic &PMEM_ADDR, r3
-  // CLASS 3: bic &PMEM_ADDR, r3
-  assert(false);
+  // CLASS 3: BIC16rm  bic &PMEM_ADDR, r3
+  BuildMI(MBB, I, DL, TII->get(MSP430::BIC16rm), MSP430::CG)
+    .addReg(MSP430::SR)
+    .addImm(512); // DMA-TODO
 }
 
 static void BuildNOP8(MachineBasicBlock &MBB,
@@ -1156,8 +1161,7 @@ static void BuildNOP8(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  //8: BIC16mn  bic 1(r7), &DMEM_ADDR
-  // CLASS 8: bic 1(r7), &DMEM_DUMMY_ADDR
+  // CLASS 8: BIC16mn  bic 1(r7), &DMEM_ADDR
   assert(false);
 }
 
@@ -1166,8 +1170,7 @@ static void BuildNOP9(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  //9: MOV16mm  mov &PMEM_ADDR, &DMEM_DUMMY_ADDR
-  // CLASS 9: mov &PMEM_ADDR, &DMEM_DUMMY_ADDR
+  // CLASS 9: MOV16mm  mov &PMEM_ADDR, &DMEM_DUMMY_ADDR
   assert(false);
 }
 
@@ -1176,8 +1179,7 @@ static void BuildNOP19(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  //19: BIC16mi  bic #0x42, &DMEM_DUMMY_ADDR
-  // CLASS 19: bic #0x42, &DMEM_DUMMY_ADDR
+  // CLASS 19: BIC16mi  bic #0x42, &DMEM_DUMMY_ADDR
   assert(false);
 }
 
@@ -1186,9 +1188,10 @@ static void BuildNOP20(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  //20: MOV16mi  mov #0x42, &DMEM_DUMMY_ADDR
-  // CLASS 20: mov #0x42, &DMEM_DUMMY_ADDR
-  assert(false);
+  // CLASS 20: MOV16mi  mov #0x42, &DMEM_DUMMY_ADDR
+  BuildMI(MBB, I, DL, TII->get(MSP430::MOV16mi), MSP430::SR)
+    .addImm(512) // DMA-TODO
+    .addImm(42);
 }
 
 static void BuildNOP24(MachineBasicBlock &MBB,
@@ -1196,8 +1199,7 @@ static void BuildNOP24(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  //24: BIC16mn  bic 42(r6), &DMEM_DUMMY_ADDR
-  // CLASS 24: bic &DMEM_DUMMY_ADDR, &DMEM_DUMMY_ADDR
+  // CLASS 24: BIC16mn  bic 42(r6), &DMEM_DUMMY_ADDR
   assert(false);
 }
 
@@ -1206,8 +1208,7 @@ static void BuildNOP25(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  //25: MOV16mm  mov &DMEM_ADDR, &DMEM_ADDR
-  // CLASS 25: mov &DMEM_ADDR, &DMEM_DUMMY_ADDR
+  // CLASS 25: MOV16mm  mov &DMEM_ADDR, &DMEM_ADDR
   assert(false);
 }
 
@@ -1216,9 +1217,10 @@ static void BuildNOP34(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  //34: MOV16rm  mov &DMEM_ADDR, r3
-  // CLASS 34: mov &DMEM_ADDR, r3
-  assert(false);
+  // CLASS 34: MOV16rm  mov &DMEM_ADDR, r3
+  BuildMI(MBB, I, DL, TII->get(MSP430::MOV16rm), MSP430::CG)
+    .addReg(MSP430::SR)
+    .addImm(512); // DMA-TODO
 }
 
 static void BuildNOP41(MachineBasicBlock &MBB,
@@ -1226,9 +1228,9 @@ static void BuildNOP41(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  //41: SWPB16m  swpb &DMEM_DUMMY_ADDR
-  // CLASS 41: swpb &DMEM_DUMMY_ADDR
-  assert(false);
+  // CLASS 41: SWPB16m  swpb &DMEM_DUMMY_ADDR
+  BuildMI(MBB, I, DL, TII->get(MSP430::SWPB16m), MSP430::SR)
+    .addImm(512); // DMA-TODO
 }
 
 static void BuildNOP42(MachineBasicBlock &MBB,
@@ -1236,9 +1238,10 @@ static void BuildNOP42(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  //42: MOV16mc  mov #1, &DMEM_DUMMY_ADDR
-  // CLASS 42: mov #1, &DMEM_DUMMY_ADDR
-  assert(false);
+  // CLASS 42: MOV16mc  mov #1, &DMEM_DUMMY_ADDR
+  BuildMI(MBB, I, DL, TII->get(MSP430::MOV16mc), MSP430::SR)
+    .addImm(512) // DMA-TODO
+    .addImm(1);
 }
 
 static void BuildNOP46(MachineBasicBlock &MBB,
@@ -1246,8 +1249,7 @@ static void BuildNOP46(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  //46: BIC16mn  bic @r6, &DMEM_DUMMY_ADDR
-  // CLASS 46: bic @r6, &DMEM_DUMMY_ADDR 
+  // CLASS 46: BIC16mn  bic @r6, &DMEM_DUMMY_ADDR
   assert(false);
 }
 
@@ -1256,8 +1258,7 @@ static void BuildNOP47(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  //47: MOV16mn  mov @r6, &DMEM_DUMMY_ADDR
-  // CLASS 47: mov @r6, &DMEM_DUMMY_ADDR
+  // CLASS 47: MOV16mn  mov @r6, &DMEM_DUMMY_ADDR
   assert(false);
 }
 
@@ -1266,8 +1267,7 @@ static void BuildNOP58(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  //58: MOV16rn  mov @r6, r3
-  // CLASS 58: mov @r6, r3
+  // CLASS 58: MOV16rn  mov @r6, r3
   assert(false);
 }
 
@@ -2429,22 +2429,19 @@ void MSP430NemesisDefenderPass::CompensateInstr(const MachineInstr &MI,
     // Taken from https://github.com/martonbognar/dma-side-channel/blob/master/scripts/classes.py
     case  1: BuildNOP1(MBB, I, TII); break;
     case  2: BuildNOP2(MBB, I, TII); break;
-
-    case  3: // BuildNOP3(MBB, I, TII); break;
-    case  8: // BuildNOP8(MBB, I, TII); break;
-    case  9: // BuildNOP9(MBB, I, TII); break;
-    case 19: // BuildNOP19(MBB, I, TII); break;
-    case 20: // BuildNOP20(MBB, I, TII); break;
-    case 24: // BuildNOP24(MBB, I, TII); break;
-    case 25: // BuildNOP25(MBB, I, TII); break;
-    case 34: // BuildNOP34(MBB, I, TII); break;
-    case 41: // BuildNOP41(MBB, I, TII); break;
-    case 42: // BuildNOP42(MBB, I, TII); break;
-    case 46: // BuildNOP46(MBB, I, TII); break;
-    case 47: // BuildNOP47(MBB, I, TII); break;
-    case 58: // BuildNOP58(MBB, I, TII); break;
-      assert(false && "TODO");
-      break;
+    case  3: BuildNOP3(MBB, I, TII); break;
+    case  8: BuildNOP8(MBB, I, TII); break;
+    case  9: BuildNOP9(MBB, I, TII); break;
+    case 19: BuildNOP19(MBB, I, TII); break;
+    case 20: BuildNOP20(MBB, I, TII); break;
+    case 24: BuildNOP24(MBB, I, TII); break;
+    case 25: BuildNOP25(MBB, I, TII); break;
+    case 34: BuildNOP34(MBB, I, TII); break;
+    case 41: BuildNOP41(MBB, I, TII); break;
+    case 42: BuildNOP42(MBB, I, TII); break;
+    case 46: BuildNOP46(MBB, I, TII); break;
+    case 47: BuildNOP47(MBB, I, TII); break;
+    case 58: BuildNOP58(MBB, I, TII); break;
 
     case  4: case  5: case  6: case  7: case 10: case 11: case 12: case 13:
     case 14: case 15: case 16: case 17: case 18: case 21: case 22: case 23:

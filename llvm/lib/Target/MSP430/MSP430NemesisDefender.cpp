@@ -1162,7 +1162,7 @@ static void BuildNOP8(MachineBasicBlock &MBB,
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
   // CLASS 8: BIC16mn  bic 1(r7), &DMEM_ADDR
-  assert(false);
+  assert(false && "TODO");
 }
 
 static void BuildNOP9(MachineBasicBlock &MBB,
@@ -1171,7 +1171,7 @@ static void BuildNOP9(MachineBasicBlock &MBB,
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
   // CLASS 9: MOV16mm  mov &PMEM_ADDR, &DMEM_DUMMY_ADDR
-  assert(false);
+  assert(false && "TODO");
 }
 
 static void BuildNOP19(MachineBasicBlock &MBB,
@@ -1180,7 +1180,7 @@ static void BuildNOP19(MachineBasicBlock &MBB,
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
   // CLASS 19: BIC16mi  bic #0x42, &DMEM_DUMMY_ADDR
-  assert(false);
+  assert(false && "TODO");
 }
 
 static void BuildNOP20(MachineBasicBlock &MBB,
@@ -1200,7 +1200,7 @@ static void BuildNOP24(MachineBasicBlock &MBB,
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
   // CLASS 24: BIC16mn  bic 42(r6), &DMEM_DUMMY_ADDR
-  assert(false);
+  assert(false && "TODO");
 }
 
 static void BuildNOP25(MachineBasicBlock &MBB,
@@ -1209,7 +1209,7 @@ static void BuildNOP25(MachineBasicBlock &MBB,
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
   // CLASS 25: MOV16mm  mov &DMEM_ADDR, &DMEM_ADDR
-  assert(false);
+  assert(false && "TODO");
 }
 
 static void BuildNOP34(MachineBasicBlock &MBB,
@@ -1250,7 +1250,7 @@ static void BuildNOP46(MachineBasicBlock &MBB,
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
   // CLASS 46: BIC16mn  bic @r6, &DMEM_DUMMY_ADDR
-  assert(false);
+  assert(false && "TODO");
 }
 
 static void BuildNOP47(MachineBasicBlock &MBB,
@@ -1259,7 +1259,7 @@ static void BuildNOP47(MachineBasicBlock &MBB,
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
   // CLASS 47: MOV16mn  mov @r6, &DMEM_DUMMY_ADDR
-  assert(false);
+  assert(false && "TODO");
 }
 
 static void BuildNOP58(MachineBasicBlock &MBB,
@@ -1268,7 +1268,7 @@ static void BuildNOP58(MachineBasicBlock &MBB,
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
   // CLASS 58: MOV16rn  mov @r6, r3
-  assert(false);
+  assert(false && "TODO");
 }
 
 // TODO: MSP430 specific

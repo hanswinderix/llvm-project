@@ -1238,7 +1238,7 @@ static void BuildNOP34(MachineBasicBlock &MBB,
   // CLASS 34: MOV16rm  mov &ANY_DMEM_ADDR, r3
   BuildMI(MBB, I, DL, TII->get(MSP430::MOV16rm), MSP430::CG)
     .addReg(MSP430::SR)
-    .addImm(512); // DMA-TODO
+    .addGlobalAddress(getDummyData(MBB));
 }
 
 static void BuildNOP41(MachineBasicBlock &MBB,
@@ -1248,7 +1248,7 @@ static void BuildNOP41(MachineBasicBlock &MBB,
 
   // CLASS 41: SWPB16m  swpb &DMEM_DUMMY_ADDR
   BuildMI(MBB, I, DL, TII->get(MSP430::SWPB16m), MSP430::SR)
-    .addImm(512); // DMA-TODO
+    .addGlobalAddress(getDummyData(MBB));
 }
 
 static void BuildNOP42(MachineBasicBlock &MBB,
@@ -1256,9 +1256,9 @@ static void BuildNOP42(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  // CLASS 42: MOV16mc  mov #1, &DMEM_DUMMY_ADDr
+  // CLASS 42: MOV16mc  mov #1, &DMEM_DUMMY_ADDR
   BuildMI(MBB, I, DL, TII->get(MSP430::MOV16mc), MSP430::SR)
-    .addImm(512) // DMA-TODO
+    .addGlobalAddress(getDummyData(MBB))
     .addImm(1);
 }
 

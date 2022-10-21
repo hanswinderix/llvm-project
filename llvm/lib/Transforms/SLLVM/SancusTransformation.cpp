@@ -177,6 +177,11 @@ void SancusTransformation::createGlobals(Module &M) {
   newSecretVariable(M, getLocalR10Name(&M), Int16Ty);
   newSecretVariable(M, getLocalR11Name(&M), Int16Ty);
 
+  // Dummy memory addresses for DMA defense
+  newSecretVariable(M, "dma_dummy_data", Int16Ty);
+  newSecretVariable(M, "dma_dummy_text", Int16Ty)
+    ->setSection(getTextSectionName(&M) + ".dma");
+
   for (auto GVI = M.global_begin(), E = M.global_end(); GVI != E; GVI++) {
     if (getAnalysis<SLLVMAnalysis>().getResults().isEData(&*GVI)) {
       if (GVI->hasCommonLinkage()) {

@@ -1152,8 +1152,10 @@ static void BuildNOP3(MachineBasicBlock &MBB,
   
   // CLASS 3: BIC16rm  bic &PMEM_ADDR, r3
   BuildMI(MBB, I, DL, TII->get(MSP430::BIC16rm), MSP430::CG)
+    .addReg(MSP430::CG)
     .addReg(MSP430::SR)
-    .addImm(512); // DMA-TODO
+    .addImm(512) // DMA-TODO
+    ;
 }
 
 static void BuildNOP8(MachineBasicBlock &MBB,
@@ -1199,7 +1201,7 @@ static void BuildNOP24(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  // CLASS 24: BIC16mn  bic 42(r6), &DMEM_DUMMY_ADDR
+  // CLASS 24: BIC16mn  bic 42(r1), &DMEM_DUMMY_ADDR
   assert(false && "TODO");
 }
 
@@ -1238,7 +1240,7 @@ static void BuildNOP42(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  // CLASS 42: MOV16mc  mov #1, &DMEM_DUMMY_ADDR
+  // CLASS 42: MOV16mc  mov #1, &DMEM_DUMMY_ADDr
   BuildMI(MBB, I, DL, TII->get(MSP430::MOV16mc), MSP430::SR)
     .addImm(512) // DMA-TODO
     .addImm(1);
@@ -1249,7 +1251,7 @@ static void BuildNOP46(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  // CLASS 46: BIC16mn  bic @r6, &DMEM_DUMMY_ADDR
+  // CLASS 46: BIC16mn  bic @r1, &DMEM_DUMMY_ADDR
   assert(false && "TODO");
 }
 
@@ -1258,7 +1260,7 @@ static void BuildNOP47(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  // CLASS 47: MOV16mn  mov @r6, &DMEM_DUMMY_ADDR
+  // CLASS 47: MOV16mn  mov @r1, &DMEM_DUMMY_ADDR
   assert(false && "TODO");
 }
 
@@ -1267,8 +1269,9 @@ static void BuildNOP58(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  // CLASS 58: MOV16rn  mov @r6, r3
-  assert(false && "TODO");
+  // CLASS 58: MOV16rn  mov @r1, r3
+  BuildMI(MBB, I, DL, TII->get(MSP430::MOV16rn), MSP430::CG)
+    .addReg(MSP430::SP);
 }
 
 // TODO: MSP430 specific
@@ -1277,7 +1280,7 @@ static void BuildNOP58(MachineBasicBlock &MBB,
 static void BuildNOPBranch(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator I,
                            const TargetInstrInfo *TII) {
-  BuildNOP2(MBB, I, TII); // DMA-TODO
+  BuildNOP2(MBB, I, TII);
 }
 
 // Builds the fingerprint of the region. The fingerprint is a slice of the
@@ -1892,36 +1895,36 @@ void MSP430NemesisDefenderPass::CanonicalizeTerminatingInstructions(
     case 0:
       assert(! BBI->IsBranch);
       assert(BBI->FallThroughBB != nullptr);
-      BuildNOP2(*MBB, T, TII);
-      BuildNOP2(*MBB, T, TII);
+      BuildNOPBranch(*MBB, T, TII);
+      BuildNOPBranch(*MBB, T, TII);
       break;
     case 1:
       if (BBI->IsConditionalBranch) {
         assert(BBI->FallThroughBB != nullptr);
-        BuildNOP2(*MBB, T, TII);
-        assert(TII->getInstrLatency(nullptr, *T++) == 2);
+        BuildNOPBranch(*MBB, T, TII);
+        assert(getLeakageClass(*T++) == 2);
       }
       else if (BBI->IsReturn) {
         assert(TII->getInstrLatency(nullptr, *T) == 3);
         llvm_unreachable("Canonical CFG expected");
       }
       else if (BBI->IsMultiWayBranch) {
-        BuildNOP2(*MBB, T, TII);
-        assert(TII->getInstrLatency(nullptr, *T++) == 2);
+        BuildNOPBranch(*MBB, T, TII);
+        assert(getLeakageClass(*T++) == 2);
       }
       else {
         //LLVM_DEBUG(DumpMF(*MF));
         //LLVM_DEBUG(dbgs() << *MBB);
         assert(BBI->IsBranch);
         assert(BBI->FallThroughBB == nullptr);
-        BuildNOP2(*MBB, T, TII);
-        assert(TII->getInstrLatency(nullptr, *T++) == 2);
+        BuildNOPBranch(*MBB, T, TII);
+        assert(getLeakageClass(*T++) == 2);
       }
       break;
     case 2:
       assert(BBI->IsConditionalBranch);
-      assert(TII->getInstrLatency(nullptr, *T++) == 2);
-      assert(TII->getInstrLatency(nullptr, *T++) == 2);
+      assert(getLeakageClass(*T++) == 2);
+      assert(getLeakageClass(*T++) == 2);
       break;
     default:
       llvm_unreachable("Invalid terminator count");
@@ -2708,7 +2711,7 @@ void MSP430NemesisDefenderPass::CanonicalizeSensitiveLoop(MachineLoop *Loop) {
   // Compensate for (see AlignFingerprint)
   //   - push of induction register (MSP430::PUSH16r)
   //   - initialization of induction register to zero (MSP430::MOV16rc)
-  BuildNOP3(*NewPreheader, NewPreheader->end(), TII);
+  BuildNOP3(*NewPreheader, NewPreheader->end(), TII); // DMA-TODO
   BuildNOP1(*NewPreheader, NewPreheader->end(), TII);
   NewPreheader->addSuccessor(Header);
   TII->insertBranch(*NewPreheader, Header, nullptr, {}, DL);
@@ -2749,7 +2752,7 @@ void MSP430NemesisDefenderPass::CanonicalizeSensitiveLoop(MachineLoop *Loop) {
   BBIE->IsCanonicalLoopBlock = true;
   // Compensate for pop of induction register (see AlignFingerprint)
   //       (MSP430::POP16r, emulated by MSP430::MOV16rp)
-  BuildNOP2(*NewExit, NewExit->end(), TII);
+  BuildNOP58(*NewExit, NewExit->end(), TII);
   NewExit->addSuccessor(Exit);
   TII->insertBranch(*NewExit, Exit, nullptr, {}, DL);
   ReplaceSuccessor(Latch, Exit, NewExit);
@@ -3633,8 +3636,8 @@ unsigned MSP430NemesisDefenderPass::getLeakageClass(const MachineInstr &MI) {
     19, 24, 24, 46, 41, 1, 2, 34, 34, 58, 1, 41, 19, 24, 24,
     46, 41, 1, 2, 34, 34, 58, 1, 41, 19, 24, 24, 46, 41, 1,
     2, 34, 34, 58, 1, 41, 19, 24, 24, 46, 41, 1, 2, 34, 34,
-    58, 1, 41, 19, 24, 24, 46, 41, 1, 2, 34, 34, 58, 1, 999,
-    999, 999, 999, 999, 999, 999, 999, 999, 999, 999, 41, 19, 24, 24, 46,
+    58, 1, 41, 19, 24, 24, 46, 41, 1, 2, 34, 34, 58, 1, 2,
+    2, 2, 2, 2, 2, 999, 999, 999, 999, 999, 41, 19, 24, 24, 46,
     41, 1, 2, 34, 34, 58, 1, 41, 19, 24, 24, 46, 41, 1, 2,
     34, 34, 58, 1, 41, 19, 24, 24, 46, 41, 1, 2, 34, 34, 58,
     1, 41, 19, 24, 24, 46, 41, 1, 2, 34, 34, 58, 1, 2, 2,

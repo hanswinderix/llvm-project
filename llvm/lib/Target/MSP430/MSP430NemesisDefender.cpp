@@ -4,6 +4,7 @@
 #include <llvm/CodeGen/MachineFrameInfo.h>
 #include "MSP430.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/TargetLowering.h"
@@ -1123,6 +1124,22 @@ static void BuildNOP6(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
 }
 #endif
 
+static GlobalVariable * getDummyData(MachineBasicBlock &MBB) {
+  const Module * M = MBB.getParent()->getMMI().getModule();
+  assert(M != nullptr);
+  GlobalVariable *GV = M->getGlobalVariable("dma_dummy_data", true);
+  assert(GV != nullptr);
+  return GV;
+}
+
+static GlobalVariable * getDummyText(MachineBasicBlock &MBB) {
+  const Module * M = MBB.getParent()->getMMI().getModule();
+  assert(M != nullptr);
+  GlobalVariable *GV = M->getGlobalVariable("dma_dummy_text", true);
+  assert(GV != nullptr);
+  return GV;
+}
+
 static void BuildNOP1(MachineBasicBlock &MBB,
                       MachineBasicBlock::iterator I,
                       const TargetInstrInfo *TII) {
@@ -1154,8 +1171,7 @@ static void BuildNOP3(MachineBasicBlock &MBB,
   BuildMI(MBB, I, DL, TII->get(MSP430::BIC16rm), MSP430::CG)
     .addReg(MSP430::CG)
     .addReg(MSP430::SR)
-    .addImm(512) // DMA-TODO
-    ;
+    .addGlobalAddress(getDummyText(MBB));
 }
 
 static void BuildNOP8(MachineBasicBlock &MBB,
@@ -1163,7 +1179,7 @@ static void BuildNOP8(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  // CLASS 8: BIC16mn  bic 1(r7), &DMEM_ADDR
+  // CLASS 8: BIC16mn  bic 1(r7), &DMEM_DUMMY_ADDR
   assert(false && "TODO");
 }
 
@@ -1172,7 +1188,7 @@ static void BuildNOP9(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  // CLASS 9: MOV16mm  mov &PMEM_ADDR, &DMEM_DUMMY_ADDR
+  // CLASS 9: MOV16mm  mov &ANY_PMEM_ADDR, &DMEM_DUMMY_ADDR
   assert(false && "TODO");
 }
 
@@ -1192,7 +1208,7 @@ static void BuildNOP20(MachineBasicBlock &MBB,
 
   // CLASS 20: MOV16mi  mov #0x42, &DMEM_DUMMY_ADDR
   BuildMI(MBB, I, DL, TII->get(MSP430::MOV16mi), MSP430::SR)
-    .addImm(512) // DMA-TODO
+    .addGlobalAddress(getDummyData(MBB))
     .addImm(42);
 }
 
@@ -1210,7 +1226,7 @@ static void BuildNOP25(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  // CLASS 25: MOV16mm  mov &DMEM_ADDR, &DMEM_ADDR
+  // CLASS 25: MOV16mm  mov &ANY_DMEM_ADDR, &DMEM_DUMMY_ADDR
   assert(false && "TODO");
 }
 
@@ -1219,7 +1235,7 @@ static void BuildNOP34(MachineBasicBlock &MBB,
                       const TargetInstrInfo *TII) {
   DebugLoc DL; // FIXME: Where to get DebugLoc from?
 
-  // CLASS 34: MOV16rm  mov &DMEM_ADDR, r3
+  // CLASS 34: MOV16rm  mov &ANY_DMEM_ADDR, r3
   BuildMI(MBB, I, DL, TII->get(MSP430::MOV16rm), MSP430::CG)
     .addReg(MSP430::SR)
     .addImm(512); // DMA-TODO

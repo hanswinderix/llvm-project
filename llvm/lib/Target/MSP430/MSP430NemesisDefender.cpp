@@ -1174,6 +1174,7 @@ static void BuildNOP3(MachineBasicBlock &MBB,
     .addGlobalAddress(getDummyText(MBB));
 }
 
+#if 0
 static void BuildNOP8(MachineBasicBlock &MBB,
                       MachineBasicBlock::iterator I,
                       const TargetInstrInfo *TII) {
@@ -1182,6 +1183,7 @@ static void BuildNOP8(MachineBasicBlock &MBB,
   // CLASS 8: BIC16mn  bic 1(r7), &DMEM_DUMMY_ADDR
   assert(false && "TODO");
 }
+#endif
 
 static void BuildNOP9(MachineBasicBlock &MBB,
                       MachineBasicBlock::iterator I,
@@ -2449,7 +2451,7 @@ void MSP430NemesisDefenderPass::CompensateInstr(const MachineInstr &MI,
     case  1: BuildNOP1(MBB, I, TII); break;
     case  2: BuildNOP2(MBB, I, TII); break;
     case  3: BuildNOP3(MBB, I, TII); break;
-    case  8: BuildNOP8(MBB, I, TII); break;
+    //case  8: BuildNOP8(MBB, I, TII); break;
     case  9: BuildNOP9(MBB, I, TII); break;
     case 19: BuildNOP19(MBB, I, TII); break;
     case 20: BuildNOP20(MBB, I, TII); break;
@@ -2462,13 +2464,13 @@ void MSP430NemesisDefenderPass::CompensateInstr(const MachineInstr &MI,
     case 47: BuildNOP47(MBB, I, TII); break;
     case 58: BuildNOP58(MBB, I, TII); break;
 
-    case  4: case  5: case  6: case  7: case 10: case 11: case 12: case 13:
-    case 14: case 15: case 16: case 17: case 18: case 21: case 22: case 23:
-    case 26: case 27: case 28: case 29: case 30: case 31: case 32: case 33:
-    case 35: case 36: case 37: case 38: case 39: case 40: case 43: case 44:
-    case 45: case 48: case 49: case 50: case 51: case 52: case 53: case 54:
-    case 55: case 56: case 57: case 59: case 60: case 61: case 62: case 63:
-    case 64: case 65:
+    case  4: case  5: case  6: case  7: case  8: case 10: case 11: case 12:
+    case 13: case 14: case 15: case 16: case 17: case 18: case 21: case 22:
+    case 23: case 26: case 27: case 28: case 29: case 30: case 31: case 32:
+    case 33: case 35: case 36: case 37: case 38: case 39: case 40: case 43:
+    case 44: case 45: case 48: case 49: case 50: case 51: case 52: case 53:
+    case 54: case 55: case 56: case 57: case 59: case 60: case 61: case 62:
+    case 63: case 64: case 65:
       assert(false && "Well-behaved enclave expected");
       break;
 
